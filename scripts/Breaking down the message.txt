@@ -1,0 +1,29 @@
+Breaking down the message
+
+
+
+$VNINS,087790.139482,2356,0285,+026.269,-054.618,+048.422,+29.72036892,-091.20959092,-00022.456,-000.005,+000.005,-000.023,17.44,00.67,0.097*56
+
+
+Field 0 -> 087790.139482 
+Field 1 -> 2356,0285 
+Field 2 -> +026.269 -> heading
+Field 3 -> -054.618 
+Field 4 -> +048.422 
+Field 5 -> +29.72036892 -> Latitude
+Field 6 -> -091.20959092 -> Longitude
+Field 7 ->-00022.456
+Field 8 -> -000.005
+Field 9 ->+000.005
+Field 10 ->-000.023
+Field 11->17.44
+Field 12 ->00.67
+Field 13 ->0.097*56
+
+
+
+$VNWRG,101,3,20,0,0,513*XX -> Receives GPHDT and GPRMC
+
+$VNWNV*XX -> Saves the configuration
+
+10

@@ -1,0 +1,266 @@
+//-------------------------------------------------
+// NAME: M. Benjamin, MIT CSAIL
+// FILE: alpha.moos
+//-------------------------------------------------
+
+ServerHost   = localhost
+ServerPort   = 9000
+Community    = alpha
+MOOSTimeWarp = 1
+
+//Morgan City
+LatOrigin  = 29.71970895316288
+LongOrigin = -91.14705165281887
+
+
+//------------------------------------------
+// Antler configuration  block
+ProcessConfig = ANTLER
+{
+  MSBetweenLaunches = 200
+
+  Run = MOOSDB        @ NewConsole = false
+  //Run = pLogger       @ NewConsole = false
+  Run = uSimMarineV22 @ NewConsole = false
+  Run = planchaPID @ NewConsole = false
+  //Run = iDivisorNMEA	@ NewConsole = false
+  Run = pHelmIvP      @ NewConsole = false
+  Run = pMarineViewer	@ NewConsole = false
+  Run = uProcessWatch	@ NewConsole = false
+  Run = pNodeReporter	@ NewConsole = false
+  Run = pRealm	      @ NewConsole = false
+  //Run = iRaspberryServer	      @ NewConsole = false
+  Run = iNMEA	      @ NewConsole = false
+  Run = iSignalK	      @ NewConsole = false
+}
+
+
+//------------------------------------------------
+// iSignalK config block
+
+ProcessConfig = iSignalK
+{
+   AppTick   = 4
+   CommsTick = 4
+}
+
+//------------------------------------------------
+// iRaspberryServer config block
+
+ProcessConfig = iRaspberryServer
+{
+   AppTick   = 4
+   CommsTick = 4
+}
+//------------------------------------------------
+
+//------------------------------------------------
+// iDivisorNMEA config block
+
+ProcessConfig = iDivisorNMEA
+{
+   AppTick   = 20
+   CommsTick = 20
+}
+//------------------------------------------------
+
+//------------------------------------------
+// uSimMarineV22 config block
+
+ProcessConfig = uSimMarineV22
+{
+  AppTick	= 10
+  CommsTick	= 10
+
+START_X = 0
+START_Y = 0 
+  START_SPEED   = 0
+START_HEADING = 0.0 
+
+  thrust_map =  "0:0,18:1, 48:6, 60:9, 62:10, 70:18, 100:28"
+  turn_rate = 50
+
+  PREFIX        = NAV
+}
+
+
+//-------------------------------------------
+// planchaPID bloco de config
+
+ProcessConfig = planchaPID
+{
+   AppTick   = 20
+   CommsTick = 10
+   HEADING_KP = 0.9
+   HEADING_KI = 0.0
+   HEADING_KD = 0.2
+   HEADING_UPPER_BOUND = 40
+   HEADING_LOWER_BOUND = -40
+}
+
+//------------------------------------------
+// pLogger config block
+
+ProcessConfig = pLogger
+{
+  AppTick   = 8
+  CommsTick = 8
+
+  AsyncLog = true
+
+  // For variables that are published in a bundle on their 
+  // first post, explicitly declare their logging request
+  Log = IVPHELM_LIFE_EVENT @ 0 NOSYNC
+  Log = REPORT @ 0 NOSYNC
+  Log = BHV_SETTINGS @ 0 NOSYNC
+  Log = SUMMARY @ 0 NOSYNC
+
+  LogAuxSrc = true
+  WildCardLogging = true
+  WildCardOmitPattern = *_STATUS
+  WildCardOmitPattern = DB_VARSUMMARY
+  WildCardOmitPattern = DB_RWSUMMARY
+  WildCardExclusionLog = true
+}
+
+//------------------------------------------
+// uProcessWatch config block
+
+ProcessConfig = uProcessWatch
+{
+  AppTick   = 20
+  CommsTick = 5
+
+  watch_all = true
+	nowatch   = uPokeDB*
+	nowatch   = uQueryDB*
+	nowatch   = uXMS*
+	nowatch   = uMAC*
+}
+
+//------------------------------------------
+// uSimMarineV22 config block
+
+ProcessConfig = uSimMarineV22
+{
+  AppTick  	= 40
+  CommsTick	= 4
+
+  start_pos     = x=0, y=-20, heading=180, speed=0
+  prefix        = NAV
+  turn_rate     = 50
+  thrust_map = 0:0, 10:3, 20:6, 30:9, 40:12, 50:15, 60:18, 70:21, 80:24, 90:27, 100:30
+	turn_spd_loss = 0.4
+}
+
+//------------------------------------------
+// pHelmIvP config block
+
+ProcessConfig = pHelmIvP
+{
+  AppTick    = 4
+  CommsTick  = 4
+
+  Behaviors  = alpha.bhv
+  Verbose    = quiet
+  Domain     = course:0:359:360
+  Domain     = speed:0:15:30
+
+  IVP_BEHAVIOR_DIR = /home/d2snc/moos-ivp-morgan/lib
+
+  ok_skew = any
+  start_in_drive = false
+  //hold_on_apps = pContactMgrV20
+}
+
+//------------------------------------------
+// pMarineViewer config block
+
+ProcessConfig = pMarineViewer
+{
+  AppTick    = 100
+  CommsTick  = 100
+
+  tiff_file            = morgan_city.tif
+	//tiff_file            = MIT_SP.tif
+
+  set_pan_x            = -90
+  set_pan_y            = -280
+  zoom                 = 0.65
+  vehicle_shape_scale  = 1.5
+  hash_delta           = 50
+  hash_shade           = 0.22
+  hash_viewable        = false
+
+  trails_point_size   = 1
+  center_view = active
+
+	//op_vertex = x=-83, y=-47,    lwidth=1,lcolor=yellow,looped=true,group=moa
+  //op_vertex = x=-46.4, y=-129.2, lwidth=1,lcolor=yellow,looped=true,group=moa
+  //op_vertex = x=94.6, y=-62.2,   lwidth=1,lcolor=yellow,looped=true,group=moa
+  //op_vertex = x=58,   y=20,    lwidth=1,lcolor=yellow,looped=true,group=moa
+
+  // Appcast configuration
+  appcast_height       = 75
+  appcast_width        = 30
+  appcast_viewable     = true
+  appcast_color_scheme = indigo
+  nodes_font_size      = xlarge
+  procs_font_size      = xlarge
+  appcast_font_size    = large
+  
+  // datum_viewable = true
+  // datum_size     = 18
+  // gui_size = small
+
+  // left_context[survey-point] = DEPLOY=true
+  // left_context[survey-point] = MOOS_MANUAL_OVERRIDE=false
+  // left_context[survey-point] = RETURN=false
+
+  right_context[return] = DEPLOY=true
+  right_context[return] = MOOS_MANUAL_OVERRIDE=false
+  right_context[return] = RETURN=false
+
+  scope  = SUMMARY
+  scope  = RETURN
+  scope  = WPT_STAT
+  scope  = VIEW_SEGLIST
+  scope  = VIEW_POINT
+  scope  = VIEW_POLYGON
+  scope  = MVIEWER_LCLICK
+  scope  = MVIEWER_RCLICK
+
+  button_one = DEPLOY # DEPLOY=true
+  button_one = MOOS_MANUAL_OVERRIDE=false # RETURN=false
+  button_two = RETURN # RETURN=true
+  button_three = SLOWER # WPT_UPDATE=speed=1.5
+  button_four = FASTER # WPT_UPDATE=speed=3.5
+
+  action  = MENU_KEY=deploy # DEPLOY = true # RETURN = false
+  action+ = MENU_KEY=deploy # MOOS_MANUAL_OVERRIDE=false
+  action  = RETURN=true
+  action  = UPDATES_RETURN=speed=1.4
+}
+
+//------------------------------------------
+// pNodeReporter config block
+
+ProcessConfig = pNodeReporter
+{
+  AppTick    = 20
+  CommsTick	 = 5
+
+  platform_type   = ship
+  platform_color  = red
+  platform_length = 100
+
+  cross_fill_policy = global
+}
+
+// iNMEA config block
+
+ProcessConfig = iNMEA
+{
+   AppTick   = 4
+   CommsTick = 4
+}

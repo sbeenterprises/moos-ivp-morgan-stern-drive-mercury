@@ -1,0 +1,137 @@
+Working Commands for one engine:
+
+cansend canb0 18F005D0#7EFFFFFFFFFFFFFF    - FOWARD
+
+cansend canb0 18F005D0#7CFFFFFFFFFFFFFF   - REVERSE
+
+cansend canb0 18F005D0#7DFFFFFFFFFFFFFF   - NEUTRAL
+
+
+Commands for both engines:
+
+cansend canb0 18F005D0#7E7EFFFFFFFFFFFF - foward both engines
+
+cansend canb0 18F005D0#7C7CFFFFFFFFFFFF - reverse both engines
+
+cansend canb0 18F005D0#7D7DFFFFFFFFFFFF - neutral both engines
+
+
+#steering
+
+cansend canb0 4B7#3232FFFFFFFFFFFF #command has worked
+
+cansend canb0 4B7#6464FFFFFFFFFFFF #command has worked
+
+
+#propulsion
+
+#set ahead 100%
+cansend canb0 4B3#7E7EFFFFFAFAFFFF  #bucket actuator moved
+
+cansend canb0 4B3#7E7EFFFF0000FFFF #bucket moved 
+
+#steering
+
+cansend canb0 4B7#3232FFFFFFFFFFFF
+
+cansend canb0 4B7#6464FFFFFFFFFFFF
+
+
+
+
+cansend canb0 4B6#6464FFFFFFFFFFFF
+
+
+#propulsion control message
+
+cansend canb0 4B3#7E7EFFFFFAFAFFFF
+
+
+Analyzing the CAN Bus:
+
+18F40AD2 -> Looks like a counter
+
+
+###################
+
+Documentation for connection between python script and MOOS app
+
+PA100 -> Propulsion Ahead
+PA090
+
+
+line 44 -> change to 4B6
+
+When it stopped
+
+210
+215
+0CFF05D0
+18F005D0
+18F40AC8
+18F40AD2
+
+
+Before the steering
+
+ID
+210
+215
+0CFF05D0
+0CFF801B
+18F005D0
+18F40AC8
+18F40AD2
+
+
+After the steering
+0CFF00D2 
+18F30A1A
+
+Comando que funcionou para o leme:
+cansend canb0 18F30A1A#0000FFFFFFFFFFFF
+
+
+
+
+
+Bucket:
+
+Outboard Engines:
+cansend can1 0CFF05D0#7EFFFFFFFFFFFFFF -> Bucket Foward
+cansend can1 0CFF05D0#7DFFFFFFFFFFFFFF -> Bucket Neutral
+cansend can1 0CFF05D0#7CFFFFFFFFFFFFFF -> Bucket Reverse
+
+Inboard Engines:
+cansend can1 0CFF05D1#7EFFFFFFFFFFFFFF -> Bucket Foward
+cansend can1 0CFF05D1#7DFFFFFFFFFFFFFF -> Bucket Neutral
+cansend can1 0CFF05D1#7CFFFFFFFFFFFFFF -> Bucket Reverse
+
+
+Steering:
+
+cansend canb0 18F30A1A#0000FFFFFFFFFFFF -> Steering at 0
+cansend canb0 18F30A1A#3232FFFFFFFFFFFF -> Steering at 50%
+cansend canb0 18F30A1A#6464FFFFFFFFFFFF -> Steering at 100%
+
+
+Throttle:
+
+Outboard Engines:
+cansend can1 18F003D0#FF00FFFFFFFFFFFF -> 0% throttle
+cansend can1 18F003D0#FF7DFFFFFFFFFFFF -> 50% throttle
+cansend can1 18F003D0#FFFAFFFFFFFFFFFF -> 100% throttle
+
+Inboard Engines:
+cansend can1 18F003D1#FF00FFFFFFFFFFFF -> 0% throttle
+cansend can1 18F003D1#FF7DFFFFFFFFFFFF -> 50% throttle
+cansend can1 18F003D1#FFFAFFFFFFFFFFFF -> 100% throttle
+
+
+Bucket:
+cansend can1 0CFF05D0#01000000007D01FF -> bucket moved a little bit
+
+
+cansend can1 0CFF05D0#01000000007D03FF 
+
+

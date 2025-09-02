@@ -1,0 +1,35 @@
+//--------    FILE: alpha.bhv   -------------
+
+initialize   DEPLOY = false
+initialize   RETURN = false
+initialize   WAYPOINT = false
+	
+//----------------------------------------------
+Behavior = BHV_Waypoint
+{ 
+  name      = waypt_survey
+  pwt       = 100
+  condition = WAYPOINT = true
+  endflag   = WAYPOINT = false
+  endflag   = MOOS_MANUAL_OVERIDE = true
+  endflag   = DESIRED_THRUST = 0 //zero thrust e rudder por segurança
+  endflag   = DESIRED_RUDDER = 0
+
+  updates    = WPT_UPDATE
+  perpetual  = true
+
+                lead = 400
+         lead_damper = 5
+       lead_to_start = true
+        capture_line = true
+      capture_radius = 85
+         slip_radius = 90
+	efficiency_measure = all
+	           
+    visual_hints = nextpt_color=yellow
+    visual_hints = nextpt_vertex_size=8
+    visual_hints = nextpt_lcolor=gray70
+    visual_hints = vertex_color=dodger_blue, edge_color=white
+    visual_hints = vertex_size=5, edge_size=1
+}
+

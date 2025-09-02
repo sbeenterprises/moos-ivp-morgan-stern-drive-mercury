@@ -1,0 +1,14 @@
+//------------------------------------------------
+// planchaPID config block
+
+ProcessConfig = planchaPID
+{
+   AppTick   = 4
+   CommsTick = 4
+   HEADING_KP = 1
+   HEADING_KI = 0
+   HEADING_KD = 0
+   HEADING_UPPER_BOUND = 40
+   HEADING_LOWER_BOUND = -40
+}
+
