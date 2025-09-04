@@ -13,6 +13,7 @@
 #include <ixwebsocket/IXWebSocket.h>
 #include <ixwebsocket/IXUserAgent.h>
 #include <iostream>
+#include <map>
 #include "MOOS/libMOOSGeodesy/MOOSGeodesy.h"
 
 
@@ -56,6 +57,31 @@ class WebSocket : public AppCastingMOOSApp
   ix::WebSocket* m_webSocket; // Store the current web socket
   bool m_clientConnected; // Track if a client is already connected
   CMOOSGeodesy m_geodesy;
+  
+  // State machine for message handling
+  typedef void (WebSocket::*MessageHandler)(const std::string& value);
+  std::map<std::string, MessageHandler> m_messageHandlers;
+  void initializeMessageHandlers();
+  
+  // Message handler methods
+  void handleControleManual(const std::string& value);
+  void handleAutonomousControl(const std::string& value);
+  void handleDesiredHeading(const std::string& value);
+  void handleDesiredSpeed(const std::string& value);
+  void handleDesiredRudder(const std::string& value);
+  void handleDesiredThrust(const std::string& value);
+  void handleDesiredGear(const std::string& value);
+  void handleAutonomousWaypoints(const std::string& value);
+  void handleAutonomousStart(const std::string& value);
+  void handleAutonomousStop(const std::string& value);
+  void handleAutonomousReturnToBase(const std::string& value);
+  void handleReturnUpdate(const std::string& value);
+  void handleStopCan(const std::string& value);
+  void handleConstantHeading(const std::string& value);
+  void handleSetpointHeading(const std::string& value);
+  void handleHeadingKp(const std::string& value);
+  void handleHeadingKi(const std::string& value);
+  void handleHeadingKd(const std::string& value);
   
 };
 

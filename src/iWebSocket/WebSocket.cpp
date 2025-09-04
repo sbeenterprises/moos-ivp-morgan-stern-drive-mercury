@@ -46,6 +46,7 @@ WebSocket::WebSocket()
   msg_recebida = "";
   m_webSocket = nullptr;
   m_clientConnected = false;
+  initializeMessageHandlers();
 }
 
 // Implement the new methods
@@ -167,227 +168,10 @@ bool WebSocket::Iterate()
   std::cout << "Key: " << key << "\n";
   std::cout << "Value: " << value << "\n";
 
-  if (key == "CONTROLE_MANUAL") {
-    if (value == "true") {
-      // Notify the MOOS community that the manual control is activated
-      //Notify("DEPLOY", "true");
-      Notify("MOOS_MANUAL_OVERIDE", "true");
-    } else if (value == "false") {
-      // Notify the MOOS community that the manual control is deactivated
-      Notify("MOOS_MANUAL_OVERIDE", "false");
-      // Notify the MOOS community with the desired thrust and rudder values
-      Notify("DESIRED_RUDDER", "0");
-      Notify("DESIRED_THRUST", "0");
-      Notify("DESIRED_GEAR", "N");
-    }
-  } else if (key == "AUTONOMOUS_CONTROL") {
-      // Notify the MOOS community that the autonomous control is activated
-      Notify("MOOS_MANUAL_OVERIDE", "true");
-      // Notify the MOOS community that the autonomous control is deactivated
-      //Notify("MOOS_MANUAL_OVERIDE", "false");
-      //Notify("DEPLOY", "true");
-  } else if (key == "DESIRED_HEADING") {
-    // Notify the MOOS community with the desired heading value
-    double value_heading = std::stod(value);
-    //Send to pHelmIvP instead of directly to the control
-    Notify("DESIRED_HEADING", value_heading);
-  } else if (key == "DESIRED_SPEED") {
-    // Notify the MOOS community with the desired speed value
-    double value_speed = std::stod(value);
-    Notify("WPT_UPDATE", "speed=" + std::to_string(value_speed));
-    //Notify("DESIRED_SPEED", value_speed);
-  } else if (key == "DESIRED_RUDDER") {
-    // Notify the MOOS community with the desired rudder value
-    double value_rudder = std::stod(value);
-    Notify("DESIRED_RUDDER", value_rudder);
-  } else if (key == "DESIRED_THRUST") {
-    //Notify the MOOS community with the desired thrust value
-    double value_thrust = std::stod(value);
-    Notify("DESIRED_THRUST", value_thrust);
-
-  } else if (key == "DESIRED_GEAR") {
-    //Notify the MOOS community with the desired gear value
-    if (value == "1") {
-      Notify("DESIRED_GEAR", "A");
-    } else if (value == "0") {
-      Notify("DESIRED_GEAR", "N");
-    } else if (value == "-1") {
-      Notify("DESIRED_GEAR", "R");
-    } 
-  } else if (key == "AUTONOMOUS_WAYPOINTS") {
-    // Morgan City origin (update if the chart changes)
-    double lat_origin = 29.71970895316288;
-    double lon_origin = -91.14705165281887;
-    
-    // Initialize the geodesy conversion using the origin.
-    m_geodesy.Initialise(lat_origin, lon_origin);
-
-    // Container for each coordinate token after splitting by colon.
-    std::vector<std::string> coordTokens;
-    
-    // Step 1: Split the input string by colon ':' to separate coordinate pairs.
-    std::istringstream tokenStream(value);
-    std::string token;
-    while (std::getline(tokenStream, token, ':')) {
-        if (!token.empty()) {
-            coordTokens.push_back(token);
-        }
-    }
-    
-    // Vector to hold the final converted coordinate strings.
-    std::vector<std::string> convertedCoords;
-    
-    // Process each coordinate token.
-    for (const auto &coordStr : coordTokens) {
-        // Step 2: Split the coordinate string by comma ','.
-        size_t commaPos = coordStr.find(',');
-        if (commaPos == std::string::npos) {
-            std::cerr << "Invalid coordinate format for: " << coordStr << std::endl;
-            continue;  // or handle error as needed
-        }
-        
-        std::string latPart = coordStr.substr(0, commaPos);
-        std::string lonPart = coordStr.substr(commaPos + 1);
-        
-        try {
-            // Convert string parts to double.
-            double orig_lon = std::stod(lonPart);
-            double orig_lat = std::stod(latPart);
-            
-            // Step 3: Convert geographic coordinates to local UTM.
-            // Note: The conversion function expects latitude first then longitude.
-            double local_y = 0.0, local_x = 0.0;
-            m_geodesy.LatLong2LocalUTM(orig_lat, orig_lon, local_y, local_x);
-            
-            // Step 4: Format the local coordinates (local_x as "lon", local_y as "lat")
-            std::ostringstream oss;
-            oss << std::fixed << std::setprecision(1) << local_x << "," << local_y;
-            convertedCoords.push_back(oss.str());
-        } catch (const std::exception &e) {
-            std::cerr << "Error converting coordinate (" << coordStr << "): " << e.what() << std::endl;
-        }
-    }
-    
-    // Step 5: Construct the final string with the format:
-    // "polygon=lon,lat:lon,lat:lon,lat:..."
-    std::ostringstream finalStream;
-    finalStream << "polygon=";
-    bool first = true;
-    for (const auto &convertedCoord : convertedCoords) {
-        if (!first) {
-            finalStream << ":";
-        }
-        finalStream << convertedCoord;
-        first = false;
-    }
-    
-    std::string wpt_update_str = finalStream.str();
-    
-    // Step 6: Publish to MOOSDB.
-    Notify("WPT_UPDATE", wpt_update_str);
-
-  } else if (key == "AUTONOMOUS_START") {
-    if (value == "true") {
-      Notify("WAYPOINT", "true");
-      Notify("MOOS_MANUAL_OVERIDE", "false");
-      //Notify("RETURN", "false");
-      //Send gear commands so the boat can start
-      Notify("DESIRED_GEAR", "A");
-    } 
-  } else if (key == "AUTONOMOUS_STOP") {
-    if (value == "true") {
-      //Notify("WAYPOINT", "false");
-      Notify("MOOS_MANUAL_OVERRIDE", "true");
-      //Notify("DESIRED_RUDDER", "0"); // Stop rudder
-      //Notify("DESIRED_THRUST", "0"); // Stop thrust
-      //Notify("DESIRED_GEAR", "N");
-    }
-  } else if (key == "AUTONOMOUS_RETURN_TO_BASE") {
-    if (value == "true") {
-      Notify("RETURN", "true");
-    } else if (value == "false") {
-      Notify("RETURN", "false");
-    }
-  } else if (key == "RETURN_UPDATE") {
-    // 1) Setup origin (update these if chart changes)
-    static constexpr double kLatOrigin = 29.71970895316288;
-    static constexpr double kLonOrigin = -91.14705165281887;
-    m_geodesy.Initialise(kLatOrigin, kLonOrigin);
-
-    // 2) Split off the payload after the '='
-    auto eqPos = value.find('=');
-    if (eqPos == std::string::npos) {
-        MOOSTrace("RETURN_UPDATE malformed: missing '=' in \"%s\"", value.c_str());
-    }
-    std::string payload = value.substr(eqPos + 1);
-
-    // 3) Split lat/lon by comma
-    auto commaPos = payload.find(',');
-    if (commaPos == std::string::npos) {
-        MOOSTrace("RETURN_UPDATE malformed: missing ',' in \"%s\"", payload.c_str());
-    }
-    std::string latStr = payload.substr(0, commaPos);
-    std::string lonStr = payload.substr(commaPos + 1);
-
-    // 4) Convert strings to doubles, with exception safety
-    double latDeg = 0.0, lonDeg = 0.0;
-    try {
-        latDeg = std::stod(latStr);
-        lonDeg = std::stod(lonStr);
-    }
-    catch (const std::invalid_argument& e) {
-        MOOSTrace("RETURN_UPDATE parse error: invalid number \"%s\" or \"%s\"", latStr.c_str(), lonStr.c_str());
-
-    }
-    catch (const std::out_of_range& e) {
-        MOOSTrace("RETURN_UPDATE parse error: value out of range \"%s\" or \"%s\"", latStr.c_str(), lonStr.c_str());
-        
-    }
-
-    // 5) Validate ranges
-    if (latDeg < -90.0 || latDeg > 90.0 || lonDeg < -180.0 || lonDeg > 180.0) {
-        MOOSTrace("RETURN_UPDATE out‑of‑range coords: lat=%f lon=%f", latDeg, lonDeg);
-        
-    }
-
-    // 6) Convert to local UTM
-    double localY = 0.0, localX = 0.0;
-    m_geodesy.LatLong2LocalUTM(latDeg, lonDeg, localY, localX);
-
-    // 7) Build and publish back to MOOSDB
-    std::ostringstream oss;
-    oss << "points="
-        << std::fixed << std::setprecision(1)
-        << localX << "," << localY;
-    Notify("RETURN_UPDATE", oss.str());
-} else if (key == "STOP_CAN") {
-    if (value == "true") {
-      Notify("STOP_CAN", "true");
-    } else if (value == "false") {
-      Notify("STOP_CAN", "false");
-    }
-  } else if (key == "CONSTANT_HEADING") {
-    if (value == "true") {
-      Notify("CONSTANT_HEADING", "true");
-    } else if (value == "false") {
-      Notify("CONSTANT_HEADING", "false");
-    }
-  } else if (key == "SETPOINT_HEADING") {
-    // Notify the MOOS community with the setpoint heading value
-    value_setpoint = std::stod(value);
-    Notify("SETPOINT_HEADING", value_setpoint);
-  } else if (key == "HEADING_KP") {
-    // Notify the MOOS community with the heading KP value
-    double value_heading_kp = std::stod(value);
-    Notify("HEADING_KP", value_heading_kp);
-  } else if (key == "HEADING_KI") {
-    // Notify the MOOS community with the heading KI value
-    double value_heading_ki = std::stod(value);
-    Notify("HEADING_KI", value_heading_ki);
-  } else if (key == "HEADING_KD") {
-    // Notify the MOOS community with the heading KD value
-    double value_heading_kd = std::stod(value);
-    Notify("HEADING_KD", value_heading_kd);
+  // State machine approach: O(log n) lookup instead of O(n) linear search
+  auto handler = m_messageHandlers.find(key);
+  if (handler != m_messageHandlers.end()) {
+    (this->*(handler->second))(value);
   } 
 
 
@@ -494,5 +278,259 @@ bool WebSocket::buildReport()
   m_msgs << actab.getFormattedString();
 
   return true;
+}
+
+//---------------------------------------------------------
+// State Machine Implementation
+//---------------------------------------------------------
+
+void WebSocket::initializeMessageHandlers()
+{
+  m_messageHandlers["CONTROLE_MANUAL"] = &WebSocket::handleControleManual;
+  m_messageHandlers["AUTONOMOUS_CONTROL"] = &WebSocket::handleAutonomousControl;
+  m_messageHandlers["DESIRED_HEADING"] = &WebSocket::handleDesiredHeading;
+  m_messageHandlers["DESIRED_SPEED"] = &WebSocket::handleDesiredSpeed;
+  m_messageHandlers["DESIRED_RUDDER"] = &WebSocket::handleDesiredRudder;
+  m_messageHandlers["DESIRED_THRUST"] = &WebSocket::handleDesiredThrust;
+  m_messageHandlers["DESIRED_GEAR"] = &WebSocket::handleDesiredGear;
+  m_messageHandlers["AUTONOMOUS_WAYPOINTS"] = &WebSocket::handleAutonomousWaypoints;
+  m_messageHandlers["AUTONOMOUS_START"] = &WebSocket::handleAutonomousStart;
+  m_messageHandlers["AUTONOMOUS_STOP"] = &WebSocket::handleAutonomousStop;
+  m_messageHandlers["AUTONOMOUS_RETURN_TO_BASE"] = &WebSocket::handleAutonomousReturnToBase;
+  m_messageHandlers["RETURN_UPDATE"] = &WebSocket::handleReturnUpdate;
+  m_messageHandlers["STOP_CAN"] = &WebSocket::handleStopCan;
+  m_messageHandlers["CONSTANT_HEADING"] = &WebSocket::handleConstantHeading;
+  m_messageHandlers["SETPOINT_HEADING"] = &WebSocket::handleSetpointHeading;
+  m_messageHandlers["HEADING_KP"] = &WebSocket::handleHeadingKp;
+  m_messageHandlers["HEADING_KI"] = &WebSocket::handleHeadingKi;
+  m_messageHandlers["HEADING_KD"] = &WebSocket::handleHeadingKd;
+}
+
+void WebSocket::handleControleManual(const std::string& value)
+{
+  if (value == "true") {
+    Notify("MOOS_MANUAL_OVERIDE", "true");
+  } else if (value == "false") {
+    Notify("MOOS_MANUAL_OVERIDE", "false");
+    Notify("DESIRED_RUDDER", "0");
+    Notify("DESIRED_THRUST", "0");
+    Notify("DESIRED_GEAR", "N");
+  }
+}
+
+void WebSocket::handleAutonomousControl(const std::string& value)
+{
+  Notify("MOOS_MANUAL_OVERIDE", "true");
+}
+
+void WebSocket::handleDesiredHeading(const std::string& value)
+{
+  double value_heading = std::stod(value);
+  Notify("DESIRED_HEADING", value_heading);
+}
+
+void WebSocket::handleDesiredSpeed(const std::string& value)
+{
+  double value_speed = std::stod(value);
+  Notify("WPT_UPDATE", "speed=" + std::to_string(value_speed));
+}
+
+void WebSocket::handleDesiredRudder(const std::string& value)
+{
+  double value_rudder = std::stod(value);
+  Notify("DESIRED_RUDDER", value_rudder);
+}
+
+void WebSocket::handleDesiredThrust(const std::string& value)
+{
+  double value_thrust = std::stod(value);
+  Notify("DESIRED_THRUST", value_thrust);
+}
+
+void WebSocket::handleDesiredGear(const std::string& value)
+{
+  if (value == "1") {
+    Notify("DESIRED_GEAR", "A");
+  } else if (value == "0") {
+    Notify("DESIRED_GEAR", "N");
+  } else if (value == "-1") {
+    Notify("DESIRED_GEAR", "R");
+  } 
+}
+
+void WebSocket::handleAutonomousWaypoints(const std::string& value)
+{
+  double lat_origin = 29.71970895316288;
+  double lon_origin = -91.14705165281887;
+  
+  m_geodesy.Initialise(lat_origin, lon_origin);
+
+  std::vector<std::string> coordTokens;
+  
+  std::istringstream tokenStream(value);
+  std::string token;
+  while (std::getline(tokenStream, token, ':')) {
+      if (!token.empty()) {
+          coordTokens.push_back(token);
+      }
+  }
+  
+  std::vector<std::string> convertedCoords;
+  
+  for (const auto &coordStr : coordTokens) {
+      size_t commaPos = coordStr.find(',');
+      if (commaPos == std::string::npos) {
+          std::cerr << "Invalid coordinate format for: " << coordStr << std::endl;
+          continue;
+      }
+      
+      std::string latPart = coordStr.substr(0, commaPos);
+      std::string lonPart = coordStr.substr(commaPos + 1);
+      
+      try {
+          double orig_lon = std::stod(lonPart);
+          double orig_lat = std::stod(latPart);
+          
+          double local_y = 0.0, local_x = 0.0;
+          m_geodesy.LatLong2LocalUTM(orig_lat, orig_lon, local_y, local_x);
+          
+          std::ostringstream oss;
+          oss << std::fixed << std::setprecision(1) << local_x << "," << local_y;
+          convertedCoords.push_back(oss.str());
+      } catch (const std::exception &e) {
+          std::cerr << "Error converting coordinate (" << coordStr << "): " << e.what() << std::endl;
+      }
+  }
+  
+  std::ostringstream finalStream;
+  finalStream << "polygon=";
+  bool first = true;
+  for (const auto &convertedCoord : convertedCoords) {
+      if (!first) {
+          finalStream << ":";
+      }
+      finalStream << convertedCoord;
+      first = false;
+  }
+  
+  std::string wpt_update_str = finalStream.str();
+  Notify("WPT_UPDATE", wpt_update_str);
+}
+
+void WebSocket::handleAutonomousStart(const std::string& value)
+{
+  if (value == "true") {
+    Notify("WAYPOINT", "true");
+    Notify("MOOS_MANUAL_OVERIDE", "false");
+    Notify("DESIRED_GEAR", "A");
+  } 
+}
+
+void WebSocket::handleAutonomousStop(const std::string& value)
+{
+  if (value == "true") {
+    Notify("MOOS_MANUAL_OVERRIDE", "true");
+  }
+}
+
+void WebSocket::handleAutonomousReturnToBase(const std::string& value)
+{
+  if (value == "true") {
+    Notify("RETURN", "true");
+  } else if (value == "false") {
+    Notify("RETURN", "false");
+  }
+}
+
+void WebSocket::handleReturnUpdate(const std::string& value)
+{
+  static constexpr double kLatOrigin = 29.71970895316288;
+  static constexpr double kLonOrigin = -91.14705165281887;
+  m_geodesy.Initialise(kLatOrigin, kLonOrigin);
+
+  auto eqPos = value.find('=');
+  if (eqPos == std::string::npos) {
+      MOOSTrace("RETURN_UPDATE malformed: missing '=' in \"%s\"", value.c_str());
+      return;
+  }
+  std::string payload = value.substr(eqPos + 1);
+
+  auto commaPos = payload.find(',');
+  if (commaPos == std::string::npos) {
+      MOOSTrace("RETURN_UPDATE malformed: missing ',' in \"%s\"", payload.c_str());
+      return;
+  }
+  std::string latStr = payload.substr(0, commaPos);
+  std::string lonStr = payload.substr(commaPos + 1);
+
+  double latDeg = 0.0, lonDeg = 0.0;
+  try {
+      latDeg = std::stod(latStr);
+      lonDeg = std::stod(lonStr);
+  }
+  catch (const std::invalid_argument& e) {
+      MOOSTrace("RETURN_UPDATE parse error: invalid number \"%s\" or \"%s\"", latStr.c_str(), lonStr.c_str());
+      return;
+  }
+  catch (const std::out_of_range& e) {
+      MOOSTrace("RETURN_UPDATE parse error: value out of range \"%s\" or \"%s\"", latStr.c_str(), lonStr.c_str());
+      return;
+  }
+
+  if (latDeg < -90.0 || latDeg > 90.0 || lonDeg < -180.0 || lonDeg > 180.0) {
+      MOOSTrace("RETURN_UPDATE out‑of‑range coords: lat=%f lon=%f", latDeg, lonDeg);
+      return;
+  }
+
+  double localY = 0.0, localX = 0.0;
+  m_geodesy.LatLong2LocalUTM(latDeg, lonDeg, localY, localX);
+
+  std::ostringstream oss;
+  oss << "points="
+      << std::fixed << std::setprecision(1)
+      << localX << "," << localY;
+  Notify("RETURN_UPDATE", oss.str());
+}
+
+void WebSocket::handleStopCan(const std::string& value)
+{
+  if (value == "true") {
+    Notify("STOP_CAN", "true");
+  } else if (value == "false") {
+    Notify("STOP_CAN", "false");
+  }
+}
+
+void WebSocket::handleConstantHeading(const std::string& value)
+{
+  if (value == "true") {
+    Notify("CONSTANT_HEADING", "true");
+  } else if (value == "false") {
+    Notify("CONSTANT_HEADING", "false");
+  }
+}
+
+void WebSocket::handleSetpointHeading(const std::string& value)
+{
+  value_setpoint = std::stod(value);
+  Notify("SETPOINT_HEADING", value_setpoint);
+}
+
+void WebSocket::handleHeadingKp(const std::string& value)
+{
+  double value_heading_kp = std::stod(value);
+  Notify("HEADING_KP", value_heading_kp);
+}
+
+void WebSocket::handleHeadingKi(const std::string& value)
+{
+  double value_heading_ki = std::stod(value);
+  Notify("HEADING_KI", value_heading_ki);
+}
+
+void WebSocket::handleHeadingKd(const std::string& value)
+{
+  double value_heading_kd = std::stod(value);
+  Notify("HEADING_KD", value_heading_kd);
 }
 
