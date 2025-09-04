@@ -302,12 +302,29 @@ void CAN::sendRudderCommand(double rudder_value)
   string frame_str = getRudderCANFrame(rudder_value);
   
   struct can_frame frame;
-  frame.can_id = 0x18F30A1A;
+  frame.can_id = 0x18F30A1A | CAN_EFF_FLAG;
   frame.can_dlc = 8;
+
+  // calculate DLC from payload size in string
+  const char* hex = frame_str.c_str() + 9; // depois do '#'
+  size_t nhex = strlen(hex);
+  size_t nbytes = nhex / 2;
+  if (nbytes > 8) nbytes = 8; // can_frame suporta até 8
+  frame.can_dlc = static_cast<__u8>(nbytes);
+
   
   sscanf(frame_str.substr(9).c_str(), "%02hhx%02hhx%02hhx%02hhx%02hhx%02hhx%02hhx%02hhx",
          &frame.data[0], &frame.data[1], &frame.data[2], &frame.data[3],
          &frame.data[4], &frame.data[5], &frame.data[6], &frame.data[7]);
+
+  
+  // zero and parse
+  memset(frame.data, 0, sizeof(frame.data));
+  for (size_t i = 0; i < nbytes; ++i) {
+    unsigned int byte_val = 0;
+    sscanf(hex + 2*i, "%02x", &byte_val);
+    frame.data[i] = static_cast<__u8>(byte_val);
+  }
 
   int bytes_sent = write(m_can_socket, &frame, sizeof(struct can_frame));
   
