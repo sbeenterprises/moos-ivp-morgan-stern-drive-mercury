@@ -9,7 +9,7 @@
 #define SignalK_HEADER
 
 #include "MOOS/libMOOS/Thirdparty/AppCasting/AppCastingMOOSApp.h"
-#include "../../../moos-ivp/MOOS/MOOSGeodesy/libMOOSGeodesy/include/MOOS/libMOOSGeodesy/MOOSGeodesy.h"
+#include "MOOS/libMOOSGeodesy/MOOSGeodesy.h"
 
 class SignalK : public AppCastingMOOSApp
 {

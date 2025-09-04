@@ -13,7 +13,7 @@
 #include <ixwebsocket/IXWebSocket.h>
 #include <ixwebsocket/IXUserAgent.h>
 #include <iostream>
-#include "../../../moos-ivp/MOOS/MOOSGeodesy/libMOOSGeodesy/include/MOOS/libMOOSGeodesy/MOOSGeodesy.h"
+#include "MOOS/libMOOSGeodesy/MOOSGeodesy.h"
 
 
 class WebSocket : public AppCastingMOOSApp

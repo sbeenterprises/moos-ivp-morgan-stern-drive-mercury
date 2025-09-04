@@ -9,6 +9,12 @@
 #define CAN_HEADER
 
 #include "MOOS/libMOOS/Thirdparty/AppCasting/AppCastingMOOSApp.h"
+#include <linux/can.h>
+#include <linux/can/raw.h>
+#include <sys/socket.h>
+#include <sys/ioctl.h>
+#include <net/if.h>
+#include <unistd.h>
 
 class CAN : public AppCastingMOOSApp
 {
@@ -27,10 +33,18 @@ class CAN : public AppCastingMOOSApp
 
  protected:
    void registerVariables();
+   bool initCAN();
+   void sendRudderCommand(double rudder_value);
+   std::string getRudderCANFrame(double rudder_value);
 
  private: // Configuration variables
 
  private: // State variables
+  double m_desired_rudder;
+  double m_desired_thrust;
+  int m_can_socket;
+  struct sockaddr_can m_can_addr;
+  struct ifreq m_ifr;
 };
 
 #endif 

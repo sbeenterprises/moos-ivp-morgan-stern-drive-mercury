@@ -9,7 +9,7 @@
 #define DivisorNMEA_HEADER
 
 #include "MOOS/libMOOS/Thirdparty/AppCasting/AppCastingMOOSApp.h"
-#include "../../../moos-ivp/MOOS/MOOSGeodesy/libMOOSGeodesy/include/MOOS/libMOOSGeodesy/MOOSGeodesy.h"
+#include "MOOS/libMOOSGeodesy/MOOSGeodesy.h"
 
 #include <boost/asio.hpp>
 #include <string>
