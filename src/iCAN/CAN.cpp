@@ -86,7 +86,9 @@ bool CAN::OnConnectToServer()
 bool CAN::Iterate()
 {
   AppCastingMOOSApp::Iterate();
-  // Do your thing here!
+  
+  sendRudderCommand(m_desired_rudder);
+  
   AppCastingMOOSApp::PostReport();
   return(true);
 }
@@ -150,13 +152,40 @@ void CAN::registerVariables()
 bool CAN::buildReport() 
 {
   m_msgs << "============================================" << endl;
-  m_msgs << "File:                                       " << endl;
+  m_msgs << "File: iCAN - CAN Bus Interface             " << endl;
   m_msgs << "============================================" << endl;
 
-  ACTable actab(4);
-  actab << "Alpha | Bravo | Charlie | Delta";
+  // CAN Interface Status
+  string can_status = (m_can_socket != -1) ? "CONNECTED" : "DISCONNECTED";
+  m_msgs << "CAN Interface (slcan0): " << can_status << endl;
+  m_msgs << "CAN Socket ID: " << m_can_socket << endl;
+  m_msgs << endl;
+
+  // Current Values
+  m_msgs << "Current Rudder Command: " << m_desired_rudder << "%" << endl;
+  m_msgs << "Current Thrust Command: " << m_desired_thrust << endl;
+  m_msgs << endl;
+
+  // CAN Frame Information
+  string current_frame = getRudderCANFrame(m_desired_rudder);
+  m_msgs << "Current CAN Frame: " << current_frame << endl;
+  
+  string direction = "CENTER";
+  if(m_desired_rudder < 0) direction = "LEFT";
+  else if(m_desired_rudder > 0) direction = "RIGHT";
+  
+  m_msgs << "Rudder Direction: " << direction << endl;
+  m_msgs << "Rudder Percentage: " << abs((int)m_desired_rudder) << "%" << endl;
+  m_msgs << endl;
+
+  // Statistics Table
+  ACTable actab(2);
+  actab << "Parameter | Value";
   actab.addHeaderLines();
-  actab << "one" << "two" << "three" << "four";
+  actab << "CAN ID" << "0x18F30A1A";
+  actab << "Data Length" << "8 bytes";
+  actab << "Update Rate" << "100ms (10Hz)";
+  actab << "Interface" << "slcan0";
   m_msgs << actab.getFormattedString();
 
   return(true);
