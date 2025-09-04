@@ -30,11 +30,12 @@ ProcessConfig = ANTLER
   Run = uProcessWatch	@ NewConsole = false
   Run = pNodeReporter	@ NewConsole = false
   Run = pRealm	      @ NewConsole = false
-  Run = iRaspberryServer	      @ NewConsole = false
+  Run = iCAN	      @ NewConsole = false
   //Run = iNMEA	      @ NewConsole = false
   //Run = iSignalK	      @ NewConsole = false
   Run = iWebSocket	      @ NewConsole = false
   Run = pXYpublisher      @ NewConsole = false
+
 }
 
 // pXYpublisher config block
@@ -47,9 +48,9 @@ ProcessConfig = pXYpublisher
 //------------------------------------------------
 
 
-// iRaspberryServer config block
+// iCAN config block
 
-ProcessConfig = iRaspberryServer
+ProcessConfig = iCAN
 {
    AppTick   = 20
    CommsTick = 20
