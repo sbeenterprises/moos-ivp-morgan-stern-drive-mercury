@@ -69,8 +69,8 @@ PIDController::PIDController(double kp, double ki, double kd)
   kp          = kp;
   ki          = ki;
   kd          = kd;
-  upper_bound = 20; //Modified value for USV
-  lower_bound = -20;
+  upper_bound = 50; //Modified value for USV
+  lower_bound = -50;
   integral    = 0;
   prevError   = 0;
   eff_kp      = 0;
