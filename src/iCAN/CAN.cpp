@@ -57,8 +57,10 @@ bool CAN::OnNewMail(MOOSMSG_LIST &NewMail)
 
      if(key == "FOO") 
        cout << "great!";
-     else if(key == "DESIRED_THRUST")
+     else if(key == "DESIRED_THRUST") {
        m_desired_thrust = msg.GetDouble();
+       sendThrustCommand(m_desired_thrust);
+     }
      else if(key == "DESIRED_RUDDER") {
        m_desired_rudder = msg.GetDouble();
        sendRudderCommand(m_desired_rudder);
@@ -88,6 +90,7 @@ bool CAN::Iterate()
   AppCastingMOOSApp::Iterate();
   
   sendRudderCommand(m_desired_rudder);
+  sendThrustCommand(m_desired_thrust);
   
   AppCastingMOOSApp::PostReport();
   return(true);
@@ -163,12 +166,12 @@ bool CAN::buildReport()
 
   // Current Values
   m_msgs << "Current Rudder Command: " << m_desired_rudder << "%" << endl;
-  m_msgs << "Current Thrust Command: " << m_desired_thrust << endl;
+  m_msgs << "Current Thrust Command: " << m_desired_thrust << "%" << endl;
   m_msgs << endl;
 
   // CAN Frame Information
-  string current_frame = getRudderCANFrame(m_desired_rudder);
-  m_msgs << "Current CAN Frame: " << current_frame << endl;
+  string current_rudder_frame = getRudderCANFrame(m_desired_rudder);
+  m_msgs << "Current Rudder CAN Frame: " << current_rudder_frame << endl;
   
   string direction = "CENTER";
   if(m_desired_rudder < 0) direction = "LEFT";
@@ -176,6 +179,19 @@ bool CAN::buildReport()
   
   m_msgs << "Rudder Direction: " << direction << endl;
   m_msgs << "Rudder Percentage: " << abs((int)m_desired_rudder) << "%" << endl;
+  m_msgs << endl;
+
+  // Thrust Information
+  string gear_command = getGearCommand(m_desired_thrust);
+  string thrust_state = (m_desired_thrust > 0) ? "FORWARD" : "NEUTRAL";
+  m_msgs << "Current Gear Command: " << gear_command << endl;
+  m_msgs << "Thrust State: " << thrust_state << endl;
+  
+  if(m_desired_thrust > 0) {
+    string current_thrust_frame = getThrustCANFrame(m_desired_thrust);
+    m_msgs << "Current Thrust CAN Frame: " << current_thrust_frame << endl;
+  }
+  m_msgs << "Thrust Percentage: " << ((int)m_desired_thrust) << "%" << endl;
   m_msgs << endl;
 
   // Statistics Table
@@ -333,6 +349,179 @@ void CAN::sendRudderCommand(double rudder_value)
   }
 }
 
+//---------------------------------------------------------
+// Procedure: sendThrustCommand()
 
+void CAN::sendThrustCommand(double thrust_value)
+{
+  if(m_can_socket == -1) {
+    return;
+  }
 
+  // Send gear command first
+  string gear_frame_str = getGearCommand(thrust_value);
+  struct can_frame gear_frame;
+  gear_frame.can_id = 0x18F005D0 | CAN_EFF_FLAG;
+  gear_frame.can_dlc = 8;
+
+  sscanf(gear_frame_str.substr(9).c_str(), "%02hhx%02hhx%02hhx%02hhx%02hhx%02hhx%02hhx%02hhx",
+         &gear_frame.data[0], &gear_frame.data[1], &gear_frame.data[2], &gear_frame.data[3],
+         &gear_frame.data[4], &gear_frame.data[5], &gear_frame.data[6], &gear_frame.data[7]);
+
+  int gear_bytes_sent = write(m_can_socket, &gear_frame, sizeof(struct can_frame));
+  
+  if(gear_bytes_sent < 0) {
+    reportRunWarning("Failed to send gear CAN frame");
+    return;
+  }
+
+  // Always send thrust command (even if 0)
+  string thrust_frame_str = getThrustCANFrame(thrust_value);
+  struct can_frame thrust_frame;
+  thrust_frame.can_id = 0x18000017 | CAN_EFF_FLAG;
+  thrust_frame.can_dlc = 8;
+
+  sscanf(thrust_frame_str.substr(9).c_str(), "%02hhx%02hhx%02hhx%02hhx%02hhx%02hhx%02hhx%02hhx",
+         &thrust_frame.data[0], &thrust_frame.data[1], &thrust_frame.data[2], &thrust_frame.data[3],
+         &thrust_frame.data[4], &thrust_frame.data[5], &thrust_frame.data[6], &thrust_frame.data[7]);
+
+  int thrust_bytes_sent = write(m_can_socket, &thrust_frame, sizeof(struct can_frame));
+  
+  if(thrust_bytes_sent < 0) {
+    reportRunWarning("Failed to send thrust CAN frame");
+  }
+}
+
+//---------------------------------------------------------
+// Procedure: getGearCommand()
+
+std::string CAN::getGearCommand(double thrust_value)
+{
+  if(thrust_value > 0) {
+    return "18F005D0#7EFFFFFFFFFFFFFF"; // Forward gear
+  } else {
+    return "18F005D0#7DFFFFFFFFFFFFFF"; // Neutral gear
+  }
+}
+
+//---------------------------------------------------------
+// Procedure: getThrustCANFrame()
+
+std::string CAN::getThrustCANFrame(double thrust_value)
+{
+  if(thrust_value <= 0) {
+    return "18000017#C1E015E1FFFFFFFF"; // 0%
+  }
+
+  // Convert thrust value to percentage (0-100)
+  int percentage = static_cast<int>(thrust_value);
+  if(percentage > 100) percentage = 100;
+
+  // Thrust command mapping based on percentage
+  std::string thrust_commands[] = {
+    "18000017#C1E015E1FFFFFFFF", // 0%
+    "18000017#C1C016E1FFFFFFFF", // 1%
+    "18000017#C11018E1FFFFFFFF", // 2%
+    "18000017#C1F018E1FFFFFFFF", // 3%
+    "18000017#C1401AE1FFFFFFFF", // 4%
+    "18000017#C1201BE1FFFFFFFF", // 5%
+    "18000017#C1701CE1FFFFFFFF", // 6%
+    "18000017#C1501DE1FFFFFFFF", // 7%
+    "18000017#C1A01EE1FFFFFFFF", // 8%
+    "18000017#C1801FE1FFFFFFFF", // 9%
+    "18000017#C1D020E1FFFFFFFF", // 10%
+    "18000017#C1B021E1FFFFFFFF", // 11%
+    "18000017#C10023E1FFFFFFFF", // 12%
+    "18000017#C1E023E1FFFFFFFF", // 13%
+    "18000017#C13025E1FFFFFFFF", // 14%
+    "18000017#C11026E1FFFFFFFF", // 15%
+    "18000017#C16027E1FFFFFFFF", // 16%
+    "18000017#C14028E1FFFFFFFF", // 17%
+    "18000017#C19029E1FFFFFFFF", // 18%
+    "18000017#C1702AE1FFFFFFFF", // 19%
+    "18000017#C1702AE1FFFFFFFF", // 20%
+    "18000017#C1C02BE1FFFFFFFF", // 21%
+    "18000017#C1F02DE1FFFFFFFF", // 22%
+    "18000017#C15032E1FFFFFFFF", // 23%
+    "18000017#C10031E1FFFFFFFF", // 24%
+    "18000017#C10031E1FFFFFFFF", // 25%
+    "18000017#C15032E1FFFFFFFF", // 26%
+    "18000017#C15032E1FFFFFFFF", // 27%
+    "18000017#C16035E1FFFFFFFF", // 28%
+    "18000017#C16035E1FFFFFFFF", // 29%
+    "18000017#C1B036E1FFFFFFFF", // 30%
+    "18000017#C1E038E1FFFFFFFF", // 31%
+    "18000017#C1E038E1FFFFFFFF", // 32%
+    "18000017#C1C039E1FFFFFFFF", // 33%
+    "18000017#C1C039E1FFFFFFFF", // 34%
+    "18000017#C1F03BE1FFFFFFFF", // 35%
+    "18000017#C1F03BE1FFFFFFFF", // 36%
+    "18000017#C1403DE1FFFFFFFF", // 37%
+    "18000017#C1203EE1FFFFFFFF", // 38%
+    "18000017#C15040E1FFFFFFFF", // 39%
+    "18000017#C15040E1FFFFFFFF", // 40%
+    "18000017#C1A041E1FFFFFFFF", // 41%
+    "18000017#C18042E1FFFFFFFF", // 42%
+    "18000017#C1D043E1FFFFFFFF", // 43%
+    "18000017#C1B044E1FFFFFFFF", // 44%
+    "18000017#C10046E1FFFFFFFF", // 45%
+    "18000017#C1E046E1FFFFFFFF", // 46%
+    "18000017#C13048E1FFFFFFFF", // 47%
+    "18000017#C11049E1FFFFFFFF", // 48%
+    "18000017#C1604AE1FFFFFFFF", // 49%
+    "18000017#C1404BE1FFFFFFFF", // 50%
+    "18000017#C1904CE1FFFFFFFF", // 51%
+    "18000017#C1C04EE1FFFFFFFF", // 52%
+    "18000017#C1C04EE1FFFFFFFF", // 53%
+    "18000017#C1C04EE1FFFFFFFF", // 54%
+    "18000017#C1C04EE1FFFFFFFF", // 55% (missing in original, using 54%)
+    "18000017#C1D051E1FFFFFFFF", // 56%
+    "18000017#C12053E1FFFFFFFF", // 57%
+    "18000017#C10054E1FFFFFFFF", // 58%
+    "18000017#C15055E1FFFFFFFF", // 59%
+    "18000017#C13056E1FFFFFFFF", // 60%
+    "18000017#C16058E1FFFFFFFF", // 61%
+    "18000017#C16058E1FFFFFFFF", // 62%
+    "18000017#C1B059E1FFFFFFFF", // 63%
+    "18000017#C1C05CE1FFFFFFFF", // 64%
+    "18000017#C1C05CE1FFFFFFFF", // 65%
+    "18000017#C1C05CE1FFFFFFFF", // 66%
+    "18000017#C1C05CE1FFFFFFFF", // 67%
+    "18000017#C1105EE1FFFFFFFF", // 68%
+    "18000017#C1F05EE1FFFFFFFF", // 69%
+    "18000017#C12061E1FFFFFFFF", // 70%
+    "18000017#C1404BE1FFFFFFFF", // 71%
+    "18000017#C15063E1FFFFFFFF", // 72%
+    "18000017#C15063E1FFFFFFFF", // 73%
+    "18000017#C18065E1FFFFFFFF", // 74%
+    "18000017#C18065E1FFFFFFFF", // 75%
+    "18000017#C1B067E1FFFFFFFF", // 76%
+    "18000017#C1B067E1FFFFFFFF", // 77%
+    "18000017#C10069E1FFFFFFFF", // 78%
+    "18000017#C1E069E1FFFFFFFF", // 79%
+    "18000017#C1106CE1FFFFFFFF", // 80%
+    "18000017#C1906FE1FFFFFFFF", // 81%
+    "18000017#C1906FE1FFFFFFFF", // 82%
+    "18000017#C1906FE1FFFFFFFF", // 83%
+    "18000017#C1906FE1FFFFFFFF", // 84%
+    "18000017#C1C071E1FFFFFFFF", // 85%
+    "18000017#C1C071E1FFFFFFFF", // 86%
+    "18000017#C1F073E1FFFFFFFF", // 87%
+    "18000017#C1F073E1FFFFFFFF", // 88%
+    "18000017#C1D074E1FFFFFFFF", // 89%
+    "18000017#C12076E1FFFFFFFF", // 90%
+    "18000017#C15078E1FFFFFFFF", // 91%
+    "18000017#C15078E1FFFFFFFF", // 92%
+    "18000017#C13079E1FFFFFFFF", // 93%
+    "18000017#C13079E1FFFFFFFF", // 94%
+    "18000017#C1607BE1FFFFFFFF", // 95%
+    "18000017#C1607BE1FFFFFFFF", // 96%
+    "18000017#C14083E1FFFFFFFF", // 97%
+    "18000017#C14083E1FFFFFFFF", // 98%
+    "18000017#C14083E1FFFFFFFF", // 99%
+    "18000017#C14083E1FFFFFFFF"  // 100%
+  };
+
+  return thrust_commands[percentage];
+}
 

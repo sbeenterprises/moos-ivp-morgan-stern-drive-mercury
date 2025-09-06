@@ -36,6 +36,9 @@ class CAN : public AppCastingMOOSApp
    bool initCAN();
    void sendRudderCommand(double rudder_value);
    std::string getRudderCANFrame(double rudder_value);
+   void sendThrustCommand(double thrust_value);
+   std::string getThrustCANFrame(double thrust_value);
+   std::string getGearCommand(double thrust_value);
 
  private: // Configuration variables
 
