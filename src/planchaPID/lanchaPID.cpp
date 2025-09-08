@@ -106,10 +106,10 @@ double PIDController::CalculateSpeed(double desired, double current, double dt)
 
     // anti-wind-up
 
-    if (integral > 60.0) {
-        integral = 60.0;
-    } else if (integral < -60.0) {
-        integral = -60.0;
+    if (integral > 100.0) {
+        integral = 100.0;
+    } else if (integral < -100.0) {
+        integral = -100.0;
     }
     
     // gain scheduling on *measured* speed
