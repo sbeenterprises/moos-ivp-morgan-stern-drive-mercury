@@ -165,7 +165,7 @@ protected:
         //heading_gps = rmcdata.m_dTrackAngle; // Marcação vinda do GPS - tirei esse e coloquei o heading vindo da giro
 
       }
-    } else if (strstr(pCmd, "GPHDT") != NULL) {
+    } else if (strstr(pCmd, "GPTHS") != NULL) { //fix for boat 
       //Take the value from $GPHDT string and put into heading_giro
       std::string input = pData;
       std::stringstream ss(input);
