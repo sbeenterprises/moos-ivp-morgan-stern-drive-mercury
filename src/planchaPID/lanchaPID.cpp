@@ -69,8 +69,8 @@ PIDController::PIDController(double kp, double ki, double kd)
   kp          = kp;
   ki          = ki;
   kd          = kd;
-  upper_bound = 50; //Modified value for USV
-  lower_bound = -50;
+  upper_bound = 100; //Modified value for USV
+  lower_bound = -100;
   integral    = 0;
   prevError   = 0;
   eff_kp      = 0;
@@ -84,8 +84,8 @@ PIDController::PIDController(double kp, double ki, double kd)
 double PIDController::CalculateSpeed(double desired, double current, double dt)
 {
     // ------- 1. Feed-forward (static map) -----------------
-    static const std::vector<double> ff_speed  = {0,1,2,3,4,6,8,10,12,14,18,20,22,24,26,28};
-    static const std::vector<double> ff_thrust = {0,1,6,14,20,30,32,33,35,30,33,36,41,45,50,55};
+    static const std::vector<double> ff_speed  = {0,4.1,4.7,5.0,5.0,5.9,6.5,6.5,6.9,7.5,8.8};
+    static const std::vector<double> ff_thrust = {0,1,2,3,4,10,15,27,20,25,30};
 
 
     // linear interpolation
@@ -136,8 +136,8 @@ double PIDController::CalculateSpeed(double desired, double current, double dt)
     output = ff + fb;
     if (output < 0.0) {
         output = 0.0; // no negative thrust
-    } else if (output > 60.0) {
-        output = 60.0; // max thrust
+    } else if (output > 20.0) {
+        output = 20.0; // max thrust of 20% for testing
     }
     //upper_bound = 40;                             // for AppCasting table
     //lower_bound = 0;
@@ -179,80 +179,12 @@ double PIDController::Calculate(double desired, double current, double dt) {
     //Gain Scheduling
 
     
-    if (nav_speed < 2) {             
+    if (nav_speed < 8) {             
         eff_kp = 0.55;
-        eff_ki = 0.0038;
-        eff_kd = 0.060;  
-        upper_bound = 20; // Modified value for USV
-        lower_bound = -20; // Modified value for USV
-    } 
-    else if (nav_speed < 4) {       
-        eff_kp = 0.45;
-        eff_ki = 0.0026;
-        eff_kd = 0.070;
-        upper_bound = 20; // Modified value for USV
-        lower_bound = -20; // Modified value for USV
-    }
-    else if (nav_speed < 6) {        
-        eff_kp = 0.35;
-        eff_ki = 0.0018;
-        eff_kd = 0.080;  
-        upper_bound = 20; // Modified value for USV
-        lower_bound = -20; // Modified value for USV
-    }
-    else if (nav_speed < 8) {        
-        eff_kp = 0.33;   
-        eff_ki = 0.0014;
-        eff_kd = 0.120;  
-        upper_bound = 20; // Modified value for USV
-        lower_bound = -20; // Modified value for USV
-    }
-    else if (nav_speed < 10) {            
-        eff_kp      = 0.24;
-        eff_ki      = 0.0010;
-        eff_kd      = 0.18;
-        upper_bound = 18; // Modified value for USV
-        lower_bound = -18; // Modified value for USV
-    }
-    else if (nav_speed < 12) {       
-        eff_kp      = 0.47;
-        eff_ki      = 0;
-        eff_kd      = 0.22;
-        upper_bound = 10; // Modified value for USV
-        lower_bound = -10; // Modified value for USV
-    }
-    else if (nav_speed < 15) {      
-        eff_kp      = 0.47;
-        eff_ki      = 0;
-        eff_kd      = 0.22;
-        upper_bound = 10; // Modified value for USV
-        lower_bound = -10; // Modified value for USV
-    }
-    else if (nav_speed < 18.0) {      
-        eff_kp      = 0.40;
-        eff_ki      = 0;
-        eff_kd      = 0.22;
-        upper_bound = 10; // Modified value for USV
-        lower_bound = -10; // Modified value for USV
-    }
-    else if (nav_speed < 20) {                             
-        eff_kp      = 0.33;
-        eff_ki      = 0;
-        eff_kd      = 0.22;
-        upper_bound = 10;
-        lower_bound = -10; // Modified value for USV
-    } else if (nav_speed < 22.5) {                             
-        eff_kp      = 0.33;
-        eff_ki      = 0;
-        eff_kd      = 0.22;
-        upper_bound = 10;
-        lower_bound = -7; // Modified value for USV
-    } else if (nav_speed < 25) {
-        eff_kp = 0.3;
         eff_ki = 0;
-        eff_kd = 0.22;
-        upper_bound = 7;
-        lower_bound = -5;
+        eff_kd = 0.060;  
+        upper_bound = 100; // Modified value for USV
+        lower_bound = -100; // Modified value for USV
     } else {
         eff_kp = 0.25;
         eff_ki = 0;

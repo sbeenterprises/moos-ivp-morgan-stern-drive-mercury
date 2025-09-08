@@ -4,7 +4,7 @@
 // FILE: alpha.moos
 //-------------------------------------------------
 
-ServerHost   = 192.168.143.10
+ServerHost   = 192.168.143.16
 ServerPort   = 9000
 Community    = alpha
 MOOSTimeWarp = 1
