@@ -136,8 +136,8 @@ double PIDController::CalculateSpeed(double desired, double current, double dt)
     output = ff + fb;
     if (output < 0.0) {
         output = 0.0; // no negative thrust
-    } else if (output > 20.0) {
-        output = 20.0; // max thrust of 20% for testing
+    } else if (output > 60.0) {
+        output = 60.0; // max thrust of 20% for testing
     }
     //upper_bound = 40;                             // for AppCasting table
     //lower_bound = 0;
@@ -179,18 +179,18 @@ double PIDController::Calculate(double desired, double current, double dt) {
     //Gain Scheduling
 
     
-    if (nav_speed < 8) {             
+    if (nav_speed < 5) {             
         eff_kp = 0.55;
         eff_ki = 0;
         eff_kd = 0.060;  
         upper_bound = 100; // Modified value for USV
         lower_bound = -100; // Modified value for USV
     } else {
-        eff_kp = 0.25;
+        eff_kp = 0.6;
         eff_ki = 0;
         eff_kd = 0.2;
-        upper_bound = 7;
-        lower_bound = -5;
+        upper_bound = 100;
+        lower_bound = -100;
     }
 
     output = eff_kp * error + eff_ki * integral + eff_kd * derivative;
