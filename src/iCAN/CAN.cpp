@@ -7,6 +7,8 @@
 
 #include <iterator>
 #include <cstring>
+#include <thread>
+#include <chrono>
 #include "MBUtils.h"
 #include "ACTable.h"
 #include "CAN.h"
@@ -20,6 +22,7 @@ CAN::CAN()
 {
   m_desired_rudder = 0.0;
   m_desired_thrust = 0.0;
+  m_current_trim = 0.0;
   m_can_socket = -1;
 }
 
@@ -64,6 +67,10 @@ bool CAN::OnNewMail(MOOSMSG_LIST &NewMail)
      else if(key == "DESIRED_RUDDER") {
        m_desired_rudder = msg.GetDouble();
        sendRudderCommand(m_desired_rudder);
+     }
+     else if(key == "TRIM") {
+       double trim_value = msg.GetDouble();
+       handleTrimCommand(trim_value);
      }
      else if(key != "APPCAST_REQ") // handled by AppCastingMOOSApp
        reportRunWarning("Unhandled Mail: " + key);
@@ -146,6 +153,7 @@ void CAN::registerVariables()
   AppCastingMOOSApp::RegisterVariables();
   Register("DESIRED_RUDDER", 0);
   Register("DESIRED_THRUST", 0);
+  Register("TRIM", 0);
 }
 
 
@@ -167,6 +175,7 @@ bool CAN::buildReport()
   // Current Values
   m_msgs << "Current Rudder Command: " << m_desired_rudder << "%" << endl;
   m_msgs << "Current Thrust Command: " << m_desired_thrust << "%" << endl;
+  m_msgs << "Current TRIM Value: " << m_current_trim << endl;
   m_msgs << endl;
 
   // CAN Frame Information
@@ -523,5 +532,76 @@ std::string CAN::getThrustCANFrame(double thrust_value)
   };
 
   return thrust_commands[percentage];
+}
+
+//---------------------------------------------------------
+// Procedure: handleTrimCommand()
+
+void CAN::handleTrimCommand(double trim_value)
+{
+  if(trim_value == 1.0) {
+    m_current_trim = 1.0;
+    // Execute trim sequence for TRIM=1 in background thread
+    std::thread trim_thread(&CAN::executeTrimSequence, this, "0CFF08D0#F1FFFFFFFFFFFFFF");
+    trim_thread.detach();
+  }
+  else if(trim_value == -1.0) {
+    m_current_trim = -1.0;
+    // Execute trim sequence for TRIM=-1 in background thread
+    std::thread trim_thread(&CAN::executeTrimSequence, this, "0CFF08D0#F4FFFFFFFFFFFFFF");
+    trim_thread.detach();
+  }
+}
+
+//---------------------------------------------------------
+// Procedure: executeTrimSequence()
+
+void CAN::executeTrimSequence(const std::string& can_command)
+{
+  if(m_can_socket == -1) {
+    reportRunWarning("CAN socket not initialized for trim sequence");
+    return;
+  }
+
+  // Send the CAN command 12 times with 100ms intervals
+  for(int i = 0; i < 12; i++) {
+    // Parse CAN frame from command string
+    struct can_frame frame;
+    
+    // Extract CAN ID and data from string format "ID#DATA"
+    size_t hash_pos = can_command.find('#');
+    if(hash_pos == std::string::npos) {
+      reportRunWarning("Invalid CAN command format for trim sequence");
+      return;
+    }
+    
+    std::string id_str = can_command.substr(0, hash_pos);
+    std::string data_str = can_command.substr(hash_pos + 1);
+    
+    // Convert hex string to CAN ID
+    frame.can_id = std::stoul(id_str, nullptr, 16) | CAN_EFF_FLAG;
+    frame.can_dlc = data_str.length() / 2;
+    
+    // Convert hex data string to bytes
+    for(size_t j = 0; j < frame.can_dlc && j < 8; j++) {
+      std::string byte_str = data_str.substr(j * 2, 2);
+      frame.data[j] = static_cast<__u8>(std::stoul(byte_str, nullptr, 16));
+    }
+    
+    // Send the frame
+    int bytes_sent = write(m_can_socket, &frame, sizeof(struct can_frame));
+    if(bytes_sent < 0) {
+      reportRunWarning("Failed to send trim CAN frame " + std::to_string(i + 1));
+    }
+    
+    // Wait 100ms before next command (except for last iteration)
+    if(i < 11) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+  }
+  
+  // Set TRIM back to 0 after sequence is complete
+  m_current_trim = 0.0;
+  Notify("TRIM", 0.0);
 }
 

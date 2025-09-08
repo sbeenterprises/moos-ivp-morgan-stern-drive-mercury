@@ -39,12 +39,15 @@ class CAN : public AppCastingMOOSApp
    void sendThrustCommand(double thrust_value);
    std::string getThrustCANFrame(double thrust_value);
    std::string getGearCommand(double thrust_value);
+  void handleTrimCommand(double trim_value);
+  void executeTrimSequence(const std::string& can_command);
 
  private: // Configuration variables
 
  private: // State variables
   double m_desired_rudder;
   double m_desired_thrust;
+  double m_current_trim;
   int m_can_socket;
   struct sockaddr_can m_can_addr;
   struct ifreq m_ifr;

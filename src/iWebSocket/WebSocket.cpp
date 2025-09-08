@@ -304,6 +304,13 @@ void WebSocket::initializeMessageHandlers()
   m_messageHandlers["HEADING_KP"] = &WebSocket::handleHeadingKp;
   m_messageHandlers["HEADING_KI"] = &WebSocket::handleHeadingKi;
   m_messageHandlers["HEADING_KD"] = &WebSocket::handleHeadingKd;
+  m_messageHandlers["TRIM"] = &WebSocket::handleTrim;
+}
+
+void WebSocket::handleTrim(const std::string& value)
+{
+  double value_trim = std::stod(value);
+  Notify("TRIM", value_trim);
 }
 
 void WebSocket::handleControleManual(const std::string& value)

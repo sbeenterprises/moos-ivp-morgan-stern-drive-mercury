@@ -82,6 +82,7 @@ class WebSocket : public AppCastingMOOSApp
   void handleHeadingKp(const std::string& value);
   void handleHeadingKi(const std::string& value);
   void handleHeadingKd(const std::string& value);
+  void handleTrim(const std::string& value);
   
 };
 
