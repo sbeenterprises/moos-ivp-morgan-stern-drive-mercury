@@ -70,7 +70,7 @@ bool CAN::OnNewMail(MOOSMSG_LIST &NewMail)
      }
      else if(key == "TRIM") {
        double trim_value = msg.GetDouble();
-       handleTrimCommand(trim_value);
+       //handleTrimCommand(trim_value); // --- TRIM DISABLED ---
      }
      else if(key != "APPCAST_REQ") // handled by AppCastingMOOSApp
        reportRunWarning("Unhandled Mail: " + key);
