@@ -421,18 +421,29 @@ void CANReceiver::parseIC1(const can_frame& frame)
 }
 
 //---------------------------------------------------------
-// Procedure: parseVEP() - Battery Potential
+// Procedure: parseVEP() - Battery Potential (SPN 168)
+// PGN 65271 (0xFEF7) - VEP1
+// Escala: 0.05 V/bit, LSB-first em bytes 1–2
 
 void CANReceiver::parseVEP(const can_frame& frame)
 {
   m_vep_count++;
 
-  if(frame.can_dlc >= 8) {
-    // SPN 168 - Battery Potential (bytes 6-7)
-    uint16_t voltage_raw = (frame.data[6] << 8) | frame.data[5];
-    if(voltage_raw != 0xFFFF) { // 0xFFFF = not available
-      m_battery_potential = voltage_raw * 0.05; // 0.05V per bit
-      Notify("ENGINE_BATTERY_VOLTAGE", m_battery_potential);
+  // Para SPN 168 precisamos ao menos dos dois primeiros bytes
+  if (frame.can_dlc >= 2) {
+    // SPN 168: bytes 1–2 (índices 0 e 1), LSB-first
+    uint16_t raw = static_cast<uint16_t>(frame.data[0])
+                 | (static_cast<uint16_t>(frame.data[1]) << 8);
+
+    // 0xFFFF = Not Available (J1939). Também descartamos 0x0000 (0.00 V) e ruídos fora da faixa.
+    if (raw != 0xFFFF && raw != 0x0000) {
+      double volts = raw * 0.05;  // 0.05 V/bit
+
+      // Sanity check: manter apenas tensões plausíveis (10–30 V cobre sistemas 12/24 V)
+      if (volts >= 10.0 && volts <= 30.0) {
+        m_battery_potential = volts;
+        Notify("ENGINE_BATTERY_VOLTAGE", m_battery_potential);
+      }
     }
   }
 }

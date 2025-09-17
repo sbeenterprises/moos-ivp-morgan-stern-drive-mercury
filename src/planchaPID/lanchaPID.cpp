@@ -377,7 +377,7 @@ bool lanchaPID::OnNewMail(MOOSMSG_LIST &NewMail)
        headingController.resetIntegral();
        speedController.resetIntegral();
        }
-     else if(key == "MOOS_MANUAL_OVERIDE") 
+     else if(key == "MOOS_MANUAL_OVERRIDE") 
        moos_manual_overide = msg.GetString();  
      else if(key == "CONSTANT_HEADING") 
        constant_heading = msg.GetString();  
