@@ -31,7 +31,7 @@ ProcessConfig = ANTLER
   Run = pNodeReporter	@ NewConsole = false
   Run = pRealm	      @ NewConsole = false
   Run = iCAN	      @ NewConsole = false
-  Run = iCANReceiver	      @ NewConsole = false
+  Run = iCANRec	      @ NewConsole = false
   //Run = iNMEA	      @ NewConsole = false
   //Run = iSignalK	      @ NewConsole = false
   Run = iWebSocket	      @ NewConsole = false
@@ -39,9 +39,9 @@ ProcessConfig = ANTLER
 
 }
 
-// iCANReceiver config block
+// iCANRec config block
 
-ProcessConfig = iCANReceiver
+ProcessConfig = iCANRec
 {
    AppTick   = 20
    CommsTick = 20
