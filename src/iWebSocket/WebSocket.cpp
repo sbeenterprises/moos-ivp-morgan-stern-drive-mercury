@@ -9,10 +9,11 @@
 #include <jsoncpp/json/json.h>     // Biblioteca jsoncpp
 #include <sstream>
 #include <iostream>
+#include <algorithm>
 #include "MBUtils.h"
 #include "ACTable.h"
 #include "MOOS/libMOOSGeodesy/MOOSGeodesy.h"
-#include "../MOOSGeodesy.cpp" 
+#include "../MOOSGeodesy.cpp"
 #include "WebSocket.h"
 
 using namespace std;
@@ -55,34 +56,50 @@ std::string wpt_stat;
 WebSocket::WebSocket()
 {
   msg_recebida = "";
-  m_webSocket = nullptr;
-  m_clientConnected = false;
   initializeMessageHandlers();
 }
 
-// Implement the new methods
-void WebSocket::SetWebSocket(ix::WebSocket* ws)
+// Implement the new methods for multiple clients
+void WebSocket::AddWebSocket(ix::WebSocket* ws)
 {
-  m_webSocket = ws;
-  m_clientConnected = (ws != nullptr);
+  if (ws != nullptr) {
+    m_webSockets.push_back(ws);
+  }
 }
 
-bool WebSocket::IsClientConnected() const
+void WebSocket::RemoveWebSocket(ix::WebSocket* ws)
 {
-  return m_clientConnected;
+  auto it = std::find(m_webSockets.begin(), m_webSockets.end(), ws);
+  if (it != m_webSockets.end()) {
+    m_webSockets.erase(it);
+  }
+}
+
+bool WebSocket::HasConnectedClients() const
+{
+  return !m_webSockets.empty();
+}
+
+size_t WebSocket::GetConnectedClientCount() const
+{
+  return m_webSockets.size();
 }
 
 void WebSocket::SendMessage(const std::string& message, bool binary)
 {
-  if (m_webSocket != nullptr)
+  if (m_webSockets.empty())
   {
-    m_webSocket->send(message, binary);
-    // You could add logging here if needed
-    // reportEvent("Message sent: " + message);
+    reportRunWarning("Attempted to send message but no WebSocket clients connected");
+    return;
   }
-  else
+
+  // Broadcast message to all connected clients
+  for (auto* ws : m_webSockets)
   {
-    reportRunWarning("Attempted to send message but WebSocket is not connected");
+    if (ws != nullptr)
+    {
+      ws->send(message, binary);
+    }
   }
 }
 
@@ -328,10 +345,8 @@ bool WebSocket::buildReport()
   actab << "Address" << "0.0.0.0";
   actab << "Port"    << "8000";
   actab << "Status"  << "Running";
+  actab << "Connected Clients" << std::to_string(GetConnectedClientCount());
   actab << "Mensagem Recebida"  << msg_recebida;
-  // Caso futuramente você tenha acesso dinâmico, por exemplo,
-  // ao número de clientes conectados, adicione:
-  // actab << "Clients" << std::to_string(numeroDeClientes);
 
   m_msgs << actab.getFormattedString();
 
@@ -484,11 +499,26 @@ void WebSocket::handleAutonomousWaypoints(const std::string& value)
 
 void WebSocket::handleAutonomousStart(const std::string& value)
 {
-  if (value == "true") {
+  size_t hashPos = value.find('#');
+  if (hashPos != std::string::npos) {
+    std::string boolPart = value.substr(0, hashPos);
+    std::string speedPart = value.substr(hashPos + 1);
+
+    if (boolPart == "true") {
+      Notify("WAYPOINT", "true");
+      Notify("MOOS_MANUAL_OVERRIDE", "false");
+
+      try {
+        double value_speed = std::stod(speedPart);
+        Notify("WPT_UPDATE", "speed=" + std::to_string(value_speed));
+      } catch (const std::exception& e) {
+        std::cerr << "Error parsing speed value: " << speedPart << std::endl;
+      }
+    }
+  } else if (value == "true") {
     Notify("WAYPOINT", "true");
-    Notify("MOOS_MANUAL_OVERIDE", "false");
-    Notify("DESIRED_GEAR", "A");
-  } 
+    Notify("MOOS_MANUAL_OVERRIDE", "false");
+  }
 }
 
 void WebSocket::handleAutonomousStop(const std::string& value)

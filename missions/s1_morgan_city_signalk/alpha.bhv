@@ -11,7 +11,7 @@ Behavior = BHV_Waypoint
   pwt       = 100
   condition = WAYPOINT = true
   endflag   = WAYPOINT = false
-  endflag   = MOOS_MANUAL_OVERIDE = true
+  endflag   = MOOS_MANUAL_OVERRIDE = true
   endflag   = DESIRED_THRUST = 0 //zero thrust e rudder por segurança
   endflag   = DESIRED_RUDDER = 0
 

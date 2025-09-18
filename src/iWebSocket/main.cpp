@@ -41,14 +41,6 @@ int main(int argc, char *argv[])
 
       if (msg->type == ix::WebSocketMessageType::Open)
       {
-          // Check if a client is already connected
-          if (WebSocket.IsClientConnected())
-          {
-              std::cout << "Connection rejected: Another client is already connected" << std::endl;
-              webSocket.close(1000, "Only one client allowed at a time");
-              return;
-          }
-
           std::cout << "New connection" << std::endl;
 
           // A connection state object is available, and has a default id
@@ -66,8 +58,9 @@ int main(int argc, char *argv[])
               std::cout << "\t" << it.first << ": " << it.second << std::endl;
           }
 
-          // Set the active WebSocket connection when a client connects
-          WebSocket.SetWebSocket(&webSocket);
+          // Add the new WebSocket connection to the list
+          WebSocket.AddWebSocket(&webSocket);
+          std::cout << "Total connected clients: " << WebSocket.GetConnectedClientCount() << std::endl;
 
       } 
       else if (msg->type == ix::WebSocketMessageType::Message)
@@ -103,8 +96,9 @@ int main(int argc, char *argv[])
       else if (msg->type == ix::WebSocketMessageType::Close)
       {
           std::cout << "Client disconnected" << std::endl;
-          // Clear the WebSocket pointer when client disconnects
-          WebSocket.SetWebSocket(nullptr);
+          // Remove the WebSocket from the list when client disconnects
+          WebSocket.RemoveWebSocket(&webSocket);
+          std::cout << "Total connected clients: " << WebSocket.GetConnectedClientCount() << std::endl;
       }
   });
 

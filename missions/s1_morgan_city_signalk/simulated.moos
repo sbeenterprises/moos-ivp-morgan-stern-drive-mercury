@@ -33,6 +33,15 @@ ProcessConfig = ANTLER
   //Run = iRaspberryServer	      @ NewConsole = false
   Run = iNMEA	      @ NewConsole = false
   Run = iWebSocket	      @ NewConsole = false
+  Run = iCANRec	      @ NewConsole = false
+}
+
+// iCANRec config block
+
+ProcessConfig = iCANRec
+{
+   AppTick   = 20
+   CommsTick = 20
 }
 
 // iRaspberryServer config block

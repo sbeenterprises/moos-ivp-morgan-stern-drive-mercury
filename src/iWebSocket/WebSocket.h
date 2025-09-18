@@ -14,6 +14,7 @@
 #include <ixwebsocket/IXUserAgent.h>
 #include <iostream>
 #include <map>
+#include <vector>
 #include "MOOS/libMOOSGeodesy/MOOSGeodesy.h"
 
 
@@ -27,16 +28,20 @@ class WebSocket : public AppCastingMOOSApp
    // Add a method to send messages
    void SendMessage(const std::string& message, bool binary = false);
    
-   // Add a method to set the current web socket connection
-   void SetWebSocket(ix::WebSocket* ws);
-   
+   // Add methods to manage multiple web socket connections
+   void AddWebSocket(ix::WebSocket* ws);
+   void RemoveWebSocket(ix::WebSocket* ws);
+
    // Add wrapper methods for the protected MOOSApp Notify methods
    bool NotifyMOOS(const std::string& key, const std::string& value);
    bool NotifyMOOS(const std::string& key, double value);
    bool NotifyMOOS(const std::string& key, bool value);
-   
-   // Method to check if a client is already connected
-   bool IsClientConnected() const;
+
+   // Method to check if any clients are connected
+   bool HasConnectedClients() const;
+
+   // Method to get number of connected clients
+   size_t GetConnectedClientCount() const;
    
 
  protected: // Standard MOOSApp functions to overload  
@@ -54,8 +59,7 @@ class WebSocket : public AppCastingMOOSApp
  private: // Configuration variables
 
  private: // State variables
-  ix::WebSocket* m_webSocket; // Store the current web socket
-  bool m_clientConnected; // Track if a client is already connected
+  std::vector<ix::WebSocket*> m_webSockets; // Store multiple web socket connections
   CMOOSGeodesy m_geodesy;
   
   // State machine for message handling
