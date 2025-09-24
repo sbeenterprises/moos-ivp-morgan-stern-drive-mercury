@@ -3,6 +3,7 @@
 initialize   DEPLOY = false
 initialize   RETURN = false
 initialize   WAYPOINT = false
+initialize   STATIONING = false
 	
 //----------------------------------------------
 Behavior = BHV_Waypoint
@@ -33,3 +34,32 @@ Behavior = BHV_Waypoint
     visual_hints = vertex_size=5, edge_size=1
 }
 
+//----------------------------------------------
+ Behavior = BHV_StationKeep
+ {
+   // General Behavior Parameters
+   // ---------------------------
+   name         = station-keep         // example
+   pwt          = 150                   // put 150 to have a priority higher than BHV_Waypoint
+   condition = STATIONING = true
+   endflag   = STATIONING = false
+   updates   = STATION_UPDATES
+
+
+   // Parameters specific to this behavior
+   // ------------------------------------
+      center_activate = false   // default
+   hibernation_radius = -1     // default
+         inner_radius = 15       
+         outer_radius = 30      
+         outer_speed  = 1    
+       transit_speed  = 5    
+       station_pt = 715,1742 
+           swing_time = 0       // default
+
+         visual_hints = vertex_size  = 1           // default
+         visual_hints = edge_color   = light_blue  // default
+         visual_hints = edge_size    = 1           // default
+         visual_hints = label_color  = black      
+         visual_hints = vertex_color = blue 
+ }

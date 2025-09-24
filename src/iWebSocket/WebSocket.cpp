@@ -48,6 +48,7 @@ double engine_battery_voltage = 0;
 std::string ivphelm_state;
 std::string ivphelm_allstop;
 std::string wpt_stat;
+std::string view_point;
 
 
 //---------------------------------------------------------
@@ -182,6 +183,8 @@ bool WebSocket::OnNewMail(MOOSMSG_LIST &NewMail)
       engine_intake_manifold_pressure = msg.GetDouble();
     else if(key == "ENGINE_BATTERY_VOLTAGE")
       engine_battery_voltage = msg.GetDouble();
+    else if(key == "VIEW_POINT")
+      view_point = msg.GetString();
     else if(key != "APPCAST_REQ") // handled by AppCastingMOOSApp
       reportRunWarning("Unhandled Mail: " + key);
   }
@@ -236,6 +239,7 @@ bool WebSocket::Iterate()
   SendMessage("WPT_INDEX=" + std::to_string(wpt_index)); // Sends the way point index
   SendMessage("IVPHELM_ALLSTOP=" + ivphelm_allstop); // Sends the all stop state
   SendMessage("WPT_STAT=" + wpt_stat); // Sends the way point state
+  SendMessage("VIEW_POINT=" + view_point); // Sends the view point
   SendMessage("ENGINE_ACCELERATOR_PEDAL_POSITION=" + std::to_string(engine_accelerator_pedal_position)); // Sends the engine accelerator pedal position
   SendMessage("ENGINE_PERCENT_LOAD=" + std::to_string(engine_percent_load)); // Sends the engine percent load
   SendMessage("ENGINE_SPEED=" + std::to_string(engine_speed)); // Sends the engine speed

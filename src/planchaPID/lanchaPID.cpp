@@ -47,6 +47,7 @@ double output = 0;
 std::string deploy; //deploy
 std::string moos_manual_overide;
 std::string moos_manual_override;
+std::string stationing; // verify station keep
 
 std::string constant_heading; //Variável para verificar se o rumo constante é verdadeiro
 double setpoint_heading; //Variável em que eu coloco o setpoint de rumo
@@ -389,6 +390,8 @@ bool lanchaPID::OnNewMail(MOOSMSG_LIST &NewMail)
         return_var = msg.GetString();
       else if(key == "NAV_COG")
         nav_cog = msg.GetDouble();
+      else if(key == "STATIONING")
+        stationing = msg.GetString();
      else if(key != "APPCAST_REQ") // handled by AppCastingMOOSApp
        reportRunWarning("Unhandled Mail: " + key);
    }
@@ -460,7 +463,7 @@ bool lanchaPID::Iterate()
   //Publico DESIRED_RUDDER e DESIRED_THRUST
   //Just publish when waypoint behavior is true and manual override is false
   //BHV_Waypoint is active 
-  if (waypoint == "true" && moos_manual_overide == "false") {
+  if (waypoint == "true" && moos_manual_overide == "false" || stationing == "true") {
     Notify("DESIRED_THRUST", desired_thrust);
     Notify("DESIRED_RUDDER", desired_rudder);
   } 
@@ -546,8 +549,7 @@ void lanchaPID::registerVariables()
   Register("SETPOINT_HEADING",0);
   Register("WAYPOINT",0);
   Register("RETURN",0);
-  
-
+  Register("STATIONING",0);
 }
 
 //------------------------------------------------------------

@@ -270,8 +270,8 @@ ProcessConfig = pMarineViewer
   button_one = DEPLOY # DEPLOY=true
   button_one = MOOS_MANUAL_OVERRIDE=false # RETURN=false
   button_two = RETURN # RETURN=true
-  button_three = SLOWER # WPT_UPDATE=speed=1.5
-  button_four = FASTER # WPT_UPDATE=speed=3.5
+  button_three = STATIONING_TRUE # STATIONING=true
+  button_four = STATIONING_FALSE # STATIONING=false
 
   action  = MENU_KEY=deploy # DEPLOY = true # RETURN = false
   action+ = MENU_KEY=deploy # MOOS_MANUAL_OVERRIDE=false
