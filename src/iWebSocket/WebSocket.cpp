@@ -382,6 +382,7 @@ void WebSocket::initializeMessageHandlers()
   m_messageHandlers["HEADING_KI"] = &WebSocket::handleHeadingKi;
   m_messageHandlers["HEADING_KD"] = &WebSocket::handleHeadingKd;
   m_messageHandlers["TRIM"] = &WebSocket::handleTrim;
+  m_messageHandlers["STATION_KEEP_WAYPOINT"] = &WebSocket::handleStationKeepWaypoint;
 }
 
 void WebSocket::handleTrim(const std::string& value)
@@ -631,5 +632,108 @@ void WebSocket::handleHeadingKd(const std::string& value)
 {
   double value_heading_kd = std::stod(value);
   Notify("HEADING_KD", value_heading_kd);
+}
+
+void WebSocket::handleStationKeepWaypoint(const std::string& value)
+{
+  // Parse the value to check if it's TRUE or FALSE
+  size_t hashPos = value.find('#');
+
+  if (hashPos != std::string::npos) {
+    // Format: TRUE#INNER_RADIUS=50#OUTER_RADIUS=100#COORDS=29.726252,-91.165742
+    std::string boolPart = value.substr(0, hashPos);
+
+    if (boolPart == "TRUE") {
+      // Extract parameters
+      std::string params = value.substr(hashPos + 1);
+
+      double inner_radius = 50.0;  // default
+      double outer_radius = 100.0; // default
+      double local_x = 0.0;
+      double local_y = 0.0;
+
+      // Parse INNER_RADIUS
+      size_t innerPos = params.find("INNER_RADIUS=");
+      if (innerPos != std::string::npos) {
+        size_t startPos = innerPos + 13; // length of "INNER_RADIUS="
+        size_t endPos = params.find('#', startPos);
+        std::string innerStr = (endPos != std::string::npos) ?
+                                params.substr(startPos, endPos - startPos) :
+                                params.substr(startPos);
+        try {
+          inner_radius = std::stod(innerStr);
+        } catch (const std::exception& e) {
+          std::cerr << "Error parsing inner_radius: " << innerStr << std::endl;
+        }
+      }
+
+      // Parse OUTER_RADIUS
+      size_t outerPos = params.find("OUTER_RADIUS=");
+      if (outerPos != std::string::npos) {
+        size_t startPos = outerPos + 13; // length of "OUTER_RADIUS="
+        size_t endPos = params.find('#', startPos);
+        std::string outerStr = (endPos != std::string::npos) ?
+                                params.substr(startPos, endPos - startPos) :
+                                params.substr(startPos);
+        try {
+          outer_radius = std::stod(outerStr);
+        } catch (const std::exception& e) {
+          std::cerr << "Error parsing outer_radius: " << outerStr << std::endl;
+        }
+      }
+
+      // Parse COORDS and convert to local
+      size_t coordsPos = params.find("COORDS=");
+      if (coordsPos != std::string::npos) {
+        double lat_origin = 29.71970895316288;
+        double lon_origin = -91.14705165281887;
+
+        m_geodesy.Initialise(lat_origin, lon_origin);
+
+        size_t startPos = coordsPos + 7; // length of "COORDS="
+        size_t endPos = params.find('#', startPos);
+        std::string coordsStr = (endPos != std::string::npos) ?
+                                 params.substr(startPos, endPos - startPos) :
+                                 params.substr(startPos);
+
+        size_t commaPos = coordsStr.find(',');
+        if (commaPos != std::string::npos) {
+          std::string latStr = coordsStr.substr(0, commaPos);
+          std::string lonStr = coordsStr.substr(commaPos + 1);
+
+          try {
+            double orig_lat = std::stod(latStr);
+            double orig_lon = std::stod(lonStr);
+
+            m_geodesy.LatLong2LocalUTM(orig_lat, orig_lon, local_y, local_x);
+          } catch (const std::exception& e) {
+            std::cerr << "Error parsing coordinates: " << coordsStr << std::endl;
+          }
+        }
+      }
+
+      //Activate the StationKeep behavior
+      Notify("STATIONING", "true");
+
+      // Send STATION_UPDATES
+      Notify("STATION_UPDATES", "inner_radius=" + std::to_string(inner_radius));
+      Notify("STATION_UPDATES", "outer_radius=" + std::to_string(outer_radius));
+
+      std::ostringstream oss;
+      oss << "station_pt=" << std::fixed << std::setprecision(1) << local_x << "," << local_y;
+      Notify("STATION_UPDATES", oss.str());
+
+      Notify("STATION_UPDATES", "pwt=250");
+
+      // Send WPT_UPDATE
+      Notify("WPT_UPDATE", "pwt=50");
+    }
+  } else if (value == "FALSE") {
+    //Deactivate the StaionKeep behavior
+    Notify("STATIONING", "false");
+    // Send updates for FALSE case
+    Notify("STATION_UPDATES", "pwt=50");
+    Notify("WPT_UPDATE", "pwt=250");
+  }
 }
 

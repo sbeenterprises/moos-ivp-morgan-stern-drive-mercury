@@ -154,7 +154,7 @@ ProcessConfig = uSimMarineV22
   AppTick  	= 4
   CommsTick	= 4
 
-  start_pos     = x=0, y=0, heading=0, speed=0
+  start_pos     = x=-1789, y=506, heading=0, speed=0
   prefix        = NAV
   turn_rate     = 95
   thrust_map    = 0:0, 20:3, 40:6, 60:9, 80:12, 100:15

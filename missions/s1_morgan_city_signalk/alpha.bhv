@@ -40,7 +40,7 @@ Behavior = BHV_Waypoint
    // General Behavior Parameters
    // ---------------------------
    name         = station-keep         // example
-   pwt          = 150                   // put 150 to have a priority higher than BHV_Waypoint
+   pwt          = 50                   // put 150 to have a priority higher than BHV_Waypoint
    condition = STATIONING = true
    endflag   = STATIONING = false
    updates   = STATION_UPDATES
@@ -53,7 +53,7 @@ Behavior = BHV_Waypoint
          inner_radius = 15       
          outer_radius = 30      
          outer_speed  = 1    
-       transit_speed  = 5    
+       transit_speed  = 0.1    
        station_pt = 715,1742 
            swing_time = 0       // default
 
