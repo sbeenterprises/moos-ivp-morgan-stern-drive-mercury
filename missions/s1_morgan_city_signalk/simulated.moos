@@ -34,6 +34,16 @@ ProcessConfig = ANTLER
   Run = iNMEA	      @ NewConsole = false
   Run = iWebSocket	      @ NewConsole = false
   Run = iCANRec	      @ NewConsole = false
+  Run = pContactSpawn	      @ NewConsole = false
+  Run = pContactMgrV20 @ NewConsole = false
+}
+
+// pContactSpawn Config Block
+
+ProcessConfig = pContactSpawn
+{
+  AppTick 	= 1
+  CommsTick = 1 
 }
 
 // iCANRec config block
@@ -175,6 +185,7 @@ ProcessConfig = pHelmIvP
 
   ok_skew = any
   start_in_drive = false
+  hold_on_apps = pContactMgrV20
 }
 
 //------------------------------------------
@@ -293,3 +304,37 @@ ProcessConfig = pNodeReporter
   platform_length = 100
 }
 
+//--------------------------------------------------------
+// pContactMgrV20 Config Block
+
+ProcessConfig = pContactMgrV20
+{
+  AppTick   = 2
+  CommsTick = 2
+
+  decay = 30,60
+
+	app_logging = true
+	
+  alert_verbose = true
+
+	contact_local_coords = force_lat_lon
+	
+  contact_max_age   = 35
+  display_radii     = true
+	display_radii_id  = avd
+  alert_range_color = gray70
+  cpa_range_color   = gray30
+
+	alert = id=avdcol_, var=CONTACT_INFO, val="name=$[VNAME] # contact=$[VNAME]"
+  alert = id=avdcol_, alert_range=1000, cpa_range=500
+	
+	//match_region = pts = {60,-40 : 60,-160 : 150,-160 : 180,-100 : 150,-40}
+	//match_type = kayak, uuv
+
+  disable_var = XYZ_DISABLE_TARGET
+  enable_var  = XYZ_REENABLE_TARGET
+	
+	post_closest_range   = true
+  hold_alerts_for_helm = true
+}

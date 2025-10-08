@@ -21,9 +21,9 @@ ContactSpawn::ContactSpawn()
   // Configuration variables
   m_spawn_distance = 500.0;    // 500 meters ahead
   m_contact_speed = 3.0;       // 5 m/s
-  m_contact_name = "target";   // Default contact name
+  m_contact_name = "CONTATO_TESTE";   // Default contact name
   m_contact_type = "ship";     // Default contact type
-  m_spawn_on_startup = false;  // Don't spawn on startup by default
+  m_spawn_on_startup = true;   // Spawn on startup by default
   m_spawn_time = 0.0;
   m_spawn_trigger = "SPAWN_HEADON"; // Default trigger variable
 
@@ -295,7 +295,7 @@ void ContactSpawn::postNodeReport()
   node_report += "HDG=" + doubleToString(m_contact_heading, 2) + ",";
   node_report += "YAW=" + doubleToString(m_contact_heading, 2) + ",";
   node_report += "DEPTH=0.0,";
-  node_report += "LENGTH=10.0,";
+  node_report += "LENGTH=90.0,";
   node_report += "MODE=SPAWNED";
   
   Notify("NODE_REPORT", node_report);
@@ -337,7 +337,7 @@ void ContactSpawn::cleanContact()
 //---------------------------------------------------------
 // Procedure: parseSpawnParameters()
 //            Parses parameters from SPAWN_CONTACT string
-//            Format: "heading=RUMO,relative_bearing=MARCACAORELATIVA,distance=DISTANCIA,speed=VELOCIDADE"
+//            Format: "heading=RUMO,relative_bearing=MARCACAORELATIVA,distance=DISTANCIA,speed=VELOCIDADE,name=NOME"
 bool ContactSpawn::parseSpawnParameters(const string& params, double& heading, double& relative_bearing, double& distance, double& speed)
 {
   // Initialize values
@@ -345,19 +345,19 @@ bool ContactSpawn::parseSpawnParameters(const string& params, double& heading, d
   relative_bearing = 0.0;
   distance = 0.0;
   speed = 0.0;
-  
+
   // Split parameters by comma
   vector<string> kvpairs = parseString(params, ',');
-  
+
   for(unsigned int i = 0; i < kvpairs.size(); i++) {
     string kvpair = kvpairs[i];
     vector<string> parts = parseString(kvpair, '=');
-    
+
     if(parts.size() != 2) continue;
-    
+
     string key = tolower(stripBlankEnds(parts[0]));
     string value = stripBlankEnds(parts[1]);
-    
+
     if(key == "heading") {
       heading = atof(value.c_str());
     }
@@ -370,13 +370,16 @@ bool ContactSpawn::parseSpawnParameters(const string& params, double& heading, d
     else if(key == "speed") {
       speed = atof(value.c_str());
     }
+    else if(key == "name") {
+      m_contact_name = value;
+    }
   }
-  
+
   // Validate parameters
   if(distance <= 0 || speed < 0) {
     return false;
   }
-  
+
   return true;
 }
 
