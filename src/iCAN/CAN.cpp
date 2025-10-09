@@ -62,6 +62,11 @@ bool CAN::OnNewMail(MOOSMSG_LIST &NewMail)
        cout << "great!";
      else if(key == "DESIRED_THRUST") {
        m_desired_thrust = msg.GetDouble();
+       //Limitation to collision avoidance tests
+       if (m_desired_thrust > 1) {
+         m_desired_thrust = 1;
+       }
+
        sendThrustCommand(m_desired_thrust);
      }
      else if(key == "DESIRED_RUDDER") {
