@@ -36,6 +36,7 @@ ProcessConfig = ANTLER
   Run = iCANRec	      @ NewConsole = false
   Run = pContactSpawn	      @ NewConsole = false
   Run = pContactMgrV20 @ NewConsole = false
+  Run = iMOOSGateway  @ NewConsole = false
 }
 
 // pContactSpawn Config Block
@@ -337,4 +338,21 @@ ProcessConfig = pContactMgrV20
 	
 	post_closest_range   = true
   hold_alerts_for_helm = true
+}
+
+//------------------------------------------
+// iMOOSGateway config block
+
+ProcessConfig = iMOOSGateway
+{
+  AppTick  	= 4
+  CommsTick	= 4
+
+  tcp_port = 9501
+	
+	// comma separated moos variables to send to client                                                 
+  forward_to_client = NAV_X, NAV_Y, NAV_HEADING
+  
+  // comma separated moos variables to block from client                                                
+  block_from_client = DEPLOY
 }
