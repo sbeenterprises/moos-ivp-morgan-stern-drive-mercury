@@ -81,8 +81,8 @@ double nav_depth;
 int contador_ais;
 double heading_giro;
 double angulo_leme;
-char* saida_pCmd;
-char* saida_pData;
+char* saida_pCmd = nullptr;
+char* saida_pData = nullptr;
 int msg_debug;
 int current_gear;
 
@@ -362,28 +362,59 @@ bool DivisorNMEA::Iterate()
     //PARSING DA MSG AIS
     
   if (msg_string.substr(0,6) == "!AIVDM"){
+    Notify("AIS_RAW_MSG", msg_string);
+    reportEvent("AIVDM recebido: " + msg_string);
+
     try {
-      
+      // Debug dos campos da mensagem AIVDM
+      for (int i = 0; i < 7; i++) {
+        std::string field = libais::GetNthField(msg, i, ",");
+        std::string debug_msg = "Campo " + std::to_string(i) + ": [" + field + "]";
+        reportEvent(debug_msg);
+        Notify("AIS_FIELD_" + std::to_string(i), field);
+      }
+
       const std::string body(libais::GetBody(msg));
-      
+      Notify("AIS_BODY", body);
+      reportEvent("Body extraído: [" + body + "]");
+
       const int pad = libais::GetPad(msg);
+      Notify("AIS_PAD", pad);
+
+      if (pad == -1) {
+        std::string field6 = libais::GetNthField(msg, 6, ",");
+        reportRunWarning("GetPad retornou -1! Campo 6 bruto: [" + field6 + "] tamanho=" + std::to_string(field6.size()));
+      } else {
+        reportEvent("Pad extraído com sucesso: " + std::to_string(pad));
+      }
+
       //std::string chksum_block = libais::GetNthField(msg, 6, ",");
       //Removendo espacos em branco da string
       //remove(chksum_block.begin(), chksum_block.end(), ' ');
-      
+
       msg_debug = pad;
-      
+
       //std::string chksum_block(libais::GetNthField(msg, 6, ","));
       if (pad >= 0){
-        
+        reportEvent("Parsing mensagem AIS - Pad válido: " + std::to_string(pad));
+
         std::unique_ptr<libais::Ais1_2_3> msg(new libais::Ais1_2_3(body.c_str(), pad));
-        
+
+        std::string debug_info = "AIS Parse OK - MMSI:" + std::to_string(msg->mmsi) +
+                                 " SOG:" + std::to_string(msg->sog) +
+                                 " Lat:" + std::to_string(msg->position.lat_deg) +
+                                 " Lon:" + std::to_string(msg->position.lng_deg);
+        reportEvent(debug_info);
+
         //Caso o código MMSI do contato seja diferente do da lancha, adicionar no quadro de contatos
         // MMSI da lancha : 710400014
 
         //if (msg->mmsi != 710400014 && msg->mmsi != 0) { //Colocar aqui o MMSI da lancha
-        
+
+        reportEvent("Verificando MMSI: " + std::to_string(msg->mmsi) + " vs 710400014");
+
         if (msg->mmsi != 710400014) {
+          reportEvent("MMSI diferente! Publicando NODE_REPORT para MMSI: " + std::to_string(msg->mmsi));
           Notify("MESSAGE_ID", msg->message_id);
           Notify("MESSAGE_MMSI", msg->mmsi);
           Notify("MESSAGE_NAVSTATUS", msg->nav_status);
@@ -404,9 +435,9 @@ bool DivisorNMEA::Iterate()
           //Colocar a Latitude e Longitude de Origem
           //!!!!!!! ALTERAR ESSES DADOS SE MUDAR A CARTA NÁUTICA !!!!!!!!!!!!
 
-          // Rio de Janeiro
-          double lat_origin = -22.93335; //ALTERAR AQUI SE MUDAR A CARTA NÁUTICA !!!
-          double lon_origin = -43.136666665;
+          // Morgan City
+          double lat_origin = 29.71970895316288; //ALTERAR AQUI SE MUDAR A CARTA NÁUTICA !!!
+          double lon_origin = -91.14705165281887;
 
           // Salvador
           //double lat_origin = -12.97933112028696;
@@ -416,24 +447,38 @@ bool DivisorNMEA::Iterate()
 
           //Faz a conversão da Lat/Long para coordenadas locais
 
-          //m_geodesy.Initialise(lat_origin, lon_origin);
-          //m_geodesy.LatLong2LocalGrid(msg->position.lat_deg, msg->position.lng_deg, nav_y, nav_x);
+          m_geodesy.Initialise(lat_origin, lon_origin);
+          m_geodesy.LatLong2LocalGrid(msg->position.lat_deg, msg->position.lng_deg, nav_y, nav_x);
 
-          //string x = to_string(nav_x);
-          //string y = to_string(nav_y);
+          string x = to_string(nav_x);
+          string y = to_string(nav_y);
           
           //Coloquei essa lógica para não confundir contato AIS com o navio principal no início da execução
-          /*
-          if (contador_ais > 10) {
-            Notify("NODE_REPORT","NAME=contato_"+msg_mmsi+",TYPE=SHIP,TIME="+time_string+",LAT="+msg_lat+",LON="+msg_lon+",SPD="+msg_spd+",HDG="+msg_cog+",LENGTH=3.8,MODE=DRIVE,X="+x+",Y="+y);
-          }
-          contador_ais +=1;
-          */
+
+          std::string node_report = "NAME=contato_"+msg_mmsi+",TYPE=SHIP,TIME="+time_string+",LAT="+msg_lat+",LON="+msg_lon+",SPD="+msg_spd+",HDG="+msg_cog+",LENGTH=100,MODE=DRIVE,X="+x+",Y="+y;
+          reportEvent("Publicando NODE_REPORT: " + node_report);
+
+          //if (contador_ais > 10) {
+          Notify("NODE_REPORT", node_report);
+          //}
+          //contador_ais +=1;
+
+        } else {
+          reportEvent("MMSI ignorado (é da própria lancha): " + std::to_string(msg->mmsi));
         }
+      } else {
+        reportRunWarning("Pad inválido (pad < 0), mensagem AIS não processada");
       }
     }
     catch (std::system_error& e) {
       std::cout << e.what();
+      reportRunWarning("Erro AIS system_error: " + std::string(e.what()));
+    }
+    catch (std::exception& e) {
+      reportRunWarning("Erro AIS exception: " + std::string(e.what()));
+    }
+    catch (...) {
+      reportRunWarning("Erro desconhecido ao processar mensagem AIS");
     }
 
   } //fechamento do if 
@@ -687,7 +732,7 @@ bool DivisorNMEA::buildReport()
   ACTable actab(4);
   actab << "msg_debug | Saida_PCmd | Saida_PData | String Recebida ";
   actab.addHeaderLines();
-  actab << msg_debug << saida_pCmd << saida_pData << read_buf;
+  actab << msg_debug << (saida_pCmd ? saida_pCmd : "") << (saida_pData ? saida_pData : "") << read_buf;
   m_msgs << actab.getFormattedString();
   m_msgs << endl << "============================================" << endl;
 

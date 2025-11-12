@@ -39,14 +39,22 @@ std::string GetNthField(const std::string &str, const size_t n,
 int GetPad(const std::string &nmea_str) {
   // -1 on error
   std::string chksum_block(GetNthField(nmea_str, 6, ","));
-  //Para evitar erros retiro o ultimo char - Comentei pois estava dando erro com os nmea da lancha
-  chksum_block.pop_back();
-  chksum_block.pop_back(); //Precisei colocar 2 pop_backs pois a contagem estava dando 6
+
+  // Remove caracteres extras no final (espaços, \r, \n, etc)
+  while (!chksum_block.empty() &&
+         (chksum_block.back() == '\r' || chksum_block.back() == '\n' ||
+          chksum_block.back() == ' ' || chksum_block.back() == '\0')) {
+    chksum_block.pop_back();
+  }
+
+  // Formato esperado: "0*4A" (4 chars: pad + * + 2 chars de checksum)
   if (chksum_block.size() != 4 || chksum_block[1] != '*')
     return -1;
+
   const char pad = chksum_block[0];
   if (pad < '0' || pad > '5')
     return -1;
+
   return static_cast<int>(pad - '0');
 }
 

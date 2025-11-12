@@ -295,7 +295,7 @@ void ContactSpawn::postNodeReport()
   node_report += "HDG=" + doubleToString(m_contact_heading, 2) + ",";
   node_report += "YAW=" + doubleToString(m_contact_heading, 2) + ",";
   node_report += "DEPTH=0.0,";
-  node_report += "LENGTH=90.0,";
+  node_report += "LENGTH=100.0,";
   node_report += "MODE=SPAWNED";
   
   Notify("NODE_REPORT", node_report);

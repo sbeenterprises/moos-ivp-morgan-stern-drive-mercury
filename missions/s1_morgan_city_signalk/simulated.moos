@@ -36,6 +36,15 @@ ProcessConfig = ANTLER
   Run = iCANRec	      @ NewConsole = false
   Run = pContactSpawn	      @ NewConsole = false
   Run = pContactMgrV20 @ NewConsole = false
+  Run = iAisParser @ NewConsole = false
+}
+
+// pContactSpawn Config Block
+
+ProcessConfig = iAisParser
+{
+  AppTick 	= 4
+  CommsTick = 4 
 }
 
 // pContactSpawn Config Block
