@@ -38,7 +38,20 @@ ProcessConfig = ANTLER
   Run = pXYpublisher      @ NewConsole = false
   Run = pContactSpawn	      @ NewConsole = false
   Run = pContactMgrV20 @ NewConsole = false
+  Run = iRadarTargets @ NewConsole = false
 
+}
+
+// iRadarTargets Config Block
+
+ProcessConfig = iRadarTargets
+{
+  AppTick   = 10
+  CommsTick = 10
+
+  // UDP Configuration
+  udp_port = 8091       // Port to receive NMEA $RATTM sentences
+  udp_host = 127.0.0.1  // Host interface (localhost by default)
 }
 
 // pContactSpawn Config Block
