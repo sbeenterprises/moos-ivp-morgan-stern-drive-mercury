@@ -37,7 +37,21 @@ ProcessConfig = ANTLER
   Run = pContactSpawn	      @ NewConsole = false
   Run = pContactMgrV20 @ NewConsole = false
   Run = iMOOSGateway  @ NewConsole = false
+  Run = iRadarTargets @ NewConsole = false
 }
+
+// iRadarTargets Config Block
+
+ProcessConfig = iRadarTargets
+{
+  AppTick   = 10
+  CommsTick = 10
+
+  // UDP Configuration
+  udp_port = 8091       // Port to receive NMEA $RATTM sentences
+  udp_host = 127.0.0.1  // Host interface (localhost by default)
+}
+
 
 // pContactSpawn Config Block
 
@@ -321,7 +335,7 @@ ProcessConfig = pContactMgrV20
 
 	contact_local_coords = force_lat_lon
 	
-  contact_max_age   = 35
+  contact_max_age   = 300
   display_radii     = true
 	display_radii_id  = avd
   alert_range_color = gray70

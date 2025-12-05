@@ -1,0 +1,12 @@
+//--------------------------------------------------
+// iRadarTargets configuration block example
+
+ProcessConfig = iRadarTargets
+{
+  AppTick   = 10
+  CommsTick = 10
+
+  // UDP Configuration
+  udp_port = 8091       // Port to receive NMEA $RATTM sentences
+  udp_host = 127.0.0.1  // Host interface (localhost by default)
+}
