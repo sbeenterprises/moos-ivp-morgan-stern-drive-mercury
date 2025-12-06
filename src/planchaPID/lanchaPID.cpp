@@ -121,7 +121,7 @@ double PIDController::CalculateSpeed(double desired, double current, double dt)
         eff_kd =  0.0;
     }
     else if(v < 6.0){      // “cruise”
-        eff_kp =  2.0;
+        eff_kp =  2.0; 
         eff_ki =  0.4;
         eff_kd =  0.05;
     }
@@ -181,7 +181,7 @@ double PIDController::Calculate(double desired, double current, double dt) {
 
     
     if (nav_speed < 5) {             
-        eff_kp = 0.55;
+        eff_kp = 0.65; //it was 0.55, increased to 0.75
         eff_ki = 0;
         eff_kd = 0.060;  
         upper_bound = 100; // Modified value for USV

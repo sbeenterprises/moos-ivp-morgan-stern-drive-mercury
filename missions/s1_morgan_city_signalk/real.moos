@@ -70,7 +70,7 @@ ProcessConfig = pContactMgrV20
   AppTick   = 2
   CommsTick = 2
 
-  decay = 30,60
+  decay = 5,10
 
 	app_logging = true
 	
@@ -78,7 +78,7 @@ ProcessConfig = pContactMgrV20
 
 	contact_local_coords = force_lat_lon
 	
-  contact_max_age   = 35
+  contact_max_age   = 5
   display_radii     = true
 	display_radii_id  = avd
   alert_range_color = gray70
@@ -350,6 +350,10 @@ ProcessConfig = pMarineViewer
   action+ = MENU_KEY=deploy # MOOS_MANUAL_OVERRIDE=false
   action  = RETURN=true
   action  = UPDATES_RETURN=speed=1.4
+  
+  stale_report_thresh  = 5     // Exibe "Stale Report:" após 10s
+  stale_remove_thresh  = 8 
+  
 }
 
 //------------------------------------------
