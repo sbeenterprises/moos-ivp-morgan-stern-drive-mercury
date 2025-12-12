@@ -266,6 +266,9 @@ ProcessConfig = pMarineViewer
   action+ = MENU_KEY=deploy # MOOS_MANUAL_OVERRIDE=false
   action  = RETURN=true
   action  = UPDATES_RETURN=speed=1.4
+
+  stale_report_thresh  = 5     // Exibe "Stale Report:" após 10s
+  stale_remove_thresh  = 8
 }
 
 //------------------------------------------

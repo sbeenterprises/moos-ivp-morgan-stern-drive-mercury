@@ -50,6 +50,13 @@ std::string ivphelm_allstop;
 std::string wpt_stat;
 std::string view_point;
 
+// NODE_REPORT contact variables
+std::string contact_name = "";
+double contact_lat = 0;
+double contact_lon = 0;
+double contact_spd = 0;
+double contact_hdg = 0;
+
 
 //---------------------------------------------------------
 // Constructor()
@@ -185,10 +192,59 @@ bool WebSocket::OnNewMail(MOOSMSG_LIST &NewMail)
       engine_battery_voltage = msg.GetDouble();
     else if(key == "VIEW_POINT")
       view_point = msg.GetString();
+    else if(key == "NODE_REPORT") {
+      // Parse NODE_REPORT to extract NAME, X, Y, SPD, HDG
+      std::string node_report = msg.GetString();
+
+      std::string name = "";
+      double x = 0, y = 0;
+      double spd = 0, hdg = 0;
+
+      // Parse the comma-separated key=value pairs
+      std::istringstream iss(node_report);
+      std::string token;
+
+      while (std::getline(iss, token, ',')) {
+        size_t eq_pos = token.find('=');
+        if (eq_pos != std::string::npos) {
+          std::string key_part = token.substr(0, eq_pos);
+          std::string val_part = token.substr(eq_pos + 1);
+
+          if (key_part == "NAME") {
+            name = val_part;
+          } else if (key_part == "X") {
+            x = std::stod(val_part);
+          } else if (key_part == "Y") {
+            y = std::stod(val_part);
+          } else if (key_part == "SPD") {
+            spd = std::stod(val_part);
+          } else if (key_part == "HDG") {
+            hdg = std::stod(val_part);
+          }
+        }
+      }
+
+      // Convert local X,Y to lat/lon
+      double lat_origin = 29.71970895316288;
+      double lon_origin = -91.14705165281887;
+
+      CMOOSGeodesy geodesy;
+      geodesy.Initialise(lat_origin, lon_origin);
+
+      double lat, lon;
+      geodesy.LocalGrid2LatLong(x, y, lat, lon);
+
+      // Store the values
+      contact_name = name;
+      contact_lat = lat;
+      contact_lon = lon;
+      contact_spd = spd;
+      contact_hdg = hdg;
+    }
     else if(key != "APPCAST_REQ") // handled by AppCastingMOOSApp
       reportRunWarning("Unhandled Mail: " + key);
   }
-  
+
   return(true);
 }
 
@@ -251,6 +307,13 @@ bool WebSocket::Iterate()
   SendMessage("ENGINE_FUEL_RATE=" + std::to_string(engine_fuel_rate)); // Sends the engine fuel rate
   SendMessage("ENGINE_INTAKE_MANIFOLD_PRESSURE=" + std::to_string(engine_intake_manifold_pressure)); // Sends the engine intake manifold pressure
   SendMessage("ENGINE_BATTERY_VOLTAGE=" + std::to_string(engine_battery_voltage)); // Sends the engine battery voltage
+
+  // Send contact information in a single message
+  SendMessage("CONTACT_INFO=NAME:" + contact_name +
+              ",LAT:" + std::to_string(contact_lat) +
+              ",LON:" + std::to_string(contact_lon) +
+              ",SPD:" + std::to_string(contact_spd) +
+              ",HDG:" + std::to_string(contact_hdg));
 
   AppCastingMOOSApp::PostReport();
   return(true);
@@ -324,6 +387,7 @@ void WebSocket::registerVariables()
   Register("ENGINE_FUEL_RATE", 0);
   Register("ENGINE_INTAKE_MANIFOLD_PRESSURE", 0);
   Register("ENGINE_BATTERY_VOLTAGE", 0);
+  Register("NODE_REPORT", 0);
 
   
 }
