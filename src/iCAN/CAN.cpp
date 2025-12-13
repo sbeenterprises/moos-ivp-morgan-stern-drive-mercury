@@ -415,7 +415,7 @@ std::string CAN::getGearCommand(double thrust_value)
     return "18F005D0#7EFFFFFFFFFFFFFF"; // Forward gear
   } else if (thrust_value == 0) {
     return "18F005D0#7DFFFFFFFFFFFFFF"; // Neutral gear
-  } else {
+  } else if (thrust_value < 0) {
     return "18F005D0#7CFFFFFFFFFFFFFF"; // Reverse Gear
   }
 }
