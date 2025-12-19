@@ -1,0 +1,20 @@
+[33mnote mission file Mission.moos was not found
+[0mMulticastNode::ReadLoop issue with socket creation : MulticastNode::ReadLoop()::bind failed
+1766016736.1333 [33m140377566729792- [0m                          disabling nagle
+[0m
+-------------- moos connect ----------------------
+  contacting a MOOS server LOCALHOST:9000 -  try 00001 
+  Handshaking as pVisionDetector        [1;32m[ok]
+[0m  DB reports async support is           [1;32m[on]
+[0m  DB is running on                      [1;32musv-721
+[0m  Timing skew estimation is             [33m[off] (not needed)
+[0m--------------------------------------------------
+
+***************************************************
+*  pVisionDetector starting ...
+***************************************************
+DEBUG: OnStartUp() called
+DEBUG: Read 0 config lines
+DEBUG: Config parsed
+ERROR: rtsp_url empty
+Derived OnStartUp() returned false... Quitting

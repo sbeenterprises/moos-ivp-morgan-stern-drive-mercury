@@ -1,0 +1,24 @@
+ServerHost = localhost
+ServerPort = 9000
+Community = alpha
+
+ProcessConfig = pVisionDetector
+{
+  AppTick = 5
+  CommsTick = 5
+  
+  rtsp_url = rtsp://douglas:Brazil2025!~@192.168.143.14:554/Streaming/Channels/101
+  yolo_model_path = /home/douglas/Documents/yolo/yolo11n_openvino_model/yolo11n.xml
+  
+  camera_height = 2.13
+  average_boat_height = 2.5
+  horizontal_fov = 87
+  vertical_fov = 46
+  distance_calibration_factor = 0.5
+  
+  confidence_threshold = 0.25
+  nms_threshold = 0.45
+  target_class = 8
+  
+  exclusion_zone = 0.3,0.8,0.65,1.0
+}

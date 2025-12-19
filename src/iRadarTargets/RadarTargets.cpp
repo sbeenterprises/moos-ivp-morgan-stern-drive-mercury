@@ -87,7 +87,7 @@ bool RadarTargets::OnConnectToServer()
 // Procedure: Iterate()
 //            happens AppTick times per second
 
-bool RadarTargets::Iterate()
+/* bool RadarTargets::Iterate()
 {
   AppCastingMOOSApp::Iterate();
 
@@ -124,6 +124,51 @@ bool RadarTargets::Iterate()
       }
     }
   }
+
+  AppCastingMOOSApp::PostReport();
+  return(true);
+} */
+
+bool RadarTargets::Iterate()
+{
+  AppCastingMOOSApp::Iterate();
+
+  if(m_socket_fd < 0) {
+    AppCastingMOOSApp::PostReport();
+    return(true);
+  }
+
+  // Receive UDP data (non-blocking)
+  char buffer[1024];
+  struct sockaddr_in sender_addr;
+  socklen_t sender_len = sizeof(sender_addr);
+
+  ssize_t bytes_received = recvfrom(m_socket_fd, buffer, sizeof(buffer)-1,
+                                     MSG_DONTWAIT,
+                                     (struct sockaddr*)&sender_addr,
+                                     &sender_len);
+
+  if(bytes_received > 0) {
+    buffer[bytes_received] = '\0';
+    string received_data(buffer);
+
+    stringstream ss(received_data);
+    string line;
+    while(getline(ss, line)) {
+      while(!line.empty() && (line.back() == '\r' || line.back() == '\n')) {
+        line.pop_back();
+      }
+
+      if(!line.empty() && line[0] == '$') {
+        parseRATTM(line);
+      }
+    }
+  }
+
+  // ========================================
+  // NEW: Publish batched RADAR_TARGETS
+  // ========================================
+  publishRadarTargets();
 
   AppCastingMOOSApp::PostReport();
   return(true);
@@ -236,7 +281,7 @@ bool RadarTargets::setupUDPSocket()
 //---------------------------------------------------------
 // Procedure: parseRATTM()
 
-bool RadarTargets::parseRATTM(const string& sentence)
+/* bool RadarTargets::parseRATTM(const string& sentence)
 {
   // Expected format: $RATTM,26,5.76,133.8,T,22.87,232.7,R,5.7,2.3,N,,,T,,,M*22
 
@@ -334,8 +379,148 @@ bool RadarTargets::parseRATTM(const string& sentence)
   }
 
   return true;
+} */
+
+//---------------------------------------------------------
+// Procedure: publishRadarTargets()
+// Purpose: Batch publish all active radar targets for fusion
+
+bool RadarTargets::parseRATTM(const string& sentence)
+{
+  // Expected format: $RATTM,26,5.76,133.8,T,22.87,232.7,R,5.7,2.3,N,,,T,,,M*22
+
+  if(sentence.find("$RATTM") != 0) {
+    return false;
+  }
+
+  // Remove checksum if present
+  string data = sentence;
+  size_t checksum_pos = data.find('*');
+  if(checksum_pos != string::npos) {
+    data = data.substr(0, checksum_pos);
+  }
+
+  // Split by comma
+  vector<string> fields;
+  stringstream ss(data);
+  string field;
+  while(getline(ss, field, ',')) {
+    fields.push_back(field);
+  }
+
+  // Need at least 11 fields
+  if(fields.size() < 11) {
+    reportRunWarning("Invalid RATTM sentence: insufficient fields");
+    return false;
+  }
+
+  try {
+    // Parse fields
+    string target_number = fields[1];
+    double range_nm = stod(fields[2]);
+    double bearing_deg = stod(fields[3]);
+    string bearing_ref = fields[4];
+    double speed_kts = stod(fields[5]);
+    double course_deg = stod(fields[6]);
+    string course_ref = fields[7];
+
+    // Convert to meters
+    double range_m = range_nm * 1852.0;
+    double bearing_rad = bearing_deg * M_PI / 180.0;
+
+    // Local position (relative to own ship)
+    double delta_x = range_m * sin(bearing_rad);
+    double delta_y = range_m * cos(bearing_rad);
+    double target_x = m_own_x + delta_x;
+    double target_y = m_own_y + delta_y;
+
+    // Calculate velocity components
+    double speed_ms = speed_kts * 0.514444;  // knots to m/s
+    double course_rad = course_deg * M_PI / 180.0;
+    double vx = speed_ms * sin(course_rad);
+    double vy = speed_ms * cos(course_rad);
+
+    double time = MOOSTime();
+
+    // ========================================
+    // Store in radar targets map (for RADAR_TARGETS)
+    // ========================================
+    RadarTarget target;
+    target.x = target_x;
+    target.y = target_y;
+    target.vx = vx;
+    target.vy = vy;
+    target.range = range_m;
+    target.bearing = bearing_deg;
+    target.last_update = time;
+    
+    m_radar_targets[target_number] = target;
+
+    // ========================================
+    // Also publish NODE_REPORT (for backwards compatibility)
+    // ========================================
+    string node_report = "NAME=contato_" + target_number + ",";
+    node_report += "TYPE=ship,";
+    node_report += "TIME=" + doubleToString(time, 2) + ",";
+    node_report += "X=" + doubleToString(target_x, 2) + ",";
+    node_report += "Y=" + doubleToString(target_y, 2) + ",";
+    node_report += "SPD=" + doubleToString(speed_kts, 2) + ",";
+    node_report += "HDG=" + doubleToString(course_deg, 2) + ",";
+    node_report += "YAW=" + doubleToString(course_deg, 2) + ",";
+    node_report += "DEPTH=0.0,";
+    node_report += "LENGTH=100,";
+    node_report += "MODE=DRIVE";
+
+    //Notify("NODE_REPORT", node_report);
+
+    // Update tracking
+    m_last_report_time[target_number] = time;
+
+    reportEvent("Radar target " + target_number +
+                " at (" + to_string(target_x) + "," + to_string(target_y) + ")");
+
+  } catch(const exception& e) {
+    reportRunWarning("Error parsing RATTM: " + string(e.what()));
+    return false;
+  }
+
+  return true;
 }
 
+void RadarTargets::publishRadarTargets()
+{
+    if(m_radar_targets.empty()) return;
+    
+    // Build RADAR_TARGETS message (semicolon-separated)
+    ostringstream oss;
+    bool first = true;
+    
+    double current_time = MOOSTime();
+    
+    for(auto& pair : m_radar_targets) {
+        const string& target_id = pair.first;
+        const RadarTarget& target = pair.second;
+        
+        // Skip stale targets (older than 5 seconds)
+        if(current_time - target.last_update > 5.0) continue;
+        
+        if(!first) oss << ";";
+        first = false;
+        
+        oss << fixed << setprecision(2);
+        oss << "x=" << target.x << ",";
+        oss << "y=" << target.y << ",";
+        oss << "vx=" << target.vx << ",";
+        oss << "vy=" << target.vy << ",";
+        oss << "range=" << target.range << ",";
+        oss << "bearing=" << target.bearing << ",";
+        oss << "label=radar_" << target_id;
+    }
+    
+    if(!first) {  // At least one target
+        Notify("RADAR_TARGETS", oss.str());
+    }
+}
 
 
 

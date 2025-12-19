@@ -1,0 +1,443 @@
+
+//-------------------------------------------------
+// NAME: D. L
+// FILE: alpha.moos
+//-------------------------------------------------
+
+ServerHost   = localhost
+ServerPort   = 9000
+Community    = alpha
+MOOSTimeWarp = 1
+
+//Morgan City
+LatOrigin  = 29.71970895316288
+LongOrigin = -91.14705165281887
+
+//------------------------------------------
+// Antler configuration  block
+ProcessConfig = ANTLER
+{
+  MSBetweenLaunches = 200
+
+  Run = MOOSDB        @ NewConsole = false
+  Run = pLogger       @ NewConsole = false
+  //Run = uSimMarineV22 @ NewConsole = false
+  //Run = pMarinePIDV22 @ NewConsole = false
+  Run = planchaPID @ NewConsole = false
+  Run = iDivisorNMEA	@ NewConsole = false
+  Run = pHelmIvP      @ NewConsole = false
+  Run = pMarineViewer	@ NewConsole = false
+  Run = uProcessWatch	@ NewConsole = false
+  Run = pNodeReporter	@ NewConsole = false
+  Run = pRealm	      @ NewConsole = false
+  Run = iCAN	      @ NewConsole = false
+  Run = iCANRec	      @ NewConsole = false
+  //Run = iNMEA	      @ NewConsole = false
+  //Run = iSignalK	      @ NewConsole = false
+  Run = iWebSocket	      @ NewConsole = false
+  Run = pXYpublisher      @ NewConsole = false
+  Run = pContactSpawn	      @ NewConsole = false
+  Run = pContactMgrV20 @ NewConsole = false
+  Run = iRadarTargets @ NewConsole = false
+  Run = pVisionDetector_ref @ NewConsole = false
+  Run = pSensorFusionTracker_ref @ NewConsole = false
+}
+
+ProcessConfig = iAIS
+{
+  AppTick   = 10
+  CommsTick = 10
+ 
+  
+  connection_type = tcp
+  tcp_host = 127.0.0.1
+  tcp_port = 10110
+  
+  max_age = 180.0
+  publish_interval = 1.0
+}
+
+
+ProcessConfig = pSensorFusionTracker
+{
+  AppTick   = 10
+  CommsTick = 10
+  
+  //------------------------------------------------------------
+  // Data Association Parameters
+  //------------------------------------------------------------
+  association_threshold = 15.0    // meters (Mahalanobis gate)
+  track_timeout = 5.0             // seconds before track deleted
+  quality_threshold = 0.5         // minimum quality to publish
+  
+  //------------------------------------------------------------
+  // Measurement Noise (Standard Deviations)
+  //------------------------------------------------------------
+  // Radar noise (accurate range/velocity)
+  radar_noise_pos = 3.0           // 3m position std dev
+  radar_noise_vel = 0.5           // 0.5 m/s velocity std dev
+  
+  // Vision noise (less accurate position, no velocity)
+  vision_noise_pos = 25.0         // 25m position std dev
+  
+  //------------------------------------------------------------
+  // Process Noise (Motion Model Uncertainty)
+  //------------------------------------------------------------
+  process_noise_pos = 0.5         // 0.5 m/s^2 acceleration noise
+  process_noise_vel = 0.2         // 0.2 m/s^2 velocity noise
+  process_noise_yaw = 0.1         // 0.1 rad/s yaw rate noise
+  
+  //------------------------------------------------------------
+  // Track Management
+  //------------------------------------------------------------
+  min_hits_to_confirm = 3         // confirmations needed
+  max_misses = 5                  // misses before deletion
+}
+
+//--------------------------------------------------------------
+// pVisionDetector - Camera-Based Detection
+//--------------------------------------------------------------
+ProcessConfig = pVisionDetector
+{
+  AppTick   = 20
+  CommsTick = 20
+  
+  rtsp_url = rtsp://douglas:Brazil2025!~@192.168.143.14:554/Streaming/Channels/101
+  yolo_model_path = /home/douglas/Documents/yolo/yolo11n_openvino_model/yolo11n.xml
+  
+  confidence_threshold = 0.25
+  nms_threshold = 0.45
+  target_class = 8  // boat
+  
+  camera_height = 2.13
+  average_boat_height = 2.5
+  horizontal_fov = 87
+  vertical_fov = 46
+  distance_calibration_factor = 0.5
+  
+  exclusion_zone = 0.3,0.8,0.65,1.0
+}
+
+
+// iRadarTargets Config Block
+ProcessConfig = iRadarTargets
+{
+  AppTick   = 10
+  CommsTick = 10
+
+  // UDP Configuration
+  udp_port = 8091       // Port to receive NMEA $RATTM sentences
+  udp_host = 127.0.0.1  // Host interface (localhost by default)
+}
+
+// pContactSpawn Config Block
+
+ProcessConfig = pContactSpawn
+{
+  AppTick 	= 1
+  CommsTick = 1 
+}
+
+//--------------------------------------------------------
+// pContactMgrV20 Config Block
+
+ProcessConfig = pContactMgrV20
+{
+  AppTick   = 2
+  CommsTick = 2
+
+  decay = 5,10
+  app_logging = true
+  alert_verbose = true
+  contact_local_coords = force_lat_lon	
+  contact_max_age   = 5
+  display_radii     = true
+  display_radii_id  = avd
+  alert_range_color = gray70
+  cpa_range_color   = gray30
+  alert = id=avdcol_, var=CONTACT_INFO, val="name=$[VNAME] # contact=$[VNAME]"
+  alert = id=avdcol_, alert_range=1000, cpa_range=500
+	
+  //match_region = pts = {60,-40 : 60,-160 : 150,-160 : 180,-100 : 150,-40}
+	//match_type = kayak, uuv
+
+  disable_var = XYZ_DISABLE_TARGET
+  enable_var  = XYZ_REENABLE_TARGET
+	
+	post_closest_range   = true
+  hold_alerts_for_helm = true
+}
+
+
+// iCANRec config block
+
+ProcessConfig = iCANRec
+{
+   AppTick   = 20
+   CommsTick = 20
+}
+
+// pXYpublisher config block
+
+ProcessConfig = pXYpublisher
+{
+   AppTick   = 4
+   CommsTick = 4
+}
+//------------------------------------------------
+
+
+// iCAN config block
+
+ProcessConfig = iCAN
+{
+   AppTick   = 20
+   CommsTick = 20
+}
+//------------------------------------------------
+
+//------------------------------------------------
+// iDivisorNMEA config block
+
+ProcessConfig = iDivisorNMEA
+{
+   AppTick   = 20
+   CommsTick = 20
+}
+//------------------------------------------------
+
+
+//-------------------------------------------
+// planchaPID bloco de config
+
+ProcessConfig = planchaPID
+{
+   AppTick   = 20
+   CommsTick = 20
+   HEADING_KP = 0.15
+   HEADING_KI = 0.0
+   HEADING_KD = 0.26
+   HEADING_UPPER_BOUND = 20
+   HEADING_LOWER_BOUND = -20
+}
+
+
+//------------------------------------------------
+// iWebSocket config block
+
+ProcessConfig = iWebSocket
+{
+   AppTick   = 20
+   CommsTick = 20
+}
+
+//------------------------------------------------
+// iNMEA config block
+
+ProcessConfig = iNMEA
+{
+   AppTick   = 4
+   CommsTick = 4
+}
+
+//------------------------------------------------
+// iSignalK config block
+
+ProcessConfig = iSignalK
+{
+   AppTick   = 4
+   CommsTick = 4
+}
+
+//------------------------------------------
+// pLogger config block
+
+ProcessConfig = pLogger
+{
+  AppTick   = 8
+  CommsTick = 8
+
+  AsyncLog = true
+
+  // For variables that are published in a bundle on their 
+  // first post, explicitly declare their logging request
+  Log = IVPHELM_LIFE_EVENT @ 0 NOSYNC
+  Log = REPORT @ 0 NOSYNC
+  Log = BHV_SETTINGS @ 0 NOSYNC
+  Log = SUMMARY @ 0 NOSYNC
+
+  LogAuxSrc = true
+  WildCardLogging = true
+  WildCardOmitPattern = *_STATUS
+  WildCardOmitPattern = DB_VARSUMMARY
+  WildCardOmitPattern = DB_RWSUMMARY
+  WildCardExclusionLog = true
+}
+
+//------------------------------------------
+// uProcessWatch config block
+
+ProcessConfig = uProcessWatch
+{
+  AppTick   = 4
+  CommsTick = 4
+
+  watch_all = true
+	nowatch   = uPokeDB*
+	nowatch   = uQueryDB*
+	nowatch   = uXMS*
+	nowatch   = uMAC*
+}
+
+//------------------------------------------
+// uSimMarineV22 config block
+
+ProcessConfig = uSimMarineV22
+{
+  AppTick  	= 4
+  CommsTick	= 4
+
+  start_pos     = x=0, y=0, heading=0, speed=0
+  prefix        = NAV
+  turn_rate     = 95
+  thrust_map    = 0:0, 20:3, 40:6, 60:9, 80:12, 100:15
+	turn_spd_loss = 0.4
+}
+
+//------------------------------------------
+// pHelmIvP config block
+
+ProcessConfig = pHelmIvP
+{
+  AppTick    = 4
+  CommsTick  = 4
+
+  behaviors  = alpha.bhv
+  domain     = course:0:359:360
+  domain     = speed:0:35:351
+
+  ok_skew = any
+  start_in_drive = false
+  hold_on_apps = pContactMgrV20
+}
+
+//------------------------------------------
+// pMarinePID config block
+
+ProcessConfig = pMarinePIDV22
+{
+  AppTick    = 20
+  CommsTick  = 20
+
+  verbose       = true
+  depth_control = false
+
+  // SIM_INSTABILITY = 20
+
+  // Yaw PID controller
+  yaw_pid_kp		 = 0.9
+  yaw_pid_kd		 = 0.3
+  yaw_pid_ki		 = 0.3
+  yaw_pid_integral_limit = 0.07
+
+  // Speed PID controller
+  speed_pid_kp		 = 1.0
+  speed_pid_kd		 = 0.0
+  speed_pid_ki		 = 0.0
+  speed_pid_integral_limit = 0.07
+
+  //MAXIMUMS
+  maxrudder    = 100
+  maxthrust    = 100
+
+  // A non-zero SPEED_FACTOR overrides use of SPEED_PID
+  // Will set DESIRED_THRUST = DESIRED_SPEED * SPEED_FACTOR
+  speed_factor = 1
+}
+
+//------------------------------------------
+// pMarineViewer config block
+
+ProcessConfig = pMarineViewer
+{
+  AppTick    = 4
+  CommsTick  = 4
+
+  tiff_file            = morgan_city.tif
+	//tiff_file            = MIT_SP.tif
+
+  set_pan_x            = -90
+  set_pan_y            = -280
+  zoom                 = 0.65
+  vehicle_shape_scale  = 1.5
+  hash_delta           = 50
+  hash_shade           = 0.22
+  hash_viewable        = false
+
+  trails_point_size   = 1
+
+	//op_vertex = x=-83, y=-47,    lwidth=1,lcolor=yellow,looped=true,group=moa
+  //op_vertex = x=-46.4, y=-129.2, lwidth=1,lcolor=yellow,looped=true,group=moa
+  //op_vertex = x=94.6, y=-62.2,   lwidth=1,lcolor=yellow,looped=true,group=moa
+  //op_vertex = x=58,   y=20,    lwidth=1,lcolor=yellow,looped=true,group=moa
+
+  // Appcast configuration
+  appcast_height       = 75
+  appcast_width        = 30
+  appcast_viewable     = true
+  appcast_color_scheme = indigo
+  nodes_font_size      = xlarge
+  procs_font_size      = xlarge
+  appcast_font_size    = large
+  
+  // datum_viewable = true
+  // datum_size     = 18
+  // gui_size = small
+
+  // left_context[survey-point] = DEPLOY=true
+  // left_context[survey-point] = MOOS_MANUAL_OVERRIDE=false
+  // left_context[survey-point] = RETURN=false
+
+  right_context[return] = DEPLOY=true
+  right_context[return] = MOOS_MANUAL_OVERRIDE=false
+  right_context[return] = RETURN=false
+
+  scope  = SUMMARY
+  scope  = RETURN
+  scope  = WPT_STAT
+  scope  = VIEW_SEGLIST
+  scope  = VIEW_POINT
+  scope  = VIEW_POLYGON
+  scope  = MVIEWER_LCLICK
+  scope  = MVIEWER_RCLICK
+
+  button_one = DEPLOY # DEPLOY=true
+  button_one = MOOS_MANUAL_OVERRIDE=false # RETURN=false
+  button_two = RETURN # RETURN=true
+  button_three = SLOWER # WPT_UPDATE=speed=1.5
+  button_four = FASTER # WPT_UPDATE=speed=3.5
+
+  action  = MENU_KEY=deploy # DEPLOY = true # RETURN = false
+  action+ = MENU_KEY=deploy # MOOS_MANUAL_OVERRIDE=false
+  action  = RETURN=true
+  action  = UPDATES_RETURN=speed=1.4
+  
+  stale_report_thresh  = 5     // Exibe "Stale Report:" após 10s
+  stale_remove_thresh  = 8 
+  
+}
+
+//------------------------------------------
+// pNodeReporter config block
+
+ProcessConfig = pNodeReporter
+{
+  AppTick    = 2
+  CommsTick	 = 2
+
+  cross_fill_policy = global
+  platform_type   = ship
+  platform_color  = red
+  platform_length = 100
+}
+

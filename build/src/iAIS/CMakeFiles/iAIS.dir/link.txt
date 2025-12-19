@@ -1,0 +1,1 @@
+/usr/bin/c++  -fPIC -g -Wdeprecated-declarations CMakeFiles/iAIS.dir/iAIS.cpp.o -o ../../../bin/iAIS   -L/home/douglas/Documents/automation/moos-ivp/lib  -Wl,-rpath,/home/douglas/Documents/automation/moos-ivp/lib: /home/douglas/Documents/automation/moos-ivp/build/MOOS/MOOSCore/lib/libMOOS.a -lpthread -lm 
