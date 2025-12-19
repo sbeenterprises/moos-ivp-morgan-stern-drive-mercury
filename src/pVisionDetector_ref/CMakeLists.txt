@@ -24,7 +24,6 @@ include_directories(
     ${MOOS_INCLUDE_DIRS}
     ${OpenCV_INCLUDE_DIRS}
     ${OpenVINO_INCLUDE_DIRS}
-    ../pVisionDetector
     .
 )
 
@@ -32,7 +31,7 @@ SET(SRC
   VisionDetector_ref.cpp
   VisionDetector_ref_Info.cpp
   main.cpp
-  ../pVisionDetector/YOLOInference.cpp
+  YOLOInference.cpp
 )
 
 ADD_EXECUTABLE(pVisionDetector_ref ${SRC})

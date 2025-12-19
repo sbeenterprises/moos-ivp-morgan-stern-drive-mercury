@@ -13,7 +13,7 @@
 #include <sstream>
 #include <iomanip>
 // Include YOLO inference
-#include "../pVisionDetector/YOLOInference.h"
+#include "YOLOInference.h"
 
 using namespace std;
 
