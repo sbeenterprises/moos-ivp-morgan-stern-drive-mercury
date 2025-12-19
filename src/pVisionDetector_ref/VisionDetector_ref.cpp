@@ -264,6 +264,10 @@ void VisionDetector_ref::visionLoop()
     reportEvent("Camera resolution: " +
                 to_string(frame_width) + "x" + to_string(frame_height));
 
+    // Create display window
+    cv::namedWindow("Vision Detector", cv::WINDOW_NORMAL);
+    cv::resizeWindow("Vision Detector", 1280, 720);
+
     while (m_running) {
         cv::Mat frame;
         m_camera >> frame;
@@ -292,6 +296,9 @@ void VisionDetector_ref::visionLoop()
                       << ", size: " << frame.cols << "x" << frame.rows << std::endl;
         }
 
+        // Create display frame (copy for visualization)
+        cv::Mat display_frame = frame.clone();
+
         // ========================================
         // GET DETECTIONS (not just draw!)
         // ========================================
@@ -300,7 +307,56 @@ void VisionDetector_ref::visionLoop()
         std::cout << "DEBUG: GetDetections returned " << yolo_detections.size()
                   << " detections" << std::endl;
 
-        // Process each detection
+        // Draw ALL detections on display frame first
+        for (const auto& yolo_det : yolo_detections) {
+            // Draw bounding box for all detections (different colors for different classes)
+            cv::Scalar box_color;
+            if (yolo_det.class_id == m_target_class) {
+                box_color = cv::Scalar(0, 255, 0);  // Green for boats
+            } else {
+                box_color = cv::Scalar(128, 128, 128);  // Gray for other objects
+            }
+
+            cv::rectangle(display_frame, yolo_det.box, box_color, 2);
+
+            // Draw label
+            std::string label = yolo_det.className + " " +
+                               std::to_string((int)(yolo_det.confidence * 100)) + "%";
+            int baseline;
+            cv::Size label_size = cv::getTextSize(label, cv::FONT_HERSHEY_SIMPLEX, 0.5, 1, &baseline);
+            cv::rectangle(display_frame,
+                         cv::Point(yolo_det.box.x, yolo_det.box.y - label_size.height - 5),
+                         cv::Point(yolo_det.box.x + label_size.width, yolo_det.box.y),
+                         box_color, -1);
+            cv::putText(display_frame, label,
+                       cv::Point(yolo_det.box.x, yolo_det.box.y - 5),
+                       cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(255, 255, 255), 1);
+        }
+
+        // Draw exclusion zone
+        int ex_x1 = (int)(m_exclusion_x1 * frame_width);
+        int ex_y1 = (int)(m_exclusion_y1 * frame_height);
+        int ex_x2 = (int)(m_exclusion_x2 * frame_width);
+        int ex_y2 = (int)(m_exclusion_y2 * frame_height);
+        cv::rectangle(display_frame,
+                     cv::Point(ex_x1, ex_y1),
+                     cv::Point(ex_x2, ex_y2),
+                     cv::Scalar(0, 0, 255), 2);
+        cv::putText(display_frame, "EXCLUSION ZONE",
+                   cv::Point(ex_x1 + 5, ex_y1 + 20),
+                   cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(0, 0, 255), 2);
+
+        // Draw FPS counter
+        std::string fps_text = "FPS: " + std::to_string((int)m_current_fps);
+        cv::putText(display_frame, fps_text, cv::Point(10, 30),
+                   cv::FONT_HERSHEY_SIMPLEX, 1.0, cv::Scalar(0, 255, 255), 2);
+
+        // Draw detection count
+        std::string det_text = "Detections: " + std::to_string(m_detection_count);
+        cv::putText(display_frame, det_text, cv::Point(10, 70),
+                   cv::FONT_HERSHEY_SIMPLEX, 1.0, cv::Scalar(0, 255, 255), 2);
+
+        // Process each detection for MOOS
         for (const auto& yolo_det : yolo_detections) {
 
             // Debug: Show ALL detections first
@@ -364,9 +420,19 @@ void VisionDetector_ref::visionLoop()
             m_detection_count++;
         }
 
+        // Display the frame with all visualizations
+        cv::imshow("Vision Detector", display_frame);
+
+        // Handle keyboard input (ESC to quit)
+        int key = cv::waitKey(1);
+        if (key == 27) {  // ESC key
+            m_running = false;
+        }
+
         std::this_thread::sleep_for(std::chrono::milliseconds(50)); // ~20 FPS
     }
 
+    cv::destroyWindow("Vision Detector");
     reportEvent("Vision thread stopped");
 }
 
