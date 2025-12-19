@@ -1,6 +1,6 @@
 file(REMOVE_RECURSE
-  "../../../../lib/libNMEAParserLib.a"
-  "../../../../lib/libNMEAParserLib.pdb"
+  "/home/d2snc/Documents/switships/sensorfusion_fix/moos-ivp-morgan-stern-drive-mercury/lib/libNMEAParserLib.a"
+  "/home/d2snc/Documents/switships/sensorfusion_fix/moos-ivp-morgan-stern-drive-mercury/lib/libNMEAParserLib.pdb"
   "CMakeFiles/NMEAParserLib.dir/NMEAParser.cpp.o"
   "CMakeFiles/NMEAParserLib.dir/NMEAParser.cpp.o.d"
   "CMakeFiles/NMEAParserLib.dir/NMEAParserPacket.cpp.o"

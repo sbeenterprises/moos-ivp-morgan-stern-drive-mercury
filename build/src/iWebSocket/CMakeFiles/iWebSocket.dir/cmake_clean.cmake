@@ -1,6 +1,7 @@
 file(REMOVE_RECURSE
-  "../../../bin/iWebSocket"
-  "../../../bin/iWebSocket.pdb"
+  "/home/d2snc/Documents/switships/sensorfusion_fix/moos-ivp-morgan-stern-drive-mercury/bin/iWebSocket"
+  "/home/d2snc/Documents/switships/sensorfusion_fix/moos-ivp-morgan-stern-drive-mercury/bin/iWebSocket.pdb"
+  "CMakeFiles/iWebSocket.dir/link.d"
   "CMakeFiles/iWebSocket.dir/WebSocket.cpp.o"
   "CMakeFiles/iWebSocket.dir/WebSocket.cpp.o.d"
   "CMakeFiles/iWebSocket.dir/WebSocket_Info.cpp.o"

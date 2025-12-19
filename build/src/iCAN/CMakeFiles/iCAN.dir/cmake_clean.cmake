@@ -1,6 +1,7 @@
 file(REMOVE_RECURSE
-  "../../../bin/iCAN"
-  "../../../bin/iCAN.pdb"
+  "/home/d2snc/Documents/switships/sensorfusion_fix/moos-ivp-morgan-stern-drive-mercury/bin/iCAN"
+  "/home/d2snc/Documents/switships/sensorfusion_fix/moos-ivp-morgan-stern-drive-mercury/bin/iCAN.pdb"
+  "CMakeFiles/iCAN.dir/link.d"
   "CMakeFiles/iCAN.dir/CAN.cpp.o"
   "CMakeFiles/iCAN.dir/CAN.cpp.o.d"
   "CMakeFiles/iCAN.dir/CAN_Info.cpp.o"

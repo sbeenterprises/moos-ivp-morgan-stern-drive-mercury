@@ -1,6 +1,7 @@
 file(REMOVE_RECURSE
-  "../../../bin/iDivisorNMEA"
-  "../../../bin/iDivisorNMEA.pdb"
+  "/home/d2snc/Documents/switships/sensorfusion_fix/moos-ivp-morgan-stern-drive-mercury/bin/iDivisorNMEA"
+  "/home/d2snc/Documents/switships/sensorfusion_fix/moos-ivp-morgan-stern-drive-mercury/bin/iDivisorNMEA.pdb"
+  "CMakeFiles/iDivisorNMEA.dir/link.d"
   "CMakeFiles/iDivisorNMEA.dir/DivisorNMEA.cpp.o"
   "CMakeFiles/iDivisorNMEA.dir/DivisorNMEA.cpp.o.d"
   "CMakeFiles/iDivisorNMEA.dir/DivisorNMEA_Info.cpp.o"

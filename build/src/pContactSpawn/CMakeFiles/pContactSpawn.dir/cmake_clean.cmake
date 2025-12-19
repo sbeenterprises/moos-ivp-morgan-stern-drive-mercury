@@ -1,6 +1,7 @@
 file(REMOVE_RECURSE
-  "../../../bin/pContactSpawn"
-  "../../../bin/pContactSpawn.pdb"
+  "/home/d2snc/Documents/switships/sensorfusion_fix/moos-ivp-morgan-stern-drive-mercury/bin/pContactSpawn"
+  "/home/d2snc/Documents/switships/sensorfusion_fix/moos-ivp-morgan-stern-drive-mercury/bin/pContactSpawn.pdb"
+  "CMakeFiles/pContactSpawn.dir/link.d"
   "CMakeFiles/pContactSpawn.dir/ContactSpawn.cpp.o"
   "CMakeFiles/pContactSpawn.dir/ContactSpawn.cpp.o.d"
   "CMakeFiles/pContactSpawn.dir/ContactSpawn_Info.cpp.o"

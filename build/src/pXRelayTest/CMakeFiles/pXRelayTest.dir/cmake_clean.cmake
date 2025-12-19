@@ -1,6 +1,7 @@
 file(REMOVE_RECURSE
-  "../../../bin/pXRelayTest"
-  "../../../bin/pXRelayTest.pdb"
+  "/home/d2snc/Documents/switships/sensorfusion_fix/moos-ivp-morgan-stern-drive-mercury/bin/pXRelayTest"
+  "/home/d2snc/Documents/switships/sensorfusion_fix/moos-ivp-morgan-stern-drive-mercury/bin/pXRelayTest.pdb"
+  "CMakeFiles/pXRelayTest.dir/link.d"
   "CMakeFiles/pXRelayTest.dir/Relayer.cpp.o"
   "CMakeFiles/pXRelayTest.dir/Relayer.cpp.o.d"
   "CMakeFiles/pXRelayTest.dir/Relayer_Info.cpp.o"

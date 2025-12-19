@@ -1,6 +1,7 @@
 file(REMOVE_RECURSE
-  "../../../bin/iSignalK"
-  "../../../bin/iSignalK.pdb"
+  "/home/d2snc/Documents/switships/sensorfusion_fix/moos-ivp-morgan-stern-drive-mercury/bin/iSignalK"
+  "/home/d2snc/Documents/switships/sensorfusion_fix/moos-ivp-morgan-stern-drive-mercury/bin/iSignalK.pdb"
+  "CMakeFiles/iSignalK.dir/link.d"
   "CMakeFiles/iSignalK.dir/SignalK.cpp.o"
   "CMakeFiles/iSignalK.dir/SignalK.cpp.o.d"
   "CMakeFiles/iSignalK.dir/SignalK_Info.cpp.o"

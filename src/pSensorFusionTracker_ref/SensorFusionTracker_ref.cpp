@@ -17,27 +17,7 @@ using namespace std;
 
 SensorFusionTracker_ref::SensorFusionTracker_ref()
 {
-  next_track_id_ = 1;
-    association_threshold_ = 15.0;
-    track_timeout_ = 5.0;
-    quality_threshold_ = 0.5;
-    buffer_time_window_ = 0.5;
-    radar_noise_pos_ = 3.0;
-    radar_noise_vel_ = 0.5;
-    vision_noise_pos_ = 25.0;
-    process_noise_pos_ = 0.5;
-    process_noise_vel_ = 0.2;
-    process_noise_yaw_ = 0.1;
-    min_hits_to_confirm_ = 3;
-    max_misses_ = 5;
-    nav_x_ = 0.0;
-    nav_y_ = 0.0;
-    nav_heading_ = 0.0;
-    radar_count_ = 0;
-    vision_count_ = 0;
-    fusion_count_ = 0;
-    tracks_created_ = 0;
-    tracks_deleted_ = 0;
+  
 }
 
 //---------------------------------------------------------

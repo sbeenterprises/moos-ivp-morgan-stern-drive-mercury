@@ -1,6 +1,7 @@
 file(REMOVE_RECURSE
-  "../../../bin/planchaPID"
-  "../../../bin/planchaPID.pdb"
+  "/home/d2snc/Documents/switships/sensorfusion_fix/moos-ivp-morgan-stern-drive-mercury/bin/planchaPID"
+  "/home/d2snc/Documents/switships/sensorfusion_fix/moos-ivp-morgan-stern-drive-mercury/bin/planchaPID.pdb"
+  "CMakeFiles/planchaPID.dir/link.d"
   "CMakeFiles/planchaPID.dir/PIDParameterReader.cpp.o"
   "CMakeFiles/planchaPID.dir/PIDParameterReader.cpp.o.d"
   "CMakeFiles/planchaPID.dir/lanchaPID.cpp.o"

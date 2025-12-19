@@ -1,6 +1,7 @@
 file(REMOVE_RECURSE
-  "../../../bin/pSensorFusionTracker_ref"
-  "../../../bin/pSensorFusionTracker_ref.pdb"
+  "/home/d2snc/Documents/switships/sensorfusion_fix/moos-ivp-morgan-stern-drive-mercury/bin/pSensorFusionTracker_ref"
+  "/home/d2snc/Documents/switships/sensorfusion_fix/moos-ivp-morgan-stern-drive-mercury/bin/pSensorFusionTracker_ref.pdb"
+  "CMakeFiles/pSensorFusionTracker_ref.dir/link.d"
   "CMakeFiles/pSensorFusionTracker_ref.dir/SensorFusionTracker_ref.cpp.o"
   "CMakeFiles/pSensorFusionTracker_ref.dir/SensorFusionTracker_ref.cpp.o.d"
   "CMakeFiles/pSensorFusionTracker_ref.dir/SensorFusionTracker_ref_Info.cpp.o"
