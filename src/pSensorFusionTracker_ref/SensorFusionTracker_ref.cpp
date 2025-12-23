@@ -439,7 +439,7 @@ void SensorFusionTracker_ref::publishNodeReports()
         oss << "HDG=" << (track->getYaw() * 180.0 / M_PI) << ",";
         oss << "TIME=" << setprecision(3) << MOOSTime();
 
-        Notify("NODE_REPORT_FUSED", oss.str());
+        Notify("NODE_REPORT", oss.str());
     }
 }
 
