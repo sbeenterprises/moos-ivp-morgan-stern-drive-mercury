@@ -437,7 +437,7 @@ void SensorFusionTracker_ref::publishNodeReports()
         oss << "Y=" << track->getPy() << ",";
         oss << "SPD=" << (track->getSpeed() * 1.94384) << ",";
         oss << "HDG=" << (track->getYaw() * 180.0 / M_PI) << ",";
-        oss << "TIME=" << setprecision(3) << MOOSTime();
+        oss << "TIME=" << setprecision(3) << MOOSTime() << ",";
         oss << "LENGTH=100";
 
         Notify("NODE_REPORT", oss.str());
