@@ -526,7 +526,7 @@ void VisionDetector_ref::publishDetection(const VisionDetection& det)
     node_oss << "TIME=" << setprecision(3) << det.timestamp;
 
     // Publish NODE_REPORT (pMarineViewer will display this)
-    Notify("NODE_REPORT", node_oss.str());
+    //Notify("NODE_REPORT", node_oss.str());
 
     m_published_count++;
 
