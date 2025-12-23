@@ -429,6 +429,10 @@ void SensorFusionTracker_ref::publishNodeReports()
             continue;
         }
 
+        double hdg = track->getYaw() * 180.0 / M_PI;
+        while(hdg < 0) hdg += 360.0;
+        while(hdg >= 360.0) hdg -= 360.0;
+
         ostringstream oss;
         oss << fixed << setprecision(2);
         oss << "NAME=fused_" << track->getID() << ",";
@@ -436,7 +440,7 @@ void SensorFusionTracker_ref::publishNodeReports()
         oss << "X=" << track->getPx() << ",";
         oss << "Y=" << track->getPy() << ",";
         oss << "SPD=" << (track->getSpeed() * 1.94384) << ",";
-        oss << "HDG=" << (track->getYaw() * 180.0 / M_PI) << ",";
+        oss << "HDG=" << hdg << ",";
         oss << "TIME=" << setprecision(3) << MOOSTime() << ",";
         oss << "LENGTH=100";
 

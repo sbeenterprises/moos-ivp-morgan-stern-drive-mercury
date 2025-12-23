@@ -77,8 +77,8 @@ public:
     double getPy() const { return x_(1); }
     double getVx() const { return x_(5); }
     double getVy() const { return x_(6); }
-    double getSpeed() const { return x_(2); }
-    double getYaw() const { return x_(3); }
+    double getSpeed() const { return std::hypot(x_(5), x_(6)); }   
+    double getYaw() const { return std::atan2(x_(5), x_(6)); }     
 
     double getLastUpdateTime() const { return last_update_time_; }
     void   setLastUpdateTime(double t) { last_update_time_ = t; }
