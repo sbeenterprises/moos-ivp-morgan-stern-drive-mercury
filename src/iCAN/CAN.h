@@ -60,4 +60,3 @@ class CAN : public AppCastingMOOSApp
 };
 
 #endif 
-
