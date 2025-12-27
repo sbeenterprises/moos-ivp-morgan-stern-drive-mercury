@@ -413,8 +413,10 @@ std::string CAN::getGearCommand(double thrust_value)
 {
   if(thrust_value > 0) {
     return "18F005D0#7EFFFFFFFFFFFFFF"; // Forward gear
-  } else {
+  } else if (thrust_value == 0) {
     return "18F005D0#7DFFFFFFFFFFFFFF"; // Neutral gear
+  } else {
+    return "18F005D0#7CFFFFFFFFFFFFFF"; // Reverse Gear
   }
 }
 
@@ -423,9 +425,10 @@ std::string CAN::getGearCommand(double thrust_value)
 
 std::string CAN::getThrustCANFrame(double thrust_value)
 {
-  if(thrust_value <= 0) {
-    return "18000017#C1E015E1FFFFFFFF"; // 0%
-  }
+  //Removed here when thrust bellow zero
+  //if(thrust_value <= 0) {
+  //  return "18000017#C1E015E1FFFFFFFF"; // 0%
+  //}
 
   // Convert thrust value to percentage (0-100)
   int percentage = static_cast<int>(thrust_value);
