@@ -463,7 +463,6 @@ void WebSocket::handleControleManual(const std::string& value)
     Notify("MOOS_MANUAL_OVERIDE", "false");
     Notify("DESIRED_RUDDER", "0");
     Notify("DESIRED_THRUST", "0");
-    Notify("DESIRED_GEAR", "N");
   }
 }
 
@@ -594,6 +593,10 @@ void WebSocket::handleAutonomousStop(const std::string& value)
 {
   if (value == "true") {
     Notify("MOOS_MANUAL_OVERRIDE", "true");
+
+    //Stop the engine and put rudder in zero just for safety
+    Notify("DESIRED_RUDDER", "0");
+    Notify("DESIRED_THRUST", "0");
   }
 }
 

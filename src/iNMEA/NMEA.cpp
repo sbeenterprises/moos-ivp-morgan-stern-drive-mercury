@@ -131,6 +131,24 @@ static std::string buildGPRMC(double lat, double lon, double speed_m_s, double h
   return full.str();
 }
 
+// Build a GPHDT sentence containing heading (true)
+// $GPHDT,heading,T*checksum
+static std::string buildGPHDT(double heading_deg)
+{
+  ostringstream oss;
+  oss << "GPHDT,"
+      << fixed << setprecision(1) << heading_deg << ","
+      << "T";  // T = True heading
+
+  // Now add the checksum
+  string sentence_no_dollar = oss.str();
+  string checksum = nmeaChecksum(sentence_no_dollar);
+
+  ostringstream full;
+  full << "$" << sentence_no_dollar << "*" << checksum << "\r\n";
+  return full.str();
+}
+
 //---------------------------------------------------------
 // Procedure: OnNewMail()
 
@@ -176,18 +194,27 @@ bool NMEA::Iterate()
   AppCastingMOOSApp::Iterate();
 
   // -------------------------
-  // Build NMEA string
+  // Build NMEA strings
   // -------------------------
-  // For example, build just a single GPRMC sentence:
   std::string gprmc = buildGPRMC(nav_lat, nav_lon, nav_speed, nav_heading);
+  std::string gphdt = buildGPHDT(nav_heading);
 
   // -------------------------
   // Send via UDP socket
   // -------------------------
   if(m_socket_initialized) {
+    // Send GPRMC sentence
     sendto(m_udp_sock,
            gprmc.c_str(),
            gprmc.size(),
+           0,
+           (struct sockaddr*)&m_server_addr,
+           sizeof(m_server_addr));
+
+    // Send GPHDT sentence
+    sendto(m_udp_sock,
+           gphdt.c_str(),
+           gphdt.size(),
            0,
            (struct sockaddr*)&m_server_addr,
            sizeof(m_server_addr));
