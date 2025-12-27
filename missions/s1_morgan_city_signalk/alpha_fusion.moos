@@ -1,0 +1,240 @@
+//-------------------------------------------------
+// NAME: D. Lima (Modified by Abdul Aziz - Sensor Fusion)
+// FILE: alpha_fusion.moos
+//-------------------------------------------------
+
+ServerHost   = localhost
+ServerPort   = 9000
+Community    = alpha
+MOOSTimeWarp = 1
+
+//Morgan City
+LatOrigin  = 29.71970895316288
+LongOrigin = -91.14705165281887
+
+//------------------------------------------
+// Antler configuration  block
+ProcessConfig = ANTLER
+{
+  MSBetweenLaunches = 200
+
+  Run = MOOSDB        @ NewConsole = false
+  Run = pLogger       @ NewConsole = false
+  Run = planchaPID @ NewConsole = false
+  Run = iDivisorNMEA	@ NewConsole = false
+  Run = pHelmIvP      @ NewConsole = false
+  Run = uProcessWatch	@ NewConsole = false
+  Run = pNodeReporter	@ NewConsole = false
+  Run = pRealm	      @ NewConsole = false
+  Run = iCAN	      @ NewConsole = false
+  Run = iCANRec	      @ NewConsole = false
+  Run = iWebSocket	      @ NewConsole = false
+  Run = pXYpublisher      @ NewConsole = false
+  Run = pContactSpawn	      @ NewConsole = false
+  Run = pContactMgrV20 @ NewConsole = false
+  
+  // *** SENSOR FUSION ADDITIONS ***
+  Run = iRadarTargets @ NewConsole = false   // Radar interface
+  Run = pRadarBridge @ NewConsole = false    // Converts NODE_REPORT to RADAR_REPORT
+  Run = pSensorFusion @ NewConsole = false   // EKF fusion with temporal filtering
+}
+
+//------------------------------------------
+// iRadarTargets Config Block
+ProcessConfig = iRadarTargets
+{
+  AppTick   = 20
+  CommsTick = 20
+
+  // UDP Configuration for SPx Server
+  udp_port = 8091       // Port to receive NMEA $RATTM sentences
+  udp_host = 0.0.0.0    // Listen on all interfaces
+}
+
+//------------------------------------------
+// pRadarBridge Config Block (NEW)
+// Converts iRadarTargets NODE_REPORT to RADAR_REPORT format
+ProcessConfig = pRadarBridge
+{
+  AppTick   = 20
+  CommsTick = 20
+}
+
+//------------------------------------------
+// pSensorFusion Config Block (NEW)
+// EKF-based sensor fusion with temporal confirmation
+// Filters 44% of false alarms (debris, water lilies)
+ProcessConfig = pSensorFusion
+{
+  AppTick   = 10
+  CommsTick = 10
+  
+  // Association threshold (meters)
+  association_threshold  = 25.0
+  
+  // Quality threshold - only publish high-confidence tracks
+  // 0.3 = balanced (filters debris with <5 radar updates)
+  // 0.4 = conservative (stricter filtering)
+  // 0.2 = permissive (more tracks published)
+  min_publish_quality    = 0.3
+  
+  // Output variable name
+  output_var             = FUSED_NODE_REPORT
+  
+  // Fusion update rate (seconds)
+  fusion_interval        = 0.1
+}
+
+// pContactSpawn Config Block
+ProcessConfig = pContactSpawn
+{
+  AppTick 	= 1
+  CommsTick = 1 
+}
+
+//--------------------------------------------------------
+// pContactMgrV20 Config Block
+// MODIFIED: Now receives FUSED_NODE_REPORT instead of NODE_REPORT
+ProcessConfig = pContactMgrV20
+{
+  AppTick   = 2
+  CommsTick = 2
+
+  decay = 5,10
+
+  app_logging = true
+  
+  alert_verbose = true
+
+  contact_local_coords = force_lat_lon
+  
+  contact_max_age   = 5
+  display_radii     = true
+  display_radii_id  = avd
+  alert_range_color = gray70
+  cpa_range_color   = gray30
+
+  // Use fused tracks for collision avoidance
+  alert = id=avdcol_, var=CONTACT_INFO, val="name=$[VNAME] # contact=$[VNAME]"
+  alert = id=avdcol_, alert_range=1000, cpa_range=500
+
+  disable_var = XYZ_DISABLE_TARGET
+  enable_var  = XYZ_REENABLE_TARGET
+  
+  post_closest_range   = true
+  hold_alerts_for_helm = true
+}
+
+// iCANRec config block
+ProcessConfig = iCANRec
+{
+   AppTick   = 20
+   CommsTick = 20
+}
+
+// pXYpublisher config block
+ProcessConfig = pXYpublisher
+{
+   AppTick   = 4
+   CommsTick = 4
+}
+
+// iCAN config block
+ProcessConfig = iCAN
+{
+   AppTick   = 20
+   CommsTick = 20
+}
+
+// iDivisorNMEA config block
+ProcessConfig = iDivisorNMEA
+{
+   AppTick   = 20
+   CommsTick = 20
+}
+
+// planchaPID bloco de config
+ProcessConfig = planchaPID
+{
+   AppTick   = 20
+   CommsTick = 20
+   HEADING_KP = 0.15
+   HEADING_KI = 0.0
+   HEADING_KD = 0.26
+   HEADING_UPPER_BOUND = 20
+   HEADING_LOWER_BOUND = -20
+}
+
+// iWebSocket config block
+ProcessConfig = iWebSocket
+{
+   AppTick   = 20
+   CommsTick = 20
+}
+
+// pLogger config block
+ProcessConfig = pLogger
+{
+  AppTick   = 8
+  CommsTick = 8
+
+  AsyncLog = true
+
+  Log = IVPHELM_LIFE_EVENT @ 0 NOSYNC
+  Log = REPORT @ 0 NOSYNC
+  Log = BHV_SETTINGS @ 0 NOSYNC
+  Log = SUMMARY @ 0 NOSYNC
+  
+  // *** LOG SENSOR FUSION VARIABLES ***
+  Log = NODE_REPORT @ 0              // Raw radar
+  Log = RADAR_REPORT @ 0             // Converted radar
+  Log = FUSED_NODE_REPORT @ 0        // Filtered tracks
+  Log = VISION_REPORT @ 0            // Vision (if available)
+
+  LogAuxSrc = true
+  WildCardLogging = true
+  WildCardOmitPattern = *_STATUS
+  WildCardOmitPattern = DB_VARSUMMARY
+  WildCardOmitPattern = DB_RWSUMMARY
+  WildCardExclusionLog = true
+}
+
+// uProcessWatch config block
+ProcessConfig = uProcessWatch
+{
+  AppTick   = 4
+  CommsTick = 4
+
+  watch_all = true
+  nowatch   = uPokeDB*
+  nowatch   = uQueryDB*
+  nowatch   = uXMS*
+  nowatch   = uMAC*
+}
+
+// pHelmIvP config block
+ProcessConfig = pHelmIvP
+{
+  AppTick    = 4
+  CommsTick  = 4
+
+  behaviors  = alpha.bhv
+  domain     = course:0:359:360
+  domain     = speed:0:35:351
+
+  ok_skew = any
+  start_in_drive = false
+  hold_on_apps = pContactMgrV20
+}
+
+// pNodeReporter config block
+ProcessConfig = pNodeReporter
+{
+  AppTick    = 2
+  CommsTick	 = 2
+
+  cross_fill_policy = global
+  platform_type   = ship
+  platform_color  = red
+  platform_length = 100
+}

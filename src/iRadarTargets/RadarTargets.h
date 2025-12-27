@@ -45,6 +45,18 @@ class RadarTargets : public AppCastingMOOSApp
    double m_own_x;
    double m_own_y;
    std::map<std::string, double> m_last_report_time;
+
+   private:
+    // Radar target storage
+    struct RadarTarget {
+        double x, y;           // Local position
+        double vx, vy;         // Velocity
+        double range, bearing; // Polar coordinates
+        double last_update;    // Timestamp
+    };
+    std::map<std::string, RadarTarget> m_radar_targets;
+
+    void publishRadarTargets();
 };
 
 #endif 

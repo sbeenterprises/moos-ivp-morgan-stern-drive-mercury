@@ -1,0 +1,28 @@
+ServerHost = localhost
+ServerPort = 9000
+Community  = usv721
+
+ProcessConfig = ANTLER
+{
+  MSBetweenLaunches = 200
+  
+  Run = MOOSDB          @ NewConsole = false
+  Run = pRadarBridge    @ NewConsole = false
+  Run = pSensorFusion   @ NewConsole = false
+}
+
+ProcessConfig = pRadarBridge
+{
+  AppTick   = 20
+  CommsTick = 20
+}
+
+ProcessConfig = pSensorFusion
+{
+  AppTick   = 10
+  CommsTick = 10
+  
+  association_threshold  = 25.0
+  min_publish_quality    = 0.3
+  output_var             = FUSED_NODE_REPORT
+}

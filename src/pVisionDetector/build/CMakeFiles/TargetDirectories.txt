@@ -1,0 +1,7 @@
+/home/douglas/Documents/automation/moos-ivp-morgan-stern-drive-mercury/src/pVisionDetector/build/CMakeFiles/pVisionDetector.dir
+/home/douglas/Documents/automation/moos-ivp-morgan-stern-drive-mercury/src/pVisionDetector/build/CMakeFiles/edit_cache.dir
+/home/douglas/Documents/automation/moos-ivp-morgan-stern-drive-mercury/src/pVisionDetector/build/CMakeFiles/rebuild_cache.dir
+/home/douglas/Documents/automation/moos-ivp-morgan-stern-drive-mercury/src/pVisionDetector/build/CMakeFiles/list_install_components.dir
+/home/douglas/Documents/automation/moos-ivp-morgan-stern-drive-mercury/src/pVisionDetector/build/CMakeFiles/install.dir
+/home/douglas/Documents/automation/moos-ivp-morgan-stern-drive-mercury/src/pVisionDetector/build/CMakeFiles/install/local.dir
+/home/douglas/Documents/automation/moos-ivp-morgan-stern-drive-mercury/src/pVisionDetector/build/CMakeFiles/install/strip.dir

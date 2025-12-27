@@ -1,0 +1,2 @@
+/usr/local/bin/pSensorFusionTracker
+/usr/local/bin/pVisionDetector
