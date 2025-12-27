@@ -231,6 +231,9 @@ bool WebSocket::OnNewMail(MOOSMSG_LIST &NewMail)
       CMOOSGeodesy geodesy;
       geodesy.Initialise(lat_origin, lon_origin);
 
+      // OFfset to y by 100meters
+      y +=100;
+
       double lat, lon;
       geodesy.LocalGrid2LatLong(x, y, lat, lon);
 
