@@ -1,1 +1,73 @@
+# MOOS Log files
 MOOSLog*/
+*.mlog
+
+# Build directories
+build/
+build_/
+bin/
+lib/
+
+# CMake generated files
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+install_manifest.txt
+*.cmake
+
+# Compiled Object files
+*.o
+*.obj
+*.ko
+*.elf
+
+# Compiled Dynamic libraries
+*.so
+*.dylib
+*.dll
+
+# Compiled Static libraries
+*.a
+*.lib
+*.la
+*.lo
+
+# Executables
+*.exe
+*.out
+*.app
+
+# Dependency files
+*.d
+
+# IDE and Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+
+# Temporary files
+*.tmp
+*.bak
+*.log
+*.txt~
+trying*.txt
+
+# Mission specific logs and data
+missions/**/*.mlog
+missions/**/LOG_*
+missions/**/MOOSLog_*/
+missions/**/.LastOpenedMOOSLogDirectory
+
+# Generated documentation
+doc/html/
+doc/latex/
+doxygen_warnings.txt
