@@ -49,7 +49,7 @@ Behavior = BHV_Waypoint
    // Parameters specific to this behavior
    // ------------------------------------
       center_activate = false   // default
-   hibernation_radius = -1     // default
+   hibernation_radius = -1     // disabled
          inner_radius = 15       
          outer_radius = 30      
          outer_speed  = 1    
