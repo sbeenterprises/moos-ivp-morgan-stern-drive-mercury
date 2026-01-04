@@ -64,6 +64,8 @@ double contact_hdg = 0;
 WebSocket::WebSocket()
 {
   msg_recebida = "";
+  m_connection_timeout = 60.0; // Default 60 seconds timeout
+  m_last_connection_check = 0.0;
   initializeMessageHandlers();
 }
 
@@ -72,6 +74,8 @@ void WebSocket::AddWebSocket(ix::WebSocket* ws)
 {
   if (ws != nullptr) {
     m_webSockets.push_back(ws);
+    m_lastMessageTime[ws] = MOOSTime(); // Initialize with current time
+    reportEvent("New WebSocket client connected. Total clients: " + std::to_string(m_webSockets.size()));
   }
 }
 
@@ -80,6 +84,8 @@ void WebSocket::RemoveWebSocket(ix::WebSocket* ws)
   auto it = std::find(m_webSockets.begin(), m_webSockets.end(), ws);
   if (it != m_webSockets.end()) {
     m_webSockets.erase(it);
+    m_lastMessageTime.erase(ws); // Remove timestamp tracking
+    reportEvent("WebSocket client disconnected. Total clients: " + std::to_string(m_webSockets.size()));
   }
 }
 
@@ -91,6 +97,36 @@ bool WebSocket::HasConnectedClients() const
 size_t WebSocket::GetConnectedClientCount() const
 {
   return m_webSockets.size();
+}
+
+void WebSocket::UpdateConnectionTime(ix::WebSocket* ws)
+{
+  if (ws != nullptr) {
+    m_lastMessageTime[ws] = MOOSTime();
+  }
+}
+
+void WebSocket::CheckStaleConnections()
+{
+  double current_time = MOOSTime();
+  std::vector<ix::WebSocket*> stale_connections;
+  
+  // Find stale connections
+  for (auto& pair : m_lastMessageTime) {
+    double time_since_last_msg = current_time - pair.second;
+    if (time_since_last_msg > m_connection_timeout) {
+      stale_connections.push_back(pair.first);
+      reportRunWarning("Detected stale connection (" + 
+                      std::to_string(time_since_last_msg) + 
+                      "s since last message). Timeout: " + 
+                      std::to_string(m_connection_timeout) + "s");
+    }
+  }
+  
+  // Remove stale connections
+  for (auto* ws : stale_connections) {
+    RemoveWebSocket(ws);
+  }
 }
 
 void WebSocket::SendMessage(const std::string& message, bool binary)
@@ -267,6 +303,14 @@ bool WebSocket::OnConnectToServer()
 bool WebSocket::Iterate()
 {
   AppCastingMOOSApp::Iterate();
+  
+  // Check for stale connections every 10 seconds
+  double current_time = MOOSTime();
+  if (current_time - m_last_connection_check > 10.0) {
+    CheckStaleConnections();
+    m_last_connection_check = current_time;
+  }
+  
   // Aqui você pode incluir outras operações se necessário
 
   //Analysis the variable coming from Freeboard
@@ -418,6 +462,19 @@ bool WebSocket::buildReport()
   actab << "Status"  << "Running";
   actab << "Connected Clients" << std::to_string(GetConnectedClientCount());
   actab << "Mensagem Recebida"  << msg_recebida;
+  actab << "Connection Timeout" << std::to_string(m_connection_timeout) + "s";
+  
+  // Show connection health
+  if (!m_webSockets.empty()) {
+    m_msgs << endl << "Connection Health:" << endl;
+    double current_time = MOOSTime();
+    for (size_t i = 0; i < m_webSockets.size(); i++) {
+      auto* ws = m_webSockets[i];
+      double time_since_last_msg = current_time - m_lastMessageTime[ws];
+      m_msgs << "  Client " << (i+1) << ": Last message " 
+             << std::fixed << std::setprecision(1) << time_since_last_msg << "s ago" << endl;
+    }
+  }
 
   m_msgs << actab.getFormattedString();
 
@@ -570,25 +627,106 @@ void WebSocket::handleAutonomousWaypoints(const std::string& value)
 
 void WebSocket::handleAutonomousStart(const std::string& value)
 {
-  size_t hashPos = value.find('#');
-  if (hashPos != std::string::npos) {
-    std::string boolPart = value.substr(0, hashPos);
-    std::string speedPart = value.substr(hashPos + 1);
-
+  // New format: true#SPEED#WAYPOINTS
+  // Example: true#10#29.719,-91.147:29.720,-91.148
+  
+  size_t firstHashPos = value.find('#');
+  if (firstHashPos != std::string::npos) {
+    std::string boolPart = value.substr(0, firstHashPos);
+    std::string remainder = value.substr(firstHashPos + 1);
+    
+    size_t secondHashPos = remainder.find('#');
+    
     if (boolPart == "true") {
       Notify("WAYPOINT", "true");
       Notify("MOOS_MANUAL_OVERRIDE", "false");
 
-      try {
-        double value_speed = std::stod(speedPart);
-        Notify("WPT_UPDATE", "speed=" + std::to_string(value_speed));
-      } catch (const std::exception& e) {
-        std::cerr << "Error parsing speed value: " << speedPart << std::endl;
+      // Parse speed
+      if (secondHashPos != std::string::npos) {
+        // Format: true#SPEED#WAYPOINTS
+        std::string speedPart = remainder.substr(0, secondHashPos);
+        std::string waypointsPart = remainder.substr(secondHashPos + 1);
+        
+        try {
+          double value_speed = std::stod(speedPart);
+          Notify("WPT_UPDATE", "speed=" + std::to_string(value_speed));
+          std::cout << "[AUTONOMOUS_START] Set speed: " << value_speed << std::endl;
+        } catch (const std::exception& e) {
+          std::cerr << "Error parsing speed value: " << speedPart << std::endl;
+        }
+        
+        // Parse and convert waypoints
+        if (!waypointsPart.empty()) {
+          double lat_origin = 29.71970895316288;
+          double lon_origin = -91.14705165281887;
+          m_geodesy.Initialise(lat_origin, lon_origin);
+
+          std::vector<std::string> coordTokens;
+          std::istringstream tokenStream(waypointsPart);
+          std::string token;
+          while (std::getline(tokenStream, token, ':')) {
+            if (!token.empty()) {
+              coordTokens.push_back(token);
+            }
+          }
+
+          std::vector<std::string> convertedCoords;
+          for (const auto &coordStr : coordTokens) {
+            size_t commaPos = coordStr.find(',');
+            if (commaPos == std::string::npos) {
+              std::cerr << "Invalid coordinate format for: " << coordStr << std::endl;
+              continue;
+            }
+
+            std::string latPart = coordStr.substr(0, commaPos);
+            std::string lonPart = coordStr.substr(commaPos + 1);
+
+            try {
+              double orig_lon = std::stod(lonPart);
+              double orig_lat = std::stod(latPart);
+
+              double local_y = 0.0, local_x = 0.0;
+              m_geodesy.LatLong2LocalUTM(orig_lat, orig_lon, local_y, local_x);
+
+              std::ostringstream oss;
+              oss << std::fixed << std::setprecision(1) << local_x << "," << local_y;
+              convertedCoords.push_back(oss.str());
+            } catch (const std::exception &e) {
+              std::cerr << "Error converting coordinate (" << coordStr << "): " << e.what() << std::endl;
+            }
+          }
+
+          std::ostringstream finalStream;
+          finalStream << "polygon=";
+          bool first = true;
+          for (const auto &convertedCoord : convertedCoords) {
+            if (!first) {
+              finalStream << ":";
+            }
+            finalStream << convertedCoord;
+            first = false;
+          }
+
+          std::string wpt_update_str = finalStream.str();
+          Notify("WPT_UPDATE", wpt_update_str);
+          std::cout << "[AUTONOMOUS_START] Set waypoints: " << coordTokens.size() << " points" << std::endl;
+        }
+      } else {
+        // Old format: true#SPEED (no waypoints)
+        try {
+          double value_speed = std::stod(remainder);
+          Notify("WPT_UPDATE", "speed=" + std::to_string(value_speed));
+          std::cout << "[AUTONOMOUS_START] Set speed (legacy): " << value_speed << std::endl;
+        } catch (const std::exception& e) {
+          std::cerr << "Error parsing speed value: " << remainder << std::endl;
+        }
       }
     }
   } else if (value == "true") {
+    // Simple format without speed or waypoints
     Notify("WAYPOINT", "true");
     Notify("MOOS_MANUAL_OVERRIDE", "false");
+    std::cout << "[AUTONOMOUS_START] Started (no speed/waypoints)" << std::endl;
   }
 }
 

@@ -24,6 +24,9 @@ int port = 8000;
 std::string host("0.0.0.0"); // If you need this server to be accessible on a different machine, use "0.0.0.0"
 ix::WebSocketServer server(port, host);
 
+// Configure server heartbeat (ping interval in seconds)
+const int PING_INTERVAL_SECONDS = 30;
+
 
 int main(int argc, char *argv[])
 {
@@ -61,6 +64,9 @@ int main(int argc, char *argv[])
           // Add the new WebSocket connection to the list
           WebSocket.AddWebSocket(&webSocket);
           std::cout << "Total connected clients: " << WebSocket.GetConnectedClientCount() << std::endl;
+          
+          // Enable heartbeat for this connection
+          webSocket.setPingInterval(PING_INTERVAL_SECONDS);
 
       } 
       else if (msg->type == ix::WebSocketMessageType::Message)
@@ -70,6 +76,9 @@ int main(int argc, char *argv[])
           // Second parameter tells whether we are sending the message in binary or text mode.
           // Here we send it in the same mode as it was received.
           std::cout << "Received: " << msg->str << std::endl;
+          
+          // Update connection timestamp on message receive
+          WebSocket.UpdateConnectionTime(&webSocket);
           
           //Adiciono o valor de msg ao objeto
           WebSocket.msg_recebida = msg -> str;
@@ -96,9 +105,29 @@ int main(int argc, char *argv[])
       else if (msg->type == ix::WebSocketMessageType::Close)
       {
           std::cout << "Client disconnected" << std::endl;
+          std::cout << "Close code: " << msg->closeInfo.code << std::endl;
+          std::cout << "Close reason: " << msg->closeInfo.reason << std::endl;
           // Remove the WebSocket from the list when client disconnects
           WebSocket.RemoveWebSocket(&webSocket);
           std::cout << "Total connected clients: " << WebSocket.GetConnectedClientCount() << std::endl;
+      }
+      else if (msg->type == ix::WebSocketMessageType::Error)
+      {
+          std::cerr << "WebSocket Error: " << msg->errorInfo.reason << std::endl;
+          std::cerr << "Error code: " << msg->errorInfo.http_status << std::endl;
+          // Connection error - remove from list
+          WebSocket.RemoveWebSocket(&webSocket);
+      }
+      else if (msg->type == ix::WebSocketMessageType::Ping)
+      {
+          std::cout << "Received ping from client" << std::endl;
+          // Pong is sent automatically by the library
+          WebSocket.UpdateConnectionTime(&webSocket);
+      }
+      else if (msg->type == ix::WebSocketMessageType::Pong)
+      {
+          std::cout << "Received pong from client" << std::endl;
+          WebSocket.UpdateConnectionTime(&webSocket);
       }
   });
 

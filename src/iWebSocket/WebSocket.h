@@ -3,7 +3,7 @@
 /*    ORGN: MIT, Cambridge MA                               */
 /*    FILE: WebSocket.h                                          */
 /*    DATE: December 29th, 1963                             */
-/************************************************************/
+/***********************************************************/
 
 #ifndef WebSocket_HEADER
 #define WebSocket_HEADER
@@ -43,6 +43,10 @@ class WebSocket : public AppCastingMOOSApp
    // Method to get number of connected clients
    size_t GetConnectedClientCount() const;
    
+   // Connection monitoring methods
+   void UpdateConnectionTime(ix::WebSocket* ws);
+   void CheckStaleConnections();
+   
 
  protected: // Standard MOOSApp functions to overload  
    bool OnNewMail(MOOSMSG_LIST &NewMail);
@@ -60,7 +64,12 @@ class WebSocket : public AppCastingMOOSApp
 
  private: // State variables
   std::vector<ix::WebSocket*> m_webSockets; // Store multiple web socket connections
+  std::map<ix::WebSocket*, double> m_lastMessageTime; // Track last message time for each connection
   CMOOSGeodesy m_geodesy;
+  
+  // Connection monitoring
+  double m_connection_timeout; // Timeout in seconds for stale connections
+  double m_last_connection_check; // Last time we checked for stale connections
   
   // State machine for message handling
   typedef void (WebSocket::*MessageHandler)(const std::string& value);
