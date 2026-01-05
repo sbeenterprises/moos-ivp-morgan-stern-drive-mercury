@@ -66,6 +66,8 @@ WebSocket::WebSocket()
   msg_recebida = "";
   m_connection_timeout = 60.0; // Default 60 seconds timeout
   m_last_connection_check = 0.0;
+  m_heartbeat_interval = 30.0; // Send heartbeat every 30 seconds (less than frontend's 60s timeout)
+  m_last_heartbeat_time = 0.0;
   initializeMessageHandlers();
 }
 
@@ -304,11 +306,18 @@ bool WebSocket::Iterate()
 {
   AppCastingMOOSApp::Iterate();
   
-  // Check for stale connections every 10 seconds
   double current_time = MOOSTime();
+  
+  // Check for stale connections every 10 seconds
   if (current_time - m_last_connection_check > 10.0) {
     CheckStaleConnections();
     m_last_connection_check = current_time;
+  }
+  
+  // Send heartbeat message to keep connection alive
+  if (HasConnectedClients() && (current_time - m_last_heartbeat_time > m_heartbeat_interval)) {
+    SendMessage("HEARTBEAT=" + std::to_string(current_time));
+    m_last_heartbeat_time = current_time;
   }
   
   // Aqui você pode incluir outras operações se necessário

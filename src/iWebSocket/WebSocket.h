@@ -71,6 +71,10 @@ class WebSocket : public AppCastingMOOSApp
   double m_connection_timeout; // Timeout in seconds for stale connections
   double m_last_connection_check; // Last time we checked for stale connections
   
+  // Heartbeat to keep connection alive
+  double m_heartbeat_interval; // Interval in seconds to send heartbeat messages
+  double m_last_heartbeat_time; // Last time we sent a heartbeat
+  
   // State machine for message handling
   typedef void (WebSocket::*MessageHandler)(const std::string& value);
   std::map<std::string, MessageHandler> m_messageHandlers;
