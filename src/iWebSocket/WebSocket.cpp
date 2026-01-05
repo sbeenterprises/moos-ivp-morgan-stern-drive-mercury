@@ -314,22 +314,27 @@ bool WebSocket::Iterate()
   // Aqui você pode incluir outras operações se necessário
 
   //Analysis the variable coming from Freeboard
-  //Split in the equal sign
-  size_t equalsPos = msg_recebida.find('=');
+  //Only process if there's a new message
+  if (!msg_recebida.empty()) {
+    //Split in the equal sign
+    size_t equalsPos = msg_recebida.find('=');
 
-  //take the two sides
-  std::string key = msg_recebida.substr(0, equalsPos);
-  std::string value = msg_recebida.substr(equalsPos + 1);
+    //take the two sides
+    std::string key = msg_recebida.substr(0, equalsPos);
+    std::string value = msg_recebida.substr(equalsPos + 1);
 
-  std::cout << "Key: " << key << "\n";
-  std::cout << "Value: " << value << "\n";
+    std::cout << "Key: " << key << "\n";
+    std::cout << "Value: " << value << "\n";
 
-  // State machine approach: O(log n) lookup instead of O(n) linear search
-  auto handler = m_messageHandlers.find(key);
-  if (handler != m_messageHandlers.end()) {
-    (this->*(handler->second))(value);
-  } 
-
+    // State machine approach: O(log n) lookup instead of O(n) linear search
+    auto handler = m_messageHandlers.find(key);
+    if (handler != m_messageHandlers.end()) {
+      (this->*(handler->second))(value);
+    }
+    
+    // Clear the message after processing to prevent re-execution
+    msg_recebida = "";
+  }
 
   // If you have pending messages to send
   //Send messages to the websocket in FreeboardSK
