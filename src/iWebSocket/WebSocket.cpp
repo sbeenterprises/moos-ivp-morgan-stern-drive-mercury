@@ -77,6 +77,13 @@ void WebSocket::AddWebSocket(ix::WebSocket* ws)
   if (ws != nullptr) {
     m_webSockets.push_back(ws);
     m_lastMessageTime[ws] = MOOSTime(); // Initialize with current time
+    
+    // Initialize heartbeat time when first client connects
+    if (m_webSockets.size() == 1) {
+      m_last_heartbeat_time = MOOSTime();
+      reportEvent("First client connected - heartbeat timer initialized");
+    }
+    
     reportEvent("New WebSocket client connected. Total clients: " + std::to_string(m_webSockets.size()));
   }
 }
@@ -521,6 +528,7 @@ void WebSocket::initializeMessageHandlers()
   m_messageHandlers["HEADING_KD"] = &WebSocket::handleHeadingKd;
   m_messageHandlers["TRIM"] = &WebSocket::handleTrim;
   m_messageHandlers["STATION_KEEP_WAYPOINT"] = &WebSocket::handleStationKeepWaypoint;
+  m_messageHandlers["HEARTBEAT_PING"] = &WebSocket::handleHeartbeatPing;
 }
 
 void WebSocket::handleTrim(const std::string& value)
@@ -957,5 +965,13 @@ void WebSocket::handleStationKeepWaypoint(const std::string& value)
     Notify("STATION_UPDATES", "pwt=50");
     Notify("WPT_UPDATE", "pwt=250");
   }
+}
+
+void WebSocket::handleHeartbeatPing(const std::string& value)
+{
+  // The connection timestamp is already updated when any message is received
+  // via the UpdateConnectionTime() call in the message handler
+  // This handler just acknowledges the heartbeat ping
+  reportEvent("Received heartbeat ping from client: " + value);
 }
 
