@@ -529,6 +529,7 @@ void WebSocket::initializeMessageHandlers()
   m_messageHandlers["TRIM"] = &WebSocket::handleTrim;
   m_messageHandlers["STATION_KEEP_WAYPOINT"] = &WebSocket::handleStationKeepWaypoint;
   m_messageHandlers["HEARTBEAT_PING"] = &WebSocket::handleHeartbeatPing;
+  m_messageHandlers["REPEAT"] = &WebSocket::handleRepeat;
 }
 
 void WebSocket::handleTrim(const std::string& value)
@@ -973,5 +974,20 @@ void WebSocket::handleHeartbeatPing(const std::string& value)
   // via the UpdateConnectionTime() call in the message handler
   // This handler just acknowledges the heartbeat ping
   reportEvent("Received heartbeat ping from client: " + value);
+}
+
+void WebSocket::handleRepeat(const std::string& value)
+{
+  // Convert the repeat count from string to integer to validate
+  try {
+    int repeat_count = std::stoi(value);
+    
+    // Send the repeat parameter to MOOS-IvP via WPT_UPDATE
+    Notify("WPT_UPDATE", "repeat=" + value);
+    
+    std::cout << "[REPEAT] Set repeat count: " << repeat_count << std::endl;
+  } catch (const std::exception& e) {
+    std::cerr << "Error parsing repeat value: " << value << " - " << e.what() << std::endl;
+  }
 }
 
