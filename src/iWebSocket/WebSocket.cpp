@@ -49,6 +49,8 @@ std::string ivphelm_state;
 std::string ivphelm_allstop;
 std::string wpt_stat;
 std::string view_point;
+std::string id_route;
+
 
 // NODE_REPORT contact variables
 std::string contact_name = "";
@@ -364,6 +366,7 @@ bool WebSocket::Iterate()
   SendMessage("IVPHELM_ALLSTOP=" + ivphelm_allstop); // Sends the all stop state
   SendMessage("WPT_STAT=" + wpt_stat); // Sends the way point state
   SendMessage("VIEW_POINT=" + view_point); // Sends the view point
+  SendMessage("ID_ROUTE=" + id_route); // Sends the ID of the route
   SendMessage("ENGINE_ACCELERATOR_PEDAL_POSITION=" + std::to_string(engine_accelerator_pedal_position)); // Sends the engine accelerator pedal position
   SendMessage("ENGINE_PERCENT_LOAD=" + std::to_string(engine_percent_load)); // Sends the engine percent load
   SendMessage("ENGINE_SPEED=" + std::to_string(engine_speed)); // Sends the engine speed
@@ -456,6 +459,7 @@ void WebSocket::registerVariables()
   Register("ENGINE_INTAKE_MANIFOLD_PRESSURE", 0);
   Register("ENGINE_BATTERY_VOLTAGE", 0);
   Register("NODE_REPORT", 0);
+  Register("ID_ROUTE", 0);
 
   
 }
@@ -650,8 +654,8 @@ void WebSocket::handleAutonomousWaypoints(const std::string& value)
 
 void WebSocket::handleAutonomousStart(const std::string& value)
 {
-  // New format: true#SPEED#WAYPOINTS
-  // Example: true#10#29.719,-91.147:29.720,-91.148
+  // New format: true#SPEED#WAYPOINTS#REPEAT=true/false
+  // Example: true#10#42.3601,-71.0589:42.3602,-71.0590#REPEAT=true
   
   size_t firstHashPos = value.find('#');
   if (firstHashPos != std::string::npos) {
@@ -666,9 +670,57 @@ void WebSocket::handleAutonomousStart(const std::string& value)
 
       // Parse speed
       if (secondHashPos != std::string::npos) {
-        // Format: true#SPEED#WAYPOINTS
+        // Format: true#SPEED#WAYPOINTS or true#SPEED#WAYPOINTS#REPEAT=true/false
         std::string speedPart = remainder.substr(0, secondHashPos);
         std::string waypointsPart = remainder.substr(secondHashPos + 1);
+        
+        // Check if there's a REPEAT parameter
+        size_t thirdHashPos = waypointsPart.find("#REPEAT=");
+        std::string actualWaypointsPart = waypointsPart;
+        bool hasRepeat = false;
+        bool repeatValue = false;
+        std::string idRoute = "";
+        
+        if (thirdHashPos != std::string::npos) {
+          // Extract waypoints part (before REPEAT)
+          actualWaypointsPart = waypointsPart.substr(0, thirdHashPos);
+          
+          // Extract everything after REPEAT
+          std::string afterRepeat = waypointsPart.substr(thirdHashPos + 8); // skip "#REPEAT="
+          
+          // Check if there's an ID_ROUTE parameter
+          size_t idRoutePos = afterRepeat.find("#ID_ROUTE=");
+          std::string repeatPart = afterRepeat;
+          
+          if (idRoutePos != std::string::npos) {
+            // Extract REPEAT value (before ID_ROUTE)
+            repeatPart = afterRepeat.substr(0, idRoutePos);
+            // Extract ID_ROUTE value (after #ID_ROUTE=)
+            idRoute = afterRepeat.substr(idRoutePos + 10); // skip "#ID_ROUTE="
+          }
+          
+          if (repeatPart == "true") {
+            repeatValue = true;
+            hasRepeat = true;
+          } else if (repeatPart == "false") {
+            repeatValue = false;
+            hasRepeat = true;
+          }
+        } else {
+          // No REPEAT parameter, but check for ID_ROUTE directly
+          size_t idRoutePos = waypointsPart.find("#ID_ROUTE=");
+          if (idRoutePos != std::string::npos) {
+            actualWaypointsPart = waypointsPart.substr(0, idRoutePos);
+            idRoute = waypointsPart.substr(idRoutePos + 10); // skip "#ID_ROUTE="
+          }
+        }
+        
+        // Save ID_ROUTE if present
+        if (!idRoute.empty()) {
+          Notify("ID_ROUTE", idRoute);
+          id_route = idRoute;
+          std::cout << "[AUTONOMOUS_START] Set ID_ROUTE: " << idRoute << std::endl;
+        }
         
         try {
           double value_speed = std::stod(speedPart);
@@ -679,13 +731,13 @@ void WebSocket::handleAutonomousStart(const std::string& value)
         }
         
         // Parse and convert waypoints
-        if (!waypointsPart.empty()) {
+        if (!actualWaypointsPart.empty()) {
           double lat_origin = 29.71970895316288;
           double lon_origin = -91.14705165281887;
           m_geodesy.Initialise(lat_origin, lon_origin);
 
           std::vector<std::string> coordTokens;
-          std::istringstream tokenStream(waypointsPart);
+          std::istringstream tokenStream(actualWaypointsPart);
           std::string token;
           while (std::getline(tokenStream, token, ':')) {
             if (!token.empty()) {
@@ -733,6 +785,18 @@ void WebSocket::handleAutonomousStart(const std::string& value)
           std::string wpt_update_str = finalStream.str();
           Notify("WPT_UPDATE", wpt_update_str);
           std::cout << "[AUTONOMOUS_START] Set waypoints: " << coordTokens.size() << " points" << std::endl;
+        }
+        
+        // Send repeat update LAST, after everything else, with a delay
+        if (hasRepeat) {
+          usleep(100000); // 100ms delay
+          if (repeatValue) {
+            Notify("WPT_UPDATE", "repeat=1000");
+            std::cout << "[AUTONOMOUS_START] Set repeat: 1000 (infinite)" << std::endl;
+          } else {
+            Notify("WPT_UPDATE", "repeat=0");
+            std::cout << "[AUTONOMOUS_START] Set repeat: 1 (once)" << std::endl;
+          }
         }
       } else {
         // Old format: true#SPEED (no waypoints)
