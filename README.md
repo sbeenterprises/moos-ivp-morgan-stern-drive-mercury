@@ -31,11 +31,18 @@ The directory structure for the moos-ivp-extend is described below:
 | scripts          | Directory for script files                  |
 | src              | Directory for source code                   |
 
+
+# Useful Commands
+```bash
 #Activate CAN
 '''
 sudo slcand -o -c -s5 /dev/ttyACM2 slcan0
 sudo ip link set slcan0 up
 '''
+
+printf '$VNRST*4D\r\n' | sudo tee /dev/ttyUSB1
+```
+
 # Build Instructions
 
 #Before Building
