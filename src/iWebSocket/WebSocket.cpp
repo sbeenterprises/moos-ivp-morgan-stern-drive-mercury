@@ -364,31 +364,40 @@ bool WebSocket::Iterate()
   //For some reason, is just sending from this on
   //I put the value_setpoint to facilitate the calibration
   //SendMessage("DESIRED_HEADING=" + std::to_string(value_setpoint)+"/NAV_HEADING="+std::to_string(nav_heading)); // Sends desired heading
-  SendMessage("IVPHELM_STATE=" + ivphelm_state); // Sends the state of the IVP Helm
-  SendMessage("WPT_INDEX=" + std::to_string(wpt_index)); // Sends the way point index
-  SendMessage("IVPHELM_ALLSTOP=" + ivphelm_allstop); // Sends the all stop state
-  SendMessage("WPT_STAT=" + wpt_stat); // Sends the way point state
-  SendMessage("VIEW_POINT=" + view_point); // Sends the view point
-  SendMessage("ID_ROUTE=" + id_route); // Sends the ID of the route
-  SendMessage("DESIRED_SPEED=" + std::to_string(desired_speed)); // Sends the desired speed
-  SendMessage("ENGINE_ACCELERATOR_PEDAL_POSITION=" + std::to_string(engine_accelerator_pedal_position)); // Sends the engine accelerator pedal position
-  SendMessage("ENGINE_PERCENT_LOAD=" + std::to_string(engine_percent_load)); // Sends the engine percent load
-  SendMessage("ENGINE_SPEED=" + std::to_string(engine_speed)); // Sends the engine speed
-  SendMessage("ENGINE_PERCENT_TORQUE=" + std::to_string(engine_percent_torque)); // Sends the engine percent torque
-  SendMessage("ENGINE_ACTIVE_DTCS=" + std::to_string(engine_active_dtcs)); // Sends the engine active DTCs
-  SendMessage("ENGINE_COOLANT_TEMP=" + std::to_string(engine_coolant_temp)); // Sends the engine coolant temperature
-  SendMessage("ENGINE_OIL_TEMP=" + std::to_string(engine_oil_temp)); // Sends the engine oil temperature
-  SendMessage("ENGINE_OIL_PRESSURE=" + std::to_string(engine_oil_pressure)); // Sends the engine oil pressure
-  SendMessage("ENGINE_FUEL_RATE=" + std::to_string(engine_fuel_rate)); // Sends the engine fuel rate
-  SendMessage("ENGINE_INTAKE_MANIFOLD_PRESSURE=" + std::to_string(engine_intake_manifold_pressure)); // Sends the engine intake manifold pressure
-  SendMessage("ENGINE_BATTERY_VOLTAGE=" + std::to_string(engine_battery_voltage)); // Sends the engine battery voltage
+  // Build consolidated JSON message with all telemetry data
+  Json::Value root;
+  root["IVPHELM_STATE"] = ivphelm_state;
+  root["WPT_INDEX"] = wpt_index;
+  root["IVPHELM_ALLSTOP"] = ivphelm_allstop;
+  root["WPT_STAT"] = wpt_stat;
+  root["VIEW_POINT"] = view_point;
+  root["ID_ROUTE"] = id_route;
+  root["DESIRED_SPEED"] = desired_speed;
+  root["ENGINE_ACCELERATOR_PEDAL_POSITION"] = engine_accelerator_pedal_position;
+  root["ENGINE_PERCENT_LOAD"] = engine_percent_load;
+  root["ENGINE_SPEED"] = engine_speed;
+  root["ENGINE_PERCENT_TORQUE"] = engine_percent_torque;
+  root["ENGINE_ACTIVE_DTCS"] = engine_active_dtcs;
+  root["ENGINE_COOLANT_TEMP"] = engine_coolant_temp;
+  root["ENGINE_OIL_TEMP"] = engine_oil_temp;
+  root["ENGINE_OIL_PRESSURE"] = engine_oil_pressure;
+  root["ENGINE_FUEL_RATE"] = engine_fuel_rate;
+  root["ENGINE_INTAKE_MANIFOLD_PRESSURE"] = engine_intake_manifold_pressure;
+  root["ENGINE_BATTERY_VOLTAGE"] = engine_battery_voltage;
 
-  // Send contact information in a single message
-  SendMessage("CONTACT_INFO=NAME:" + contact_name +
-              ",LAT:" + std::to_string(contact_lat) +
-              ",LON:" + std::to_string(contact_lon) +
-              ",SPD:" + std::to_string(contact_spd) +
-              ",HDG:" + std::to_string(contact_hdg));
+  // Add contact info as nested object
+  Json::Value contact;
+  contact["NAME"] = contact_name;
+  contact["LAT"] = contact_lat;
+  contact["LON"] = contact_lon;
+  contact["SPD"] = contact_spd;
+  contact["HDG"] = contact_hdg;
+  root["CONTACT_INFO"] = contact;
+
+  // Send single JSON message (compact format for network efficiency)
+  Json::StreamWriterBuilder writer;
+  writer["indentation"] = "";
+  SendMessage(Json::writeString(writer, root));
 
   AppCastingMOOSApp::PostReport();
   return(true);
