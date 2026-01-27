@@ -32,6 +32,7 @@ double nav_long = 0;
 double nav_speed = 0;
 double nav_heading = 0;
 double desired_heading = 0;
+double desired_speed = 0;
 double value_setpoint = 0;
 double wpt_index = 0; // Index of the current waypoint
 double engine_accelerator_pedal_position = 0;
@@ -207,6 +208,8 @@ bool WebSocket::OnNewMail(MOOSMSG_LIST &NewMail)
       nav_heading = msg.GetDouble();
     else if(key == "DESIRED_HEADING")
       desired_heading = msg.GetDouble();
+    else if(key == "DESIRED_SPEED")
+      desired_speed = msg.GetDouble();
     else if(key == "IVPHELM_STATE")
       ivphelm_state = msg.GetString();
     else if(key == "WPT_INDEX")
@@ -367,6 +370,7 @@ bool WebSocket::Iterate()
   SendMessage("WPT_STAT=" + wpt_stat); // Sends the way point state
   SendMessage("VIEW_POINT=" + view_point); // Sends the view point
   SendMessage("ID_ROUTE=" + id_route); // Sends the ID of the route
+  SendMessage("DESIRED_SPEED=" + std::to_string(desired_speed)); // Sends the desired speed
   SendMessage("ENGINE_ACCELERATOR_PEDAL_POSITION=" + std::to_string(engine_accelerator_pedal_position)); // Sends the engine accelerator pedal position
   SendMessage("ENGINE_PERCENT_LOAD=" + std::to_string(engine_percent_load)); // Sends the engine percent load
   SendMessage("ENGINE_SPEED=" + std::to_string(engine_speed)); // Sends the engine speed
