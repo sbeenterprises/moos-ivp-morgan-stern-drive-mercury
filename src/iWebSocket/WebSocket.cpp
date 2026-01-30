@@ -51,6 +51,8 @@ std::string ivphelm_allstop;
 std::string wpt_stat;
 std::string view_point;
 std::string id_route;
+bool repeat_mission = false;
+std::string base_coords;
 
 
 // NODE_REPORT contact variables
@@ -242,6 +244,8 @@ bool WebSocket::OnNewMail(MOOSMSG_LIST &NewMail)
       engine_battery_voltage = msg.GetDouble();
     else if(key == "VIEW_POINT")
       view_point = msg.GetString();
+    else if(key == "BASE_COORDS")
+      base_coords = msg.GetString();
     else if(key == "NODE_REPORT") {
       // Parse NODE_REPORT to extract NAME, X, Y, SPD, HDG
       std::string node_report = msg.GetString();
@@ -372,7 +376,9 @@ bool WebSocket::Iterate()
   root["WPT_STAT"] = wpt_stat;
   root["VIEW_POINT"] = view_point;
   root["ID_ROUTE"] = id_route;
+  root["REPEAT_MISSION"] = repeat_mission;
   root["DESIRED_SPEED"] = desired_speed;
+  root["BASE_COORDS"] = base_coords;
   root["ENGINE_ACCELERATOR_PEDAL_POSITION"] = engine_accelerator_pedal_position;
   root["ENGINE_PERCENT_LOAD"] = engine_percent_load;
   root["ENGINE_SPEED"] = engine_speed;
@@ -473,6 +479,8 @@ void WebSocket::registerVariables()
   Register("ENGINE_BATTERY_VOLTAGE", 0);
   Register("NODE_REPORT", 0);
   Register("ID_ROUTE", 0);
+  Register("REPEAT_MISSION", 0);
+  Register("BASE_COORDS", 0);
 
   
 }
@@ -547,6 +555,7 @@ void WebSocket::initializeMessageHandlers()
   m_messageHandlers["STATION_KEEP_WAYPOINT"] = &WebSocket::handleStationKeepWaypoint;
   m_messageHandlers["HEARTBEAT_PING"] = &WebSocket::handleHeartbeatPing;
   m_messageHandlers["REPEAT"] = &WebSocket::handleRepeat;
+  m_messageHandlers["BASE_COORDS"] = &WebSocket::handleBaseCoords;
 }
 
 void WebSocket::handleTrim(const std::string& value)
@@ -694,12 +703,16 @@ void WebSocket::handleAutonomousStart(const std::string& value)
         bool repeatValue = false;
         std::string idRoute = "";
         
+        reportEvent("[AUTONOMOUS_START] thirdHashPos: " + std::to_string(thirdHashPos));
+        
         if (thirdHashPos != std::string::npos) {
           // Extract waypoints part (before REPEAT)
           actualWaypointsPart = waypointsPart.substr(0, thirdHashPos);
           
           // Extract everything after REPEAT
           std::string afterRepeat = waypointsPart.substr(thirdHashPos + 8); // skip "#REPEAT="
+          
+          reportEvent("[AUTONOMOUS_START] afterRepeat: " + afterRepeat);
           
           // Check if there's an ID_ROUTE parameter
           size_t idRoutePos = afterRepeat.find("#ID_ROUTE=");
@@ -712,12 +725,20 @@ void WebSocket::handleAutonomousStart(const std::string& value)
             idRoute = afterRepeat.substr(idRoutePos + 10); // skip "#ID_ROUTE="
           }
           
+          reportEvent("[AUTONOMOUS_START] repeatPart: '" + repeatPart + "'");
+          
           if (repeatPart == "true") {
             repeatValue = true;
             hasRepeat = true;
+            repeat_mission = true;
+            Notify("REPEAT_MISSION", "true");
+            reportEvent("[AUTONOMOUS_START] Set REPEAT_MISSION=true");
           } else if (repeatPart == "false") {
             repeatValue = false;
             hasRepeat = true;
+            repeat_mission = false;
+            Notify("REPEAT_MISSION", "false");
+            reportEvent("[AUTONOMOUS_START] Set REPEAT_MISSION=false");
           }
         } else {
           // No REPEAT parameter, but check for ID_ROUTE directly
@@ -805,9 +826,11 @@ void WebSocket::handleAutonomousStart(const std::string& value)
           usleep(100000); // 100ms delay
           if (repeatValue) {
             Notify("WPT_UPDATE", "repeat=1000");
+            Notify("REPEAT_MISSION", "true");
             std::cout << "[AUTONOMOUS_START] Set repeat: 1000 (infinite)" << std::endl;
           } else {
             Notify("WPT_UPDATE", "repeat=0");
+            Notify("REPEAT_MISSION", "false");
             std::cout << "[AUTONOMOUS_START] Set repeat: 1 (once)" << std::endl;
           }
         }
@@ -1066,5 +1089,16 @@ void WebSocket::handleRepeat(const std::string& value)
   } catch (const std::exception& e) {
     std::cerr << "Error parsing repeat value: " << value << " - " << e.what() << std::endl;
   }
+}
+
+void WebSocket::handleBaseCoords(const std::string& value)
+{
+  // Save the base coordinates value
+  base_coords = value;
+  
+  // Notify MOOS with the BASE_COORDS value
+  Notify("BASE_COORDS", value);
+  
+  std::cout << "[BASE_COORDS] Saved and notified: " << value << std::endl;
 }
 
