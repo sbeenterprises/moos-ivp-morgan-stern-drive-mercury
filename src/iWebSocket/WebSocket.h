@@ -103,6 +103,7 @@ class WebSocket : public AppCastingMOOSApp
   void handleStationKeepWaypoint(const std::string& value);
   void handleHeartbeatPing(const std::string& value);
   void handleRepeat(const std::string& value);
+  void handleBaseCoords(const std::string& value);
 
 };
 

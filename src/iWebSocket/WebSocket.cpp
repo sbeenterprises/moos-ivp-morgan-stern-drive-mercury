@@ -32,6 +32,7 @@ double nav_long = 0;
 double nav_speed = 0;
 double nav_heading = 0;
 double desired_heading = 0;
+double desired_speed = 0;
 double value_setpoint = 0;
 double wpt_index = 0; // Index of the current waypoint
 double engine_accelerator_pedal_position = 0;
@@ -50,6 +51,8 @@ std::string ivphelm_allstop;
 std::string wpt_stat;
 std::string view_point;
 std::string id_route;
+bool repeat_mission = false;
+std::string base_coords;
 
 
 // NODE_REPORT contact variables
@@ -207,6 +210,8 @@ bool WebSocket::OnNewMail(MOOSMSG_LIST &NewMail)
       nav_heading = msg.GetDouble();
     else if(key == "DESIRED_HEADING")
       desired_heading = msg.GetDouble();
+    else if(key == "DESIRED_SPEED")
+      desired_speed = msg.GetDouble();
     else if(key == "IVPHELM_STATE")
       ivphelm_state = msg.GetString();
     else if(key == "WPT_INDEX")
@@ -239,6 +244,8 @@ bool WebSocket::OnNewMail(MOOSMSG_LIST &NewMail)
       engine_battery_voltage = msg.GetDouble();
     else if(key == "VIEW_POINT")
       view_point = msg.GetString();
+    else if(key == "BASE_COORDS")
+      base_coords = msg.GetString();
     else if(key == "NODE_REPORT") {
       // Parse NODE_REPORT to extract NAME, X, Y, SPD, HDG
       std::string node_report = msg.GetString();
@@ -361,30 +368,42 @@ bool WebSocket::Iterate()
   //For some reason, is just sending from this on
   //I put the value_setpoint to facilitate the calibration
   //SendMessage("DESIRED_HEADING=" + std::to_string(value_setpoint)+"/NAV_HEADING="+std::to_string(nav_heading)); // Sends desired heading
-  SendMessage("IVPHELM_STATE=" + ivphelm_state); // Sends the state of the IVP Helm
-  SendMessage("WPT_INDEX=" + std::to_string(wpt_index)); // Sends the way point index
-  SendMessage("IVPHELM_ALLSTOP=" + ivphelm_allstop); // Sends the all stop state
-  SendMessage("WPT_STAT=" + wpt_stat); // Sends the way point state
-  SendMessage("VIEW_POINT=" + view_point); // Sends the view point
-  SendMessage("ID_ROUTE=" + id_route); // Sends the ID of the route
-  SendMessage("ENGINE_ACCELERATOR_PEDAL_POSITION=" + std::to_string(engine_accelerator_pedal_position)); // Sends the engine accelerator pedal position
-  SendMessage("ENGINE_PERCENT_LOAD=" + std::to_string(engine_percent_load)); // Sends the engine percent load
-  SendMessage("ENGINE_SPEED=" + std::to_string(engine_speed)); // Sends the engine speed
-  SendMessage("ENGINE_PERCENT_TORQUE=" + std::to_string(engine_percent_torque)); // Sends the engine percent torque
-  SendMessage("ENGINE_ACTIVE_DTCS=" + std::to_string(engine_active_dtcs)); // Sends the engine active DTCs
-  SendMessage("ENGINE_COOLANT_TEMP=" + std::to_string(engine_coolant_temp)); // Sends the engine coolant temperature
-  SendMessage("ENGINE_OIL_TEMP=" + std::to_string(engine_oil_temp)); // Sends the engine oil temperature
-  SendMessage("ENGINE_OIL_PRESSURE=" + std::to_string(engine_oil_pressure)); // Sends the engine oil pressure
-  SendMessage("ENGINE_FUEL_RATE=" + std::to_string(engine_fuel_rate)); // Sends the engine fuel rate
-  SendMessage("ENGINE_INTAKE_MANIFOLD_PRESSURE=" + std::to_string(engine_intake_manifold_pressure)); // Sends the engine intake manifold pressure
-  SendMessage("ENGINE_BATTERY_VOLTAGE=" + std::to_string(engine_battery_voltage)); // Sends the engine battery voltage
+  // Build consolidated JSON message with all telemetry data
+  Json::Value root;
+  root["IVPHELM_STATE"] = ivphelm_state;
+  root["WPT_INDEX"] = wpt_index;
+  root["IVPHELM_ALLSTOP"] = ivphelm_allstop;
+  root["WPT_STAT"] = wpt_stat;
+  root["VIEW_POINT"] = view_point;
+  root["ID_ROUTE"] = id_route;
+  root["REPEAT_MISSION"] = repeat_mission;
+  root["DESIRED_SPEED"] = desired_speed;
+  root["BASE_COORDS"] = base_coords;
+  root["ENGINE_ACCELERATOR_PEDAL_POSITION"] = engine_accelerator_pedal_position;
+  root["ENGINE_PERCENT_LOAD"] = engine_percent_load;
+  root["ENGINE_SPEED"] = engine_speed;
+  root["ENGINE_PERCENT_TORQUE"] = engine_percent_torque;
+  root["ENGINE_ACTIVE_DTCS"] = engine_active_dtcs;
+  root["ENGINE_COOLANT_TEMP"] = engine_coolant_temp;
+  root["ENGINE_OIL_TEMP"] = engine_oil_temp;
+  root["ENGINE_OIL_PRESSURE"] = engine_oil_pressure;
+  root["ENGINE_FUEL_RATE"] = engine_fuel_rate;
+  root["ENGINE_INTAKE_MANIFOLD_PRESSURE"] = engine_intake_manifold_pressure;
+  root["ENGINE_BATTERY_VOLTAGE"] = engine_battery_voltage;
 
-  // Send contact information in a single message
-  SendMessage("CONTACT_INFO=NAME:" + contact_name +
-              ",LAT:" + std::to_string(contact_lat) +
-              ",LON:" + std::to_string(contact_lon) +
-              ",SPD:" + std::to_string(contact_spd) +
-              ",HDG:" + std::to_string(contact_hdg));
+  // Add contact info as nested object
+  Json::Value contact;
+  contact["NAME"] = contact_name;
+  contact["LAT"] = contact_lat;
+  contact["LON"] = contact_lon;
+  contact["SPD"] = contact_spd;
+  contact["HDG"] = contact_hdg;
+  root["CONTACT_INFO"] = contact;
+
+  // Send single JSON message (compact format for network efficiency)
+  Json::StreamWriterBuilder writer;
+  writer["indentation"] = "";
+  SendMessage(Json::writeString(writer, root));
 
   AppCastingMOOSApp::PostReport();
   return(true);
@@ -460,6 +479,8 @@ void WebSocket::registerVariables()
   Register("ENGINE_BATTERY_VOLTAGE", 0);
   Register("NODE_REPORT", 0);
   Register("ID_ROUTE", 0);
+  Register("REPEAT_MISSION", 0);
+  Register("BASE_COORDS", 0);
 
   
 }
@@ -534,6 +555,7 @@ void WebSocket::initializeMessageHandlers()
   m_messageHandlers["STATION_KEEP_WAYPOINT"] = &WebSocket::handleStationKeepWaypoint;
   m_messageHandlers["HEARTBEAT_PING"] = &WebSocket::handleHeartbeatPing;
   m_messageHandlers["REPEAT"] = &WebSocket::handleRepeat;
+  m_messageHandlers["BASE_COORDS"] = &WebSocket::handleBaseCoords;
 }
 
 void WebSocket::handleTrim(const std::string& value)
@@ -681,12 +703,16 @@ void WebSocket::handleAutonomousStart(const std::string& value)
         bool repeatValue = false;
         std::string idRoute = "";
         
+        reportEvent("[AUTONOMOUS_START] thirdHashPos: " + std::to_string(thirdHashPos));
+        
         if (thirdHashPos != std::string::npos) {
           // Extract waypoints part (before REPEAT)
           actualWaypointsPart = waypointsPart.substr(0, thirdHashPos);
           
           // Extract everything after REPEAT
           std::string afterRepeat = waypointsPart.substr(thirdHashPos + 8); // skip "#REPEAT="
+          
+          reportEvent("[AUTONOMOUS_START] afterRepeat: " + afterRepeat);
           
           // Check if there's an ID_ROUTE parameter
           size_t idRoutePos = afterRepeat.find("#ID_ROUTE=");
@@ -699,12 +725,20 @@ void WebSocket::handleAutonomousStart(const std::string& value)
             idRoute = afterRepeat.substr(idRoutePos + 10); // skip "#ID_ROUTE="
           }
           
+          reportEvent("[AUTONOMOUS_START] repeatPart: '" + repeatPart + "'");
+          
           if (repeatPart == "true") {
             repeatValue = true;
             hasRepeat = true;
+            repeat_mission = true;
+            Notify("REPEAT_MISSION", "true");
+            reportEvent("[AUTONOMOUS_START] Set REPEAT_MISSION=true");
           } else if (repeatPart == "false") {
             repeatValue = false;
             hasRepeat = true;
+            repeat_mission = false;
+            Notify("REPEAT_MISSION", "false");
+            reportEvent("[AUTONOMOUS_START] Set REPEAT_MISSION=false");
           }
         } else {
           // No REPEAT parameter, but check for ID_ROUTE directly
@@ -792,9 +826,11 @@ void WebSocket::handleAutonomousStart(const std::string& value)
           usleep(100000); // 100ms delay
           if (repeatValue) {
             Notify("WPT_UPDATE", "repeat=1000");
+            Notify("REPEAT_MISSION", "true");
             std::cout << "[AUTONOMOUS_START] Set repeat: 1000 (infinite)" << std::endl;
           } else {
             Notify("WPT_UPDATE", "repeat=0");
+            Notify("REPEAT_MISSION", "false");
             std::cout << "[AUTONOMOUS_START] Set repeat: 1 (once)" << std::endl;
           }
         }
@@ -1053,5 +1089,16 @@ void WebSocket::handleRepeat(const std::string& value)
   } catch (const std::exception& e) {
     std::cerr << "Error parsing repeat value: " << value << " - " << e.what() << std::endl;
   }
+}
+
+void WebSocket::handleBaseCoords(const std::string& value)
+{
+  // Save the base coordinates value
+  base_coords = value;
+  
+  // Notify MOOS with the BASE_COORDS value
+  Notify("BASE_COORDS", value);
+  
+  std::cout << "[BASE_COORDS] Saved and notified: " << value << std::endl;
 }
 

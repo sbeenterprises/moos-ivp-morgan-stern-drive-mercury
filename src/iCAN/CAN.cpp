@@ -431,7 +431,8 @@ std::string CAN::getThrustCANFrame(double thrust_value)
   //}
 
   // Convert thrust value to percentage (0-100)
-  int percentage = static_cast<int>(thrust_value);
+  // Use absolute value to handle negative thrust (reverse)
+  int percentage = static_cast<int>(std::abs(thrust_value));
   if(percentage > 100) percentage = 100;
 
   // Thrust command mapping based on percentage

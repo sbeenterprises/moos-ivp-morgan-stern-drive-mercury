@@ -32,6 +32,18 @@ The directory structure for the moos-ivp-extend is described below:
 | src              | Directory for source code                   |
 
 
+# Useful Commands
+```bash
+#Activate CAN
+'''
+sudo slcand -o -c -s5 /dev/ttyACM2 slcan0
+sudo ip link set slcan0 up
+'''
+
+# Restart satelital antenna
+printf '$VNRST*4D\r\n' | sudo tee /dev/ttyUSB1
+```
+
 # Build Instructions
 
 #Before Building
