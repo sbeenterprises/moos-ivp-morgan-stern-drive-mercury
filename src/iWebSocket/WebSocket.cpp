@@ -53,6 +53,7 @@ std::string view_point;
 std::string id_route;
 bool repeat_mission = false;
 std::string base_coords;
+bool can_send = true; // Variable used to control CAN message flux
 
 
 // NODE_REPORT contact variables
@@ -246,6 +247,8 @@ bool WebSocket::OnNewMail(MOOSMSG_LIST &NewMail)
       view_point = msg.GetString();
     else if(key == "BASE_COORDS")
       base_coords = msg.GetString();
+    else if(key == "CAN_SEND")
+      can_send = (msg.GetString() == "true");
     else if(key == "NODE_REPORT") {
       // Parse NODE_REPORT to extract NAME, X, Y, SPD, HDG
       std::string node_report = msg.GetString();
@@ -379,6 +382,7 @@ bool WebSocket::Iterate()
   root["REPEAT_MISSION"] = repeat_mission;
   root["DESIRED_SPEED"] = desired_speed;
   root["BASE_COORDS"] = base_coords;
+  root["CAN_SEND"] = can_send;
   root["ENGINE_ACCELERATOR_PEDAL_POSITION"] = engine_accelerator_pedal_position;
   root["ENGINE_PERCENT_LOAD"] = engine_percent_load;
   root["ENGINE_SPEED"] = engine_speed;
@@ -480,7 +484,8 @@ void WebSocket::registerVariables()
   Register("NODE_REPORT", 0);
   Register("ID_ROUTE", 0);
   Register("REPEAT_MISSION", 0);
-  Register("BASE_COORDS", 0);
+  Register("BASE_COORDS", 0); //Variable used in return to home
+  Register("CAN_SEND", 0); //Variable used to control CAN message flux
 
   
 }
@@ -556,6 +561,7 @@ void WebSocket::initializeMessageHandlers()
   m_messageHandlers["HEARTBEAT_PING"] = &WebSocket::handleHeartbeatPing;
   m_messageHandlers["REPEAT"] = &WebSocket::handleRepeat;
   m_messageHandlers["BASE_COORDS"] = &WebSocket::handleBaseCoords;
+  m_messageHandlers["CAN_SEND"] = &WebSocket::handleCanSend;
 }
 
 void WebSocket::handleTrim(const std::string& value)
@@ -1100,5 +1106,19 @@ void WebSocket::handleBaseCoords(const std::string& value)
   Notify("BASE_COORDS", value);
   
   std::cout << "[BASE_COORDS] Saved and notified: " << value << std::endl;
+}
+
+void WebSocket::handleCanSend(const std::string& value)
+{
+  // Parse the value to check if it's true or false
+  if (value == "true") {
+    can_send = true;
+    Notify("CAN_SEND", "true");
+    std::cout << "[CAN_SEND] Set to true" << std::endl;
+  } else if (value == "false") {
+    can_send = false;
+    Notify("CAN_SEND", "false");
+    std::cout << "[CAN_SEND] Set to false" << std::endl;
+  }
 }
 

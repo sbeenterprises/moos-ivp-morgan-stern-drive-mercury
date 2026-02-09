@@ -23,6 +23,7 @@ CAN::CAN()
   m_desired_rudder = 0.0;
   m_desired_thrust = 0.0;
   m_current_trim = 0.0;
+  m_can_send = "true";  // Enable CAN sending by default
   m_can_socket = -1;
 }
 
@@ -76,6 +77,10 @@ bool CAN::OnNewMail(MOOSMSG_LIST &NewMail)
      else if(key == "TRIM") {
        double trim_value = msg.GetDouble();
        //handleTrimCommand(trim_value); // --- TRIM DISABLED ---
+     }
+     else if(key == "CAN_SEND") {
+       // Support both string ("true"/"false") and boolean formats
+       m_can_send = msg.GetString();
      }
      else if(key != "APPCAST_REQ") // handled by AppCastingMOOSApp
        reportRunWarning("Unhandled Mail: " + key);
@@ -159,6 +164,7 @@ void CAN::registerVariables()
   Register("DESIRED_RUDDER", 0);
   Register("DESIRED_THRUST", 0);
   Register("TRIM", 0);
+  Register("CAN_SEND", 0);
 }
 
 
@@ -356,10 +362,15 @@ void CAN::sendRudderCommand(double rudder_value)
     frame.data[i] = static_cast<__u8>(byte_val);
   }
 
-  int bytes_sent = write(m_can_socket, &frame, sizeof(struct can_frame));
-  
-  if(bytes_sent < 0) {
-    reportRunWarning("Failed to send CAN frame");
+  if (m_can_send == "true") {
+    int bytes_sent = write(m_can_socket, &frame, sizeof(struct can_frame));
+    
+    if(bytes_sent < 0) {
+      reportRunWarning("Failed to send CAN frame");
+    }
+  }
+  else {
+    reportRunWarning("CAN_SEND is false, not sending CAN frame");
   }
 }
 
@@ -382,11 +393,15 @@ void CAN::sendThrustCommand(double thrust_value)
          &gear_frame.data[0], &gear_frame.data[1], &gear_frame.data[2], &gear_frame.data[3],
          &gear_frame.data[4], &gear_frame.data[5], &gear_frame.data[6], &gear_frame.data[7]);
 
-  int gear_bytes_sent = write(m_can_socket, &gear_frame, sizeof(struct can_frame));
-  
-  if(gear_bytes_sent < 0) {
-    reportRunWarning("Failed to send gear CAN frame");
-    return;
+  if (m_can_send == "true") {
+    int gear_bytes_sent = write(m_can_socket, &gear_frame, sizeof(struct can_frame));
+    
+    if(gear_bytes_sent < 0) {
+      reportRunWarning("Failed to send gear CAN frame");
+    }
+  }
+  else {
+    reportRunWarning("CAN_SEND is false, not sending gear CAN frame");
   }
 
   // Always send thrust command (even if 0)
@@ -399,10 +414,15 @@ void CAN::sendThrustCommand(double thrust_value)
          &thrust_frame.data[0], &thrust_frame.data[1], &thrust_frame.data[2], &thrust_frame.data[3],
          &thrust_frame.data[4], &thrust_frame.data[5], &thrust_frame.data[6], &thrust_frame.data[7]);
 
-  int thrust_bytes_sent = write(m_can_socket, &thrust_frame, sizeof(struct can_frame));
-  
-  if(thrust_bytes_sent < 0) {
-    reportRunWarning("Failed to send thrust CAN frame");
+  if (m_can_send == "true") {
+    int thrust_bytes_sent = write(m_can_socket, &thrust_frame, sizeof(struct can_frame));
+    
+    if(thrust_bytes_sent < 0) {
+      reportRunWarning("Failed to send thrust CAN frame");
+    }
+  }
+  else {
+    reportRunWarning("CAN_SEND is false, not sending thrust CAN frame");
   }
 }
 
@@ -597,10 +617,15 @@ void CAN::executeTrimSequence(const std::string& can_command)
       frame.data[j] = static_cast<__u8>(std::stoul(byte_str, nullptr, 16));
     }
     
-    // Send the frame
-    int bytes_sent = write(m_can_socket, &frame, sizeof(struct can_frame));
-    if(bytes_sent < 0) {
-      reportRunWarning("Failed to send trim CAN frame " + std::to_string(i + 1));
+    if (m_can_send == "true") {
+      // Send the frame
+      int bytes_sent = write(m_can_socket, &frame, sizeof(struct can_frame));
+      if(bytes_sent < 0) {
+        reportRunWarning("Failed to send trim CAN frame " + std::to_string(i + 1));
+      }
+    }
+    else {
+      reportRunWarning("CAN_SEND is false, not sending trim CAN frame");
     }
     
     // Wait 100ms before next command (except for last iteration)

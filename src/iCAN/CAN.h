@@ -48,6 +48,7 @@ class CAN : public AppCastingMOOSApp
   double m_desired_rudder;
   double m_desired_thrust;
   double m_current_trim;
+  std::string m_can_send;  // Controls whether CAN frames should be sent
   int m_can_socket;
   struct sockaddr_can m_can_addr;
   struct ifreq m_ifr;
