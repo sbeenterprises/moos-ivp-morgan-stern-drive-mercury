@@ -666,7 +666,7 @@ void WebSocket::handleAutonomousWaypoints(const std::string& value)
   }
   
   std::ostringstream finalStream;
-  finalStream << "polygon=";
+  finalStream << "xpoints="; //Need to be sent like this because of the behavior
   bool first = true;
   for (const auto &convertedCoord : convertedCoords) {
       if (!first) {
