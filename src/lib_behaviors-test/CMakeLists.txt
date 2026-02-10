@@ -45,3 +45,23 @@ TARGET_LINK_LIBRARIES(BHV_SimpleWaypoint
    mbutil 
    geometry 
    ${SYSTEM_LIBS} )
+   
+   
+#--------------------------------------------------------
+#                                      BHV_Waypoint_mod
+#--------------------------------------------------------
+ADD_LIBRARY(BHV_Waypoint_mod SHARED 
+   BHV_Waypoint_mod.cpp)
+TARGET_LINK_LIBRARIES(BHV_Waypoint_mod
+   helmivp
+   behaviors 
+   ivpbuild 
+   logic 
+   ivpcore 
+   bhvutil
+   turngeo 
+   -Wl,--whole-archive
+   mbutil 
+   geometry 
+   -Wl,--no-whole-archive
+   ${SYSTEM_LIBS} )
