@@ -207,16 +207,20 @@ bool BHV_Waypoint_mod::setParam(string param, string param_val)
     if(new_seglist.size() == 0)
       return(false);
 
-    // With the xpoints option, the waypoints are updated but also the
-    // current index is held the same. If the number of waypoints is
-    // different, the update is rejected.
+    // Save state before updating
     int current_waypt = m_waypoint_engine.getCurrIndex();
     int prev_waypt_ix = m_prev_waypt_index;
     int prev_cycle_ix = m_prev_cycle_index;
 
-    if(param == "xpoints") {
-      if(new_seglist.size() != m_waypoint_engine.size())
-	return(false);
+    // For xpoints: save the current target waypoint coordinates
+    // so we can find them in the new list after updating.
+    double curr_target_x = 0;
+    double curr_target_y = 0;
+    bool have_target = false;
+    if(param == "xpoints" && m_waypoint_engine.size() > 0 && current_waypt >= 0) {
+      curr_target_x = m_waypoint_engine.getPointX((unsigned int)current_waypt);
+      curr_target_y = m_waypoint_engine.getPointY((unsigned int)current_waypt);
+      have_target = true;
     }
     
     m_waypoint_engine.setSegList(new_seglist);
@@ -225,13 +229,46 @@ bool BHV_Waypoint_mod::setParam(string param, string param_val)
     m_prev_waypt_index = -1;
     m_prevpt.invalidate();
     
-    // After the waypoint engine is updated with new points, if the 
-    // xpoints option is used, we also restore the current index,
-    // prev_waypt_ix and cycle_ix.
+    // For xpoints: find the current target waypoint in the new list
+    // and adjust the index. This allows adding points at the beginning
+    // or end of the route while the boat continues its journey.
     if(param == "xpoints") {
-      m_waypoint_engine.setCurrIndex((unsigned int)(current_waypt));
-      m_prev_waypt_index = prev_waypt_ix;
-      m_prev_cycle_index = prev_cycle_ix;
+      if(have_target) {
+        // Search for the current target point in the new seglist
+        int new_index = -1;
+        double match_threshold = 0.1; // meters tolerance for matching
+        for(unsigned int i = 0; i < new_seglist.size(); i++) {
+          double dx = new_seglist.get_vx(i) - curr_target_x;
+          double dy = new_seglist.get_vy(i) - curr_target_y;
+          double dist = sqrt(dx*dx + dy*dy);
+          if(dist < match_threshold) {
+            new_index = (int)i;
+            break;
+          }
+        }
+        
+        if(new_index >= 0) {
+          // Found the target point in the new list - use its new index
+          m_waypoint_engine.setCurrIndex((unsigned int)new_index);
+          // Adjust prev_waypt_index by the same offset
+          int offset = new_index - current_waypt;
+          if(prev_waypt_ix >= 0)
+            m_prev_waypt_index = prev_waypt_ix + offset;
+          else
+            m_prev_waypt_index = prev_waypt_ix;
+        } else {
+          // Target point not found in new list - clamp the old index
+          if(current_waypt >= (int)new_seglist.size())
+            m_waypoint_engine.setCurrIndex((unsigned int)(new_seglist.size() - 1));
+          else
+            m_waypoint_engine.setCurrIndex((unsigned int)current_waypt);
+          m_prev_waypt_index = prev_waypt_ix;
+        }
+        m_prev_cycle_index = prev_cycle_ix;
+      } else {
+        // No previous target - just keep index 0
+        m_waypoint_engine.setCurrIndex(0);
+      }
     }
     
     return(true);
