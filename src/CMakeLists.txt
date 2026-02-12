@@ -28,10 +28,7 @@ ADD_SUBDIRECTORY(iCAN)
 ADD_SUBDIRECTORY(iCANRec)
 ADD_SUBDIRECTORY(pContactSpawn)
 ADD_SUBDIRECTORY(iRadarTargets)
-ADD_SUBDIRECTORY(pSensorFusionTracker_ref)
-ADD_SUBDIRECTORY(pVisionDetector_ref)
 ADD_SUBDIRECTORY(pMultisensorfusion)
-ADD_SUBDIRECTORY(pMultivisiondetector)
 ADD_SUBDIRECTORY(pMultivisiondetector_ref)
 
 
