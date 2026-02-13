@@ -26,7 +26,7 @@ ProcessConfig = ANTLER
   Run = planchaPID @ NewConsole = false
   Run = iDivisorNMEA	@ NewConsole = false
   Run = pHelmIvP      @ NewConsole = false
-//  Run = pMarineViewer	@ NewConsole = false
+  Run = pMarineViewer	@ NewConsole = false
   Run = uProcessWatch	@ NewConsole = false
   Run = pNodeReporter	@ NewConsole = false
   Run = pRealm	      @ NewConsole = false

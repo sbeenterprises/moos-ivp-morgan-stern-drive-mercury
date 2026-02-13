@@ -23,8 +23,8 @@ Behavior = BHV_Waypoint_mod
          lead_damper = 0.5
        lead_to_start = true
         capture_line = true
-      capture_radius = 35
-         slip_radius = 40
+      capture_radius = 25
+         slip_radius = 30
 	efficiency_measure = all
 	           
     visual_hints = nextpt_color=yellow

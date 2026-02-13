@@ -10,6 +10,7 @@
 #include <sstream>
 #include <iostream>
 #include <algorithm>
+#include <cctype>
 #include "MBUtils.h"
 #include "ACTable.h"
 #include "MOOS/libMOOSGeodesy/MOOSGeodesy.h"
@@ -17,6 +18,46 @@
 #include "WebSocket.h"
 
 using namespace std;
+
+
+namespace {
+static std::string trim_copy(std::string s)
+{
+  auto not_space = [](unsigned char c) { return !std::isspace(c); };
+  s.erase(s.begin(), std::find_if(s.begin(), s.end(), not_space));
+  s.erase(std::find_if(s.rbegin(), s.rend(), not_space).base(), s.end());
+  return s;
+}
+
+static void to_upper_inplace(std::string& s)
+{
+  std::transform(s.begin(), s.end(), s.begin(),
+                 [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+}
+
+static void to_lower_inplace(std::string& s)
+{
+  std::transform(s.begin(), s.end(), s.begin(),
+                 [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+}
+
+static bool parse_bool_string(std::string s, bool& out)
+{
+  s = trim_copy(std::move(s));
+  to_lower_inplace(s);
+
+  if (s == "true" || s == "1" || s == "yes" || s == "on") {
+    out = true;
+    return true;
+  }
+  if (s == "false" || s == "0" || s == "no" || s == "off") {
+    out = false;
+    return true;
+  }
+  return false;
+}
+} // namespace
+
 
 #include <ixwebsocket/IXNetSystem.h>
 #include <ixwebsocket/IXWebSocket.h>
@@ -247,8 +288,18 @@ bool WebSocket::OnNewMail(MOOSMSG_LIST &NewMail)
       view_point = msg.GetString();
     else if(key == "BASE_COORDS")
       base_coords = msg.GetString();
-    else if(key == "CAN_SEND")
-      can_send = (msg.GetString() == "true");
+    else if(key == "CAN_SEND") {
+      bool parsed = false;
+      if (msg.IsDouble()) {
+        can_send = (msg.GetDouble() != 0.0);
+      } else {
+        std::string s = msg.GetString();
+        if (parse_bool_string(s, parsed))
+          can_send = parsed;
+        else
+          reportRunWarning("CAN_SEND: unrecognized value '" + s + "'");
+      }
+    }
     else if(key == "NODE_REPORT") {
       // Parse NODE_REPORT to extract NAME, X, Y, SPD, HDG
       std::string node_report = msg.GetString();
@@ -347,12 +398,22 @@ bool WebSocket::Iterate()
     //Split in the equal sign
     size_t equalsPos = msg_recebida.find('=');
 
-    //take the two sides
-    std::string key = msg_recebida.substr(0, equalsPos);
-    std::string value = msg_recebida.substr(equalsPos + 1);
+    if (equalsPos == std::string::npos) {
+      reportRunWarning("Malformed WebSocket message (missing '='): " + msg_recebida);
+      msg_recebida = "";
+      AppCastingMOOSApp::PostReport();
+      return(true);
+    }
 
-    std::cout << "Key: " << key << "\n";
-    std::cout << "Value: " << value << "\n";
+    //take the two sides
+    std::string key = trim_copy(msg_recebida.substr(0, equalsPos));
+    std::string value = trim_copy(msg_recebida.substr(equalsPos + 1));
+
+    // Normalize key for handler dispatch (case-insensitive)
+    to_upper_inplace(key);
+
+    std::cout << "Key: " << key << std::endl;
+    std::cout << "Value: " << value << std::endl;
 
     // State machine approach: O(log n) lookup instead of O(n) linear search
     auto handler = m_messageHandlers.find(key);
@@ -1110,15 +1171,13 @@ void WebSocket::handleBaseCoords(const std::string& value)
 
 void WebSocket::handleCanSend(const std::string& value)
 {
-  // Parse the value to check if it's true or false
-  if (value == "true") {
-    can_send = true;
-    Notify("CAN_SEND", "true");
-    std::cout << "[CAN_SEND] Set to true" << std::endl;
-  } else if (value == "false") {
-    can_send = false;
-    Notify("CAN_SEND", "false");
-    std::cout << "[CAN_SEND] Set to false" << std::endl;
+  bool parsed = false;
+  if (!parse_bool_string(value, parsed)) {
+    reportRunWarning("CAN_SEND: unrecognized value '" + value + "'");
+    return;
   }
-}
 
+  can_send = parsed;
+  Notify("CAN_SEND", parsed ? "true" : "false");
+  std::cout << "[CAN_SEND] Set to " << (parsed ? "true" : "false") << std::endl;
+}

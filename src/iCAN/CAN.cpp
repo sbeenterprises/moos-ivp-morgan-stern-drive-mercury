@@ -7,6 +7,9 @@
 
 #include <iterator>
 #include <cstring>
+#include <cerrno>
+#include <algorithm>
+#include <cctype>
 #include <thread>
 #include <chrono>
 #include "MBUtils.h"
@@ -14,6 +17,28 @@
 #include "CAN.h"
 
 using namespace std;
+
+namespace {
+static std::string trim_copy(std::string s) {
+  // left trim
+  s.erase(s.begin(), std::find_if(s.begin(), s.end(),
+    [](unsigned char c){ return !std::isspace(c); }));
+  // right trim
+  s.erase(std::find_if(s.rbegin(), s.rend(),
+    [](unsigned char c){ return !std::isspace(c); }).base(), s.end());
+  return s;
+}
+
+static bool parse_bool_string(const std::string& in, bool& out) {
+  std::string s = trim_copy(in);
+  std::transform(s.begin(), s.end(), s.begin(),
+    [](unsigned char c){ return static_cast<char>(std::tolower(c)); });
+
+  if(s=="true" || s=="1" || s=="yes" || s=="on")  { out=true;  return true; }
+  if(s=="false"|| s=="0" || s=="no"  || s=="off") { out=false; return true; }
+  return false;
+}
+} // namespace
 
 //---------------------------------------------------------
 // Constructor()
@@ -23,7 +48,10 @@ CAN::CAN()
   m_desired_rudder = 0.0;
   m_desired_thrust = 0.0;
   m_current_trim = 0.0;
-  m_can_send = "true";  // Enable CAN sending by default
+  m_can_send.store(true);
+  m_can_send_raw = "true";
+  m_last_can_send_update_time = 0.0;  // will update on first mail
+
   m_can_socket = -1;
 }
 
@@ -68,19 +96,58 @@ bool CAN::OnNewMail(MOOSMSG_LIST &NewMail)
          m_desired_thrust = 1;
        }
 
-       sendThrustCommand(m_desired_thrust);
+       
      }
+
      else if(key == "DESIRED_RUDDER") {
        m_desired_rudder = msg.GetDouble();
-       sendRudderCommand(m_desired_rudder);
      }
      else if(key == "TRIM") {
        double trim_value = msg.GetDouble();
        //handleTrimCommand(trim_value); // --- TRIM DISABLED ---
      }
-     else if(key == "CAN_SEND") {
-       // Support both string ("true"/"false") and boolean formats
-       m_can_send = msg.GetString();
+     else if(tolower(key) == "can_send") {
+       bool new_val = m_can_send.load();
+       std::string raw;
+
+       if(msg.IsDouble()) {
+         new_val = (msg.GetDouble() != 0.0);
+         raw = doubleToStringX(msg.GetDouble(), 6);
+       } else {
+         raw = msg.GetString();
+         bool parsed=false;
+         if(parse_bool_string(raw, parsed))
+           new_val = parsed;
+         else {
+           reportRunWarning("CAN_SEND: unrecognized value '" + raw + "' (expected true/false/1/0)");
+           // keep previous state
+           continue;
+         }
+       }
+
+       bool old_val = m_can_send.exchange(new_val);
+       m_can_send_raw = raw;
+       m_last_can_send_update_time = MOOSTime();
+
+       if(old_val != new_val) {
+         reportEvent(std::string("CAN_SEND changed to ") + (new_val ? "true" : "false") + " (raw='" + raw + "')");
+       }
+
+       // Optional: re-publish a normalized value only if input wasn't already canonical.
+       // This avoids creating a CAN_SEND -> CAN_SEND feedback loop inside this same app.
+       bool should_echo = false;
+       if(msg.IsDouble()) {
+         should_echo = true;
+       } else {
+         std::string canon = trim_copy(raw);
+         std::transform(canon.begin(), canon.end(), canon.begin(),
+           [](unsigned char c){ return static_cast<char>(std::tolower(c)); });
+         if(canon != "true" && canon != "false")
+           should_echo = true;
+       }
+
+       if(should_echo)
+         Notify("CAN_SEND", new_val ? "true" : "false");
      }
      else if(key != "APPCAST_REQ") // handled by AppCastingMOOSApp
        reportRunWarning("Unhandled Mail: " + key);
@@ -165,6 +232,7 @@ void CAN::registerVariables()
   Register("DESIRED_THRUST", 0);
   Register("TRIM", 0);
   Register("CAN_SEND", 0);
+  Register("can_send", 0);
 }
 
 
@@ -187,6 +255,10 @@ bool CAN::buildReport()
   m_msgs << "Current Rudder Command: " << m_desired_rudder << "%" << endl;
   m_msgs << "Current Thrust Command: " << m_desired_thrust << "%" << endl;
   m_msgs << "Current TRIM Value: " << m_current_trim << endl;
+  m_msgs << "CAN_SEND (tx enabled): " << (m_can_send.load() ? "true" : "false") << endl;
+  m_msgs << "CAN_SEND raw: " << m_can_send_raw << endl;
+  if(m_last_can_send_update_time > 0)
+    m_msgs << "CAN_SEND last update (MOOSTime): " << doubleToStringX(m_last_can_send_update_time, 2) << endl;
   m_msgs << endl;
 
   // CAN Frame Information
@@ -234,16 +306,29 @@ bool CAN::initCAN()
 {
   m_can_socket = socket(PF_CAN, SOCK_RAW, CAN_RAW);
   if(m_can_socket < 0) {
+    reportRunWarning(std::string("socket(PF_CAN) failed: errno=") +
+                     std::to_string(errno) + " (" + std::string(strerror(errno)) + ")");
     return false;
   }
 
-  strcpy(m_ifr.ifr_name, "slcan0");
-  ioctl(m_can_socket, SIOCGIFINDEX, &m_ifr);
+  memset(&m_ifr, 0, sizeof(m_ifr));
+  memset(&m_can_addr, 0, sizeof(m_can_addr));
 
-  m_can_addr.can_family = AF_CAN;
+  strncpy(m_ifr.ifr_name, "slcan0", IFNAMSIZ-1);
+  if(ioctl(m_can_socket, SIOCGIFINDEX, &m_ifr) < 0) {
+    reportRunWarning(std::string("SIOCGIFINDEX failed for slcan0: errno=") +
+                     std::to_string(errno) + " (" + std::string(strerror(errno)) + ")");
+    close(m_can_socket);
+    m_can_socket = -1;
+    return false;
+  }
+
+  m_can_addr.can_family  = AF_CAN;
   m_can_addr.can_ifindex = m_ifr.ifr_ifindex;
 
   if(bind(m_can_socket, (struct sockaddr *)&m_can_addr, sizeof(m_can_addr)) < 0) {
+    reportRunWarning(std::string("bind(AF_CAN) failed on slcan0: errno=") +
+                     std::to_string(errno) + " (" + std::string(strerror(errno)) + ")");
     close(m_can_socket);
     m_can_socket = -1;
     return false;
@@ -362,16 +447,30 @@ void CAN::sendRudderCommand(double rudder_value)
     frame.data[i] = static_cast<__u8>(byte_val);
   }
 
-  if (m_can_send == "true") {
-    int bytes_sent = write(m_can_socket, &frame, sizeof(struct can_frame));
-    
-    if(bytes_sent < 0) {
-      reportRunWarning("Failed to send CAN frame");
-    }
+  if(!m_can_send.load()) {
+    return;
   }
-  else {
-    reportRunWarning("CAN_SEND is false, not sending CAN frame");
+
+  int bytes_sent = write(m_can_socket, &frame, sizeof(struct can_frame));
+if(bytes_sent < 0) {
+  static double s_last_warn = 0.0;
+  double now = MOOSTime();
+  if((now - s_last_warn) > 1.0) {
+    int e = errno;
+    reportRunWarning(std::string("Failed to send rudder CAN frame: errno=") +
+                     std::to_string(e) + " (" + std::string(strerror(e)) + ")");
+    s_last_warn = now;
   }
+} else if(bytes_sent != (int)sizeof(struct can_frame)) {
+  static double s_last_warn_short = 0.0;
+  double now = MOOSTime();
+  if((now - s_last_warn_short) > 1.0) {
+    reportRunWarning(std::string("Short write on rudder CAN frame: bytes_sent=") +
+                     std::to_string(bytes_sent));
+    s_last_warn_short = now;
+  }
+}
+
 }
 
 //---------------------------------------------------------
@@ -380,6 +479,10 @@ void CAN::sendRudderCommand(double rudder_value)
 void CAN::sendThrustCommand(double thrust_value)
 {
   if(m_can_socket == -1) {
+    return;
+  }
+
+  if(!m_can_send.load()) {
     return;
   }
 
@@ -393,18 +496,27 @@ void CAN::sendThrustCommand(double thrust_value)
          &gear_frame.data[0], &gear_frame.data[1], &gear_frame.data[2], &gear_frame.data[3],
          &gear_frame.data[4], &gear_frame.data[5], &gear_frame.data[6], &gear_frame.data[7]);
 
-  if (m_can_send == "true") {
-    int gear_bytes_sent = write(m_can_socket, &gear_frame, sizeof(struct can_frame));
-    
-    if(gear_bytes_sent < 0) {
-      reportRunWarning("Failed to send gear CAN frame");
-    }
+  int gear_bytes_sent = write(m_can_socket, &gear_frame, sizeof(struct can_frame));
+if(gear_bytes_sent < 0) {
+  static double s_last_warn = 0.0;
+  double now = MOOSTime();
+  if((now - s_last_warn) > 1.0) {
+    int e = errno;
+    reportRunWarning(std::string("Failed to send gear CAN frame: errno=") +
+                     std::to_string(e) + " (" + std::string(strerror(e)) + ")");
+    s_last_warn = now;
   }
-  else {
-    reportRunWarning("CAN_SEND is false, not sending gear CAN frame");
+} else if(gear_bytes_sent != (int)sizeof(struct can_frame)) {
+  static double s_last_warn_short = 0.0;
+  double now = MOOSTime();
+  if((now - s_last_warn_short) > 1.0) {
+    reportRunWarning(std::string("Short write on gear CAN frame: bytes_sent=") +
+                     std::to_string(gear_bytes_sent));
+    s_last_warn_short = now;
   }
+}
 
-  // Always send thrust command (even if 0)
+// Always send thrust command (even if 0)
   string thrust_frame_str = getThrustCANFrame(thrust_value);
   struct can_frame thrust_frame;
   thrust_frame.can_id = 0x18000017 | CAN_EFF_FLAG;
@@ -414,16 +526,26 @@ void CAN::sendThrustCommand(double thrust_value)
          &thrust_frame.data[0], &thrust_frame.data[1], &thrust_frame.data[2], &thrust_frame.data[3],
          &thrust_frame.data[4], &thrust_frame.data[5], &thrust_frame.data[6], &thrust_frame.data[7]);
 
-  if (m_can_send == "true") {
-    int thrust_bytes_sent = write(m_can_socket, &thrust_frame, sizeof(struct can_frame));
-    
-    if(thrust_bytes_sent < 0) {
-      reportRunWarning("Failed to send thrust CAN frame");
-    }
+  int thrust_bytes_sent = write(m_can_socket, &thrust_frame, sizeof(struct can_frame));
+if(thrust_bytes_sent < 0) {
+  static double s_last_warn = 0.0;
+  double now = MOOSTime();
+  if((now - s_last_warn) > 1.0) {
+    int e = errno;
+    reportRunWarning(std::string("Failed to send thrust CAN frame: errno=") +
+                     std::to_string(e) + " (" + std::string(strerror(e)) + ")");
+    s_last_warn = now;
   }
-  else {
-    reportRunWarning("CAN_SEND is false, not sending thrust CAN frame");
+} else if(thrust_bytes_sent != (int)sizeof(struct can_frame)) {
+  static double s_last_warn_short = 0.0;
+  double now = MOOSTime();
+  if((now - s_last_warn_short) > 1.0) {
+    reportRunWarning(std::string("Short write on thrust CAN frame: bytes_sent=") +
+                     std::to_string(thrust_bytes_sent));
+    s_last_warn_short = now;
   }
+}
+
 }
 
 //---------------------------------------------------------
@@ -616,19 +738,34 @@ void CAN::executeTrimSequence(const std::string& can_command)
       std::string byte_str = data_str.substr(j * 2, 2);
       frame.data[j] = static_cast<__u8>(std::stoul(byte_str, nullptr, 16));
     }
-    
-    if (m_can_send == "true") {
-      // Send the frame
-      int bytes_sent = write(m_can_socket, &frame, sizeof(struct can_frame));
-      if(bytes_sent < 0) {
-        reportRunWarning("Failed to send trim CAN frame " + std::to_string(i + 1));
-      }
+
+    if(!m_can_send.load()) {
+      break;
     }
-    else {
-      reportRunWarning("CAN_SEND is false, not sending trim CAN frame");
-    }
-    
-    // Wait 100ms before next command (except for last iteration)
+
+    // Send the frame
+    int bytes_sent = write(m_can_socket, &frame, sizeof(struct can_frame));
+if(bytes_sent < 0) {
+  static double s_last_warn = 0.0;
+  double now = MOOSTime();
+  if((now - s_last_warn) > 1.0) {
+    int e = errno;
+    reportRunWarning(std::string("Failed to send trim CAN frame ") +
+                     std::to_string(i + 1) + ": errno=" + std::to_string(e) +
+                     " (" + std::string(strerror(e)) + ")");
+    s_last_warn = now;
+  }
+} else if(bytes_sent != (int)sizeof(struct can_frame)) {
+  static double s_last_warn_short = 0.0;
+  double now = MOOSTime();
+  if((now - s_last_warn_short) > 1.0) {
+    reportRunWarning(std::string("Short write on trim CAN frame: bytes_sent=") +
+                     std::to_string(bytes_sent));
+    s_last_warn_short = now;
+  }
+}
+
+// Wait 100ms before next command (except for last iteration)
     if(i < 11) {
       std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
