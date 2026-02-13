@@ -9,6 +9,8 @@
 #define CAN_HEADER
 
 #include "MOOS/libMOOS/Thirdparty/AppCasting/AppCastingMOOSApp.h"
+#include <atomic>
+#include <string>
 #include <linux/can.h>
 #include <linux/can/raw.h>
 #include <sys/socket.h>
@@ -48,6 +50,10 @@ class CAN : public AppCastingMOOSApp
   double m_desired_rudder;
   double m_desired_thrust;
   double m_current_trim;
+  std::atomic_bool m_can_send;  // Controls whether CAN frames should be sent
+  std::string m_can_send_raw;  // Last raw CAN_SEND value received
+  double m_last_can_send_update_time;  // MOOSTime() when CAN_SEND last updated
+
   int m_can_socket;
   struct sockaddr_can m_can_addr;
   struct ifreq m_ifr;

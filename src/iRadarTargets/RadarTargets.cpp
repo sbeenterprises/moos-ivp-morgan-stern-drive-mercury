@@ -471,7 +471,7 @@ bool RadarTargets::parseRATTM(const string& sentence)
     node_report += "LENGTH=100,";
     node_report += "MODE=DRIVE";
 
-    //Notify("NODE_REPORT", node_report);
+    Notify("NODE_REPORT", node_report);
 
     // Update tracking
     m_last_report_time[target_number] = time;
