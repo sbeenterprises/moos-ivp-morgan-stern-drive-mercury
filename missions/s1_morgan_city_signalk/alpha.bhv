@@ -6,7 +6,7 @@ initialize   WAYPOINT = false
 initialize   STATIONING = false
 	
 //----------------------------------------------
-Behavior = BHV_Waypoint
+Behavior = BHV_Waypoint_mod
 { 
   name      = waypt_survey
   pwt       = 100
@@ -40,7 +40,7 @@ Behavior = BHV_Waypoint
    // General Behavior Parameters
    // ---------------------------
    name         = station-keep         // example
-   pwt          = 50                   // put 150 to have a priority higher than BHV_Waypoint
+   pwt          = 50                   // put 150 to have a priority higher than BHV_Waypoint_mod
    condition = STATIONING = true
    endflag   = STATIONING = false
    updates   = STATION_UPDATES
