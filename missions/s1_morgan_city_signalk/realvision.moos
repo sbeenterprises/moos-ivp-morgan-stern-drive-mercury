@@ -58,7 +58,7 @@ ProcessConfig = iAIS
 }
 
 
-ProcessConfig = pSensorFusionTracker
+ProcessConfig = pSensorFusionTracker_ref
 {
   AppTick   = 10
   CommsTick = 10
@@ -319,6 +319,7 @@ ProcessConfig = pHelmIvP
   ok_skew = any
   start_in_drive = false
   hold_on_apps = pContactMgrV20
+  ivp_behavior_dir = ../../lib
 }
 
 //------------------------------------------
