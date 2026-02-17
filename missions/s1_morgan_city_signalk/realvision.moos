@@ -97,12 +97,12 @@ ProcessConfig = pSensorFusionTracker_ref
 //--------------------------------------------------------------
 // pVisionDetector - Camera-Based Detection
 //--------------------------------------------------------------
-ProcessConfig = pVisionDetector
+ProcessConfig = pVisionDetector_ref
 {
   AppTick   = 20
   CommsTick = 20
   
-  rtsp_url = rtsp://douglas:Brazil2025!~@192.168.143.14:554/Streaming/Channels/101
+  rtsp_url = rtsp://douglas:Brazil2025!~@192.168.1.65:554/Streaming/Channels/101
   yolo_model_path = /home/douglas/Documents/yolo/yolo11n_openvino_model/yolo11n.xml
   
   confidence_threshold = 0.25

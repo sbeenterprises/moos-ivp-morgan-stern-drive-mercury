@@ -161,7 +161,7 @@ bool VisionDetector_ref::OnStartUp()
 
     //Hard-coded for testing
     m_rtsp_url =
-        "rtsp://douglas:Brazil2025!~@192.168.143.14:554/Streaming/Channels/101";
+        "rtsp://douglas:Brazil2025!~@192.168.1.65:554/Streaming/Channels/101";
 
     m_yolo_model_path =
         "/home/douglas/Documents/yolo/yolo11n_openvino_model/yolo11n.xml";
