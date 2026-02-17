@@ -863,6 +863,7 @@ void WebSocket::handleAutonomousStop(const std::string& value)
 {
   if (value == "true") {
     Notify("MOOS_MANUAL_OVERRIDE", "true");
+    Notify("STATIONING", "false"); //To end the station keep and not keep the mission stuck
 
     //Stop the engine and put rudder in zero just for safety
     Notify("DESIRED_RUDDER", 0.0);
