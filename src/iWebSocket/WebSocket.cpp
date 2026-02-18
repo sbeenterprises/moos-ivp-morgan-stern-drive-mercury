@@ -33,6 +33,8 @@ double nav_speed = 0;
 double nav_heading = 0;
 double desired_heading = 0;
 double desired_speed = 0;
+double desired_rudder = 0;
+double desired_thrust = 0;
 double value_setpoint = 0;
 double wpt_index = 0; // Index of the current waypoint
 double engine_accelerator_pedal_position = 0;
@@ -213,6 +215,10 @@ bool WebSocket::OnNewMail(MOOSMSG_LIST &NewMail)
       desired_heading = msg.GetDouble();
     else if(key == "DESIRED_SPEED")
       desired_speed = msg.GetDouble();
+    else if(key == "DESIRED_RUDDER")
+      desired_rudder = msg.GetDouble();
+    else if(key == "DESIRED_THRUST")
+      desired_thrust = msg.GetDouble();
     else if(key == "IVPHELM_STATE")
       ivphelm_state = msg.GetString();
     else if(key == "WPT_INDEX")
@@ -383,6 +389,8 @@ bool WebSocket::Iterate()
   root["DESIRED_SPEED"] = desired_speed;
   root["BASE_COORDS"] = base_coords;
   root["CAN_SEND"] = can_send;
+  root["DESIRED_RUDDER"] = desired_rudder;
+  root["DESIRED_THRUST"] = desired_thrust;
   root["ENGINE_ACCELERATOR_PEDAL_POSITION"] = engine_accelerator_pedal_position;
   root["ENGINE_PERCENT_LOAD"] = engine_percent_load;
   root["ENGINE_SPEED"] = engine_speed;
