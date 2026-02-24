@@ -4,6 +4,7 @@ initialize   DEPLOY = false
 initialize   RETURN = false
 initialize   WAYPOINT = false
 initialize   STATIONING = false
+initialize   REGION = false
 	
 //----------------------------------------------
 Behavior = BHV_Waypoint_mod
@@ -90,3 +91,18 @@ Behavior = BHV_AvdColregsV22
              pwt_grade = linear
    bearing_line_config = white:0, green:0.65, yellow:0.8, red:1.0
 }
+
+//----------------------------------------------
+Behavior = BHV_OpRegionV24
+ {
+   name = opr24
+   pwt  = 300
+   condition = REGION = true
+   endflag   = REGION = false
+   updates   = REGION_UPDATES    
+
+  // core_poly = pts={-6790,253:-6777,7:-6604,48:-6592,247}
+   save_dist = 5
+   halt_dist = 100
+   recover_spd = 5 // 5 knots of recovery speed
+ }

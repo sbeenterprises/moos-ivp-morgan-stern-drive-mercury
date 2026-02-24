@@ -570,6 +570,8 @@ void WebSocket::initializeMessageHandlers()
   m_messageHandlers["REPEAT"] = &WebSocket::handleRepeat;
   m_messageHandlers["BASE_COORDS"] = &WebSocket::handleBaseCoords;
   m_messageHandlers["CAN_SEND"] = &WebSocket::handleCanSend;
+  m_messageHandlers["REGION_UPDATES"] = &WebSocket::handleRegionUpdates;
+  m_messageHandlers["REGION"] = &WebSocket::handleRegion;
 }
 
 void WebSocket::handleTrim(const std::string& value)
@@ -1131,3 +1133,148 @@ void WebSocket::handleCanSend(const std::string& value)
   }
 }
 
+void WebSocket::handleRegionUpdates(const std::string& value)
+{
+  // Expected value format: core_poly=pts={lat,lon:lat,lon:lat,lon:...}
+  // Parse the pts={...} block, convert lat/lon to local x,y,
+  // and rebuild the string with local coordinates.
+
+  reportEvent("[REGION_UPDATES] Raw input: [" + value + "]");
+  reportEvent("[REGION_UPDATES] Input length: " + std::to_string(value.length()));
+
+  double lat_origin = 29.71970895316288;
+  double lon_origin = -91.14705165281887;
+  m_geodesy.Initialise(lat_origin, lon_origin);
+
+  // Find the pts={...} block
+  size_t ptsStart = value.find("pts={");
+  if (ptsStart == std::string::npos) {
+    reportRunWarning("[REGION_UPDATES] Could not find pts={} in value: " + value);
+    return;
+  }
+
+  // Everything before "pts={"
+  std::string prefix = value.substr(0, ptsStart);
+
+  size_t braceOpen = value.find('{', ptsStart);
+  size_t braceClose = value.find('}', braceOpen);
+  if (braceOpen == std::string::npos || braceClose == std::string::npos) {
+    reportRunWarning("[REGION_UPDATES] Malformed pts block in value: " + value);
+    return;
+  }
+
+  // Extract the coordinate string inside braces
+  std::string coordsStr = value.substr(braceOpen + 1, braceClose - braceOpen - 1);
+
+  // Everything after the closing brace (could be empty)
+  std::string suffix = value.substr(braceClose + 1);
+
+  // Split coordinates by ':'
+  std::vector<std::string> coordTokens;
+  std::istringstream tokenStream(coordsStr);
+  std::string token;
+  while (std::getline(tokenStream, token, ':')) {
+    if (!token.empty()) {
+      coordTokens.push_back(token);
+    }
+  }
+
+  // Convert each lat,lon pair to local x,y
+  std::vector<std::string> convertedCoords;
+  for (const auto &coordStr : coordTokens) {
+    size_t commaPos = coordStr.find(',');
+    reportEvent("[REGION_UPDATES] Processing coord token: [" + coordStr + "]");
+    if (commaPos == std::string::npos) {
+      std::cerr << "[REGION_UPDATES] Invalid coordinate format: " << coordStr << std::endl;
+      continue;
+    }
+
+    std::string latPart = coordStr.substr(0, commaPos);
+    std::string lonPart = coordStr.substr(commaPos + 1);
+
+    try {
+      double orig_lat = std::stod(latPart);
+      double orig_lon = std::stod(lonPart);
+
+      double local_y = 0.0, local_x = 0.0;
+      m_geodesy.LatLong2LocalUTM(orig_lat, orig_lon, local_y, local_x);
+
+      std::ostringstream oss;
+      oss << std::fixed << std::setprecision(1) << local_x << "," << local_y;
+      convertedCoords.push_back(oss.str());
+    } catch (const std::exception &e) {
+      std::cerr << "[REGION_UPDATES] Error converting coordinate (" << coordStr << "): " << e.what() << std::endl;
+    }
+  }
+
+  // Remove closing vertex if polygon is a closed ring
+  // (last point == first point), as XYPolygon expects open polygons
+  if (convertedCoords.size() > 1 && 
+      convertedCoords.front() == convertedCoords.back()) {
+    convertedCoords.pop_back();
+  }
+
+  // Validate: need at least 3 points for a convex polygon
+  if (convertedCoords.size() < 3) {
+    reportRunWarning("[REGION_UPDATES] Only " + std::to_string(convertedCoords.size()) 
+                     + " unique coords, need at least 3");
+    return;
+  }
+
+  // Rebuild the pts={...} string with local coordinates
+  std::ostringstream finalStream;
+  finalStream << prefix << "pts={";
+  bool first = true;
+  for (const auto &convertedCoord : convertedCoords) {
+    if (!first) {
+      finalStream << ":";
+    }
+    finalStream << convertedCoord;
+    first = false;
+  }
+  finalStream << "}" << suffix;
+
+  std::string region_update_str = finalStream.str();
+  Notify("REGION_UPDATES", region_update_str);
+  reportEvent("[REGION_UPDATES] Published: " + region_update_str);
+}
+
+void WebSocket::handleRegion(const std::string& value)
+{
+  // Expected format: true#REGION_UPDATES=core_poly=pts={lat,lon:lat,lon:...}
+  //              or: false#REGION_UPDATES=core_poly=pts={lat,lon:lat,lon:...}
+
+  // Split on the first '#'
+  size_t hashPos = value.find('#');
+
+  std::string regionBool;
+  std::string remainder;
+
+  if (hashPos != std::string::npos) {
+    regionBool = value.substr(0, hashPos);
+    remainder = value.substr(hashPos + 1);
+  } else {
+    regionBool = value;
+  }
+
+  // Set the REGION variable
+  if (regionBool == "true") {
+    Notify("REGION", "true");
+  } else if (regionBool == "false") {
+    Notify("REGION", "false");
+  }
+
+  // Process REGION_UPDATES if present
+  if (!remainder.empty()) {
+    // remainder should be: REGION_UPDATES=core_poly=pts={...}
+    size_t eqPos = remainder.find('=');
+    if (eqPos != std::string::npos) {
+      std::string key = remainder.substr(0, eqPos);
+      std::string regionValue = remainder.substr(eqPos + 1);
+
+      if (key == "REGION_UPDATES" && !regionValue.empty()) {
+        handleRegionUpdates(regionValue);
+      }
+    }
+  }
+}

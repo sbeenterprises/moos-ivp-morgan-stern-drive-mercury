@@ -105,6 +105,8 @@ class WebSocket : public AppCastingMOOSApp
   void handleRepeat(const std::string& value);
   void handleBaseCoords(const std::string& value);
   void handleCanSend(const std::string& value);
+  void handleRegionUpdates(const std::string& value);
+  void handleRegion(const std::string& value);
 
 };
 
