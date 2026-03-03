@@ -56,6 +56,7 @@ std::string id_route;
 bool repeat_mission = false;
 std::string base_coords;
 bool can_send = false; // Variable used to control CAN message flux
+bool region_active = false; // Variable used to control region activation
 
 
 // NODE_REPORT contact variables
@@ -255,6 +256,8 @@ bool WebSocket::OnNewMail(MOOSMSG_LIST &NewMail)
       base_coords = msg.GetString();
     else if(key == "CAN_SEND")
       can_send = (msg.GetString() == "true");
+    else if(key == "REGION")
+      region_active = (msg.GetString() == "true");
     else if(key == "NODE_REPORT") {
       // Parse NODE_REPORT to extract NAME, X, Y, SPD, HDG
       std::string node_report = msg.GetString();
@@ -389,6 +392,7 @@ bool WebSocket::Iterate()
   root["DESIRED_SPEED"] = desired_speed;
   root["BASE_COORDS"] = base_coords;
   root["CAN_SEND"] = can_send;
+  root["REGION"] = region_active;
   root["DESIRED_RUDDER"] = desired_rudder;
   root["DESIRED_THRUST"] = desired_thrust;
   root["ENGINE_ACCELERATOR_PEDAL_POSITION"] = engine_accelerator_pedal_position;
@@ -494,7 +498,7 @@ void WebSocket::registerVariables()
   Register("REPEAT_MISSION", 0);
   Register("BASE_COORDS", 0); //Variable used in return to home
   Register("CAN_SEND", 0); //Variable used to control CAN message flux
-
+  Register("REGION", 0); //Variable used to control region
   
 }
 
