@@ -55,7 +55,7 @@ std::string view_point;
 std::string id_route;
 bool repeat_mission = false;
 std::string base_coords;
-std::string can_send; // Variable used to control CAN message flux
+bool can_send = false; // Variable used to control CAN message flux
 
 
 // NODE_REPORT contact variables
