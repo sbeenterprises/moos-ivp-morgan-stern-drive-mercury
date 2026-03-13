@@ -38,7 +38,7 @@ VisionDetector_ref::VisionDetector_ref()
     // Initialize detection parameters
     m_confidence_threshold = 0.25f;
     m_nms_threshold = 0.45f;
-    m_target_class = 0;  // Custom model class for boat
+    m_target_class = 0;  // boat na minha rede
 
     // Initialize exclusion zone (default: center bottom)
     m_exclusion_x1 = 0.3;
@@ -164,7 +164,7 @@ bool VisionDetector_ref::OnStartUp()
         "rtsp://douglas:Brazil2025!~@192.168.1.65:554/Streaming/Channels/101";
 
     m_yolo_model_path =
-        "/home/douglas/Documents/yolo/yolo11n_openvino_model/yolo11n.xml";
+        "/home/douglas/Documents/yolo/best_openvino_model/best.xml";
 
     // Sanity check
     if (m_rtsp_url.empty()) {
@@ -319,9 +319,22 @@ void VisionDetector_ref::visionLoop()
 
             cv::rectangle(display_frame, yolo_det.box, box_color, 2);
 
-            // Draw label
-            std::string label = yolo_det.className + " " +
-                               std::to_string((int)(yolo_det.confidence * 100)) + "%";
+            // Compute distance for display only (no logic change — filtering/publishing
+            // still happens exclusively in the second loop below)
+            double display_distance = estimateDistance(yolo_det.box.height, frame_height);
+
+            // Draw label: ClassName  Conf%  Dist m  (or "N/A" when bbox too small)
+            std::ostringstream label_ss;
+            label_ss << yolo_det.className
+                     << "  " << (int)(yolo_det.confidence * 100) << "%";
+            if (display_distance >= 0.0) {
+                label_ss << "  " << std::fixed << std::setprecision(1)
+                         << display_distance << "m";
+            } else {
+                label_ss << "  N/A";
+            }
+            std::string label = label_ss.str();
+
             int baseline;
             cv::Size label_size = cv::getTextSize(label, cv::FONT_HERSHEY_SIMPLEX, 0.5, 1, &baseline);
             cv::rectangle(display_frame,
