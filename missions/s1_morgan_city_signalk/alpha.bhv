@@ -103,6 +103,6 @@ Behavior = BHV_OpRegionV24
 
   // core_poly = pts={-6790,253:-6777,7:-6604,48:-6592,247}
    save_dist = 5
-   halt_dist = 100
+   //halt_dist = 10
    recover_spd = 5 // 5 knots of recovery speed
  }
