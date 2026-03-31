@@ -179,7 +179,7 @@ ProcessConfig = uSimMarineV22
   AppTick  	= 4
   CommsTick	= 4
 
-  start_pos     = x=-6409, y=144, heading=0, speed=0
+  start_pos     = x=-6289, y=400, heading=0, speed=0
   prefix        = NAV
   turn_rate     = 95
   thrust_map    = 0:0, 20:3, 40:6, 60:9, 80:12, 100:15
@@ -199,7 +199,7 @@ ProcessConfig = pHelmIvP
   domain     = speed:0:35:351
 
   ok_skew = any
-  start_in_drive = false
+  start_in_drive = true
   hold_on_apps = pContactMgrV20
   ivp_behavior_dir = ../../lib 
 

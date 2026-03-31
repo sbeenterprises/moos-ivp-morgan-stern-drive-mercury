@@ -13,7 +13,7 @@ Behavior = BHV_Waypoint_mod
   pwt       = 100
   condition = WAYPOINT = true
   endflag   = WAYPOINT = false
-  endflag   = MOOS_MANUAL_OVERRIDE = true
+  //endflag   = MOOS_MANUAL_OVERRIDE = true
   endflag   = DESIRED_THRUST = 0 //zero thrust e rudder por segurança
   endflag   = DESIRED_RUDDER = 0
 
@@ -98,11 +98,11 @@ Behavior = BHV_OpRegionV24
    name = opr24
    pwt  = 300
    condition = REGION = true
-   perpetual = true
+   endflag   = REGION = false
    updates   = REGION_UPDATES    
 
-  // core_poly = pts={-6790,253:-6777,7:-6604,48:-6592,247}
+   core_poly = pts={-6790,253:-6777,7:-6604,48:-6592,247}
    save_dist = 5
-   //halt_dist = 10
+   halt_dist = 100
    recover_spd = 5 // 5 knots of recovery speed
  }

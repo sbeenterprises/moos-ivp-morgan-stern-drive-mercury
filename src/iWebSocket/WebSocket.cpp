@@ -50,6 +50,7 @@ double engine_intake_manifold_pressure = 0;
 double engine_battery_voltage = 0;
 std::string ivphelm_state;
 std::string ivphelm_allstop;
+std::string waypoint;
 std::string wpt_stat;
 std::string view_point;
 std::string id_route;
@@ -226,6 +227,8 @@ bool WebSocket::OnNewMail(MOOSMSG_LIST &NewMail)
       wpt_index = msg.GetDouble();
     else if(key == "IVPHELM_ALLSTOP")
       ivphelm_allstop = msg.GetString();
+    else if(key == "WAYPOINT")
+      waypoint = msg.GetString();
     else if(key == "WPT_STAT")
       wpt_stat = msg.GetString();
     else if(key == "ENGINE_ACCELERATOR_PEDAL_POSITION")
@@ -385,6 +388,7 @@ bool WebSocket::Iterate()
   root["IVPHELM_STATE"] = ivphelm_state;
   root["WPT_INDEX"] = wpt_index;
   root["IVPHELM_ALLSTOP"] = ivphelm_allstop;
+  root["WAYPOINT"] = waypoint;
   root["WPT_STAT"] = wpt_stat;
   root["VIEW_POINT"] = view_point;
   root["ID_ROUTE"] = id_route;
@@ -499,6 +503,7 @@ void WebSocket::registerVariables()
   Register("BASE_COORDS", 0); //Variable used in return to home
   Register("CAN_SEND", 0); //Variable used to control CAN message flux
   Register("REGION", 0); //Variable used to control region
+  Register("WAYPOINT", 0); //Variable to control waypoint behavior
   
 }
 
@@ -876,7 +881,8 @@ void WebSocket::handleAutonomousStart(const std::string& value)
 void WebSocket::handleAutonomousStop(const std::string& value)
 {
   if (value == "true") {
-    Notify("MOOS_MANUAL_OVERRIDE", "true");
+    //Notify("MOOS_MANUAL_OVERRIDE", "true");
+    Notify("WAYPOINT", "false");
     Notify("STATIONING", "false"); //To end the station keep and not keep the mission stuck
 
     //Stop the engine and put rudder in zero just for safety

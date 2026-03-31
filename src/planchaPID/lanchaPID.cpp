@@ -55,6 +55,7 @@ double setpoint_heading; //Variável em que eu coloco o setpoint de rumo
 //Check when autonomous control is active
 std::string waypoint; //Variável para verificar se o controle autônomo é verdadeiro
 std::string return_var; //
+std::string region; // Variável para verificar se o OpRegion está ativo
 
 //Cria os objetos para o controle PID com valores iniciais de kp, ki e kd lidos do arquivo
 //PIDController speedController("/home/dueiras/vsnt/moos-ivp-vsnt/src/planchaPID/speed_pid_parameters.txt");
@@ -392,6 +393,8 @@ bool lanchaPID::OnNewMail(MOOSMSG_LIST &NewMail)
         nav_cog = msg.GetDouble();
       else if(key == "STATIONING")
         stationing = msg.GetString();
+      else if(key == "REGION")
+        region = msg.GetString();
      else if(key != "APPCAST_REQ") // handled by AppCastingMOOSApp
        reportRunWarning("Unhandled Mail: " + key);
    }
@@ -462,8 +465,8 @@ bool lanchaPID::Iterate()
 
   //Publico DESIRED_RUDDER e DESIRED_THRUST
   //Just publish when waypoint behavior is true and manual override is false
-  //BHV_Waypoint is active 
-  if (waypoint == "true" && moos_manual_overide == "false" || stationing == "true") {
+  //BHV_Waypoint is active, or StationKeep is active, or OpRegion is active
+  if ((waypoint == "true" && moos_manual_overide == "false") || stationing == "true" || region == "true") {
     Notify("DESIRED_THRUST", desired_thrust);
     Notify("DESIRED_RUDDER", desired_rudder);
   } 
@@ -550,6 +553,7 @@ void lanchaPID::registerVariables()
   Register("WAYPOINT",0);
   Register("RETURN",0);
   Register("STATIONING",0);
+  Register("REGION",0);
 }
 
 //------------------------------------------------------------
