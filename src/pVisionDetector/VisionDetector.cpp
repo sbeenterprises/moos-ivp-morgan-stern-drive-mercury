@@ -33,7 +33,7 @@ VisionDetector::VisionDetector()
     // Initialize detection parameters
     m_confidence_threshold = 0.25f;
     m_nms_threshold = 0.45f;
-    m_target_class = 8;  // COCO class for boat
+    m_target_class = 0;  // Custom model class for boat
     
     // Initialize exclusion zone (default: center bottom)
     m_exclusion_x1 = 0.3;

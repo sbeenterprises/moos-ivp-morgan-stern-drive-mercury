@@ -43,18 +43,9 @@ UltralyticsInference::UltralyticsInference(const std::string& modelPath,
 {
     std::cout << "DEBUG: Loading YOLO with conf=" << confThreshold << ", nms=" << iouThreshold << std::endl;
     
-    // COCO class names
+    // Custom class names for the YOLO model
     classNames = {
-        "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck", "boat",
-        "traffic light", "fire hydrant", "stop sign", "parking meter", "bench", "bird", "cat",
-        "dog", "horse", "sheep", "cow", "elephant", "bear", "zebra", "giraffe", "backpack",
-        "umbrella", "handbag", "tie", "suitcase", "frisbee", "skis", "snowboard", "sports ball",
-        "kite", "baseball bat", "baseball glove", "skateboard", "surfboard", "tennis racket",
-        "bottle", "wine glass", "cup", "fork", "knife", "spoon", "bowl", "banana", "apple",
-        "sandwich", "orange", "broccoli", "carrot", "hot dog", "pizza", "donut", "cake", "chair",
-        "couch", "potted plant", "bed", "dining table", "toilet", "tv", "laptop", "mouse",
-        "remote", "keyboard", "cell phone", "microwave", "oven", "toaster", "sink", "refrigerator",
-        "book", "clock", "vase", "scissors", "teddy bear", "hair drier", "toothbrush"
+        "boat", "tree", "vegetation"
     };
     
     // Load model with preprocessing (EXACTLY like Ultralytics)
@@ -145,7 +136,8 @@ std::vector<Detection> UltralyticsInference::runInference(const cv::Mat& input)
         float max_score = 0.0f;
         int best_class = 0;
         
-        for (int c = 0; c < 80; c++) {
+        int num_classes = dimensions - 4; // Dynamically derive number of classes
+        for (int c = 0; c < num_classes; c++) {
             float score = classes_scores[c * rows];
             if (score > max_score) {
                 max_score = score;
