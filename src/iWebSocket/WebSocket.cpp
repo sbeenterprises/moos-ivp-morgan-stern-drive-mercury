@@ -37,6 +37,7 @@ double desired_rudder = 0;
 double desired_thrust = 0;
 double value_setpoint = 0;
 double wpt_index = 0; // Index of the current waypoint
+double wpt_pct_complete = 0; // Percentage of route completed
 double engine_accelerator_pedal_position = 0;
 double engine_percent_load = 0;
 double engine_speed = 0;
@@ -225,6 +226,8 @@ bool WebSocket::OnNewMail(MOOSMSG_LIST &NewMail)
       ivphelm_state = msg.GetString();
     else if(key == "WPT_INDEX")
       wpt_index = msg.GetDouble();
+    else if(key == "WPT_PCT_COMPLETE")
+      wpt_pct_complete = msg.GetDouble();
     else if(key == "IVPHELM_ALLSTOP")
       ivphelm_allstop = msg.GetString();
     else if(key == "WAYPOINT")
@@ -410,6 +413,7 @@ bool WebSocket::Iterate()
   root["ENGINE_FUEL_RATE"] = engine_fuel_rate;
   root["ENGINE_INTAKE_MANIFOLD_PRESSURE"] = engine_intake_manifold_pressure;
   root["ENGINE_BATTERY_VOLTAGE"] = engine_battery_voltage;
+  root["WPT_PCT_COMPLETE"] = wpt_pct_complete;
 
   // Add contact info as nested object
   Json::Value contact;
@@ -504,6 +508,7 @@ void WebSocket::registerVariables()
   Register("CAN_SEND", 0); //Variable used to control CAN message flux
   Register("REGION", 0); //Variable used to control region
   Register("WAYPOINT", 0); //Variable to control waypoint behavior
+  Register("WPT_PCT_COMPLETE", 0); //Route completion percentage
   
 }
 

@@ -122,6 +122,7 @@ BHV_Waypoint_mod::BHV_Waypoint_mod(IvPDomain gdomain) :
   m_prev_waypt_index = -1;
   
   addInfoVars("NAV_X, NAV_Y, NAV_SPEED");
+  addInfoVars("WPT_CAPTURE_RADIUS, WPT_SLIP_RADIUS");
   m_markpt.set_active(false);
   m_markpt.set_vertex_size(4);
 
@@ -542,6 +543,8 @@ void BHV_Waypoint_mod::onRunToIdleState()
   if(m_var_dist_to_next != "")
     postMessage(m_var_dist_to_next, -1);
 
+  // Reset route completion percentage to zero when behavior goes idle
+  postMessage(("WPT_PCT_COMPLETE" + m_var_suffix), 0.0);
 }
 
 //-----------------------------------------------------------
@@ -712,6 +715,16 @@ bool BHV_Waypoint_mod::updateInfoIn()
     m_waypoint_engine.setSegList(shtour_segl);
   }
 
+  bool ok_cr, ok_sr;
+  double new_cr = getBufferDoubleVal("WPT_CAPTURE_RADIUS", ok_cr);
+  if(ok_cr && new_cr != m_waypoint_engine.getCaptureRadius()) {
+    m_waypoint_engine.setCaptureRadius(new_cr);
+  }
+  double new_sr = getBufferDoubleVal("WPT_SLIP_RADIUS", ok_sr);
+  if(ok_sr && new_sr != m_waypoint_engine.getSlipRadius()) {
+    m_waypoint_engine.setNonmonotonicRadius(new_sr);
+  }
+
   return(true);
 }
 
@@ -756,6 +769,8 @@ bool BHV_Waypoint_mod::setNextWaypoint()
     //m_completed = true;
     setComplete();
     m_markpt.set_active(false);
+    // Reset completion percentage to zero when route is finished
+    postMessage(("WPT_PCT_COMPLETE" + m_var_suffix), 0.0);
     if(m_perpetual)
       m_waypoint_engine.resetForNewTraversal();
     return(false);
@@ -940,13 +955,30 @@ void BHV_Waypoint_mod::postStatusReport()
   string hits_str = uintToString(capture_hits);
   hits_str += "/" + uintToString(total_hits);
 
+  // Calculate route completion percentage based on distance (meters)
+  double pct_complete = 0;
+  XYSegList segl = m_waypoint_engine.getSegList();
+  double total_route_dist = segl.length();
+  if(total_route_dist > 0) {
+    double dist_remaining = m_waypoint_engine.distToEndCycle(m_osx, m_osy);
+    if(dist_remaining >= 0) {
+      double dist_traveled = total_route_dist - dist_remaining;
+      if(dist_traveled < 0)
+        dist_traveled = 0;
+      pct_complete = (dist_traveled / total_route_dist) * 100.0;
+      if(pct_complete > 100.0)
+        pct_complete = 100.0;
+    }
+  }
+
   string stat = "vname=" + m_us_name + ",";
   stat += "behavior-name=" + m_descriptor + ",";
   stat += "index="  + intToString(current_waypt)   + ",";
   stat += "hits="   + hits_str + ",";
   stat += "cycles=" + uintToString(waypt_cycles)   + ",";
   stat += "dist="   + doubleToString(dist_meters, 0)  + ",";
-  stat += "eta="    + doubleToString(eta_seconds, 0);
+  stat += "eta="    + doubleToString(eta_seconds, 0)  + ",";
+  stat += "pct_complete=" + doubleToString(pct_complete, 1);
 
   if(m_var_report != "silent")
     postMessage((m_var_report + m_var_suffix), stat);
@@ -955,6 +987,16 @@ void BHV_Waypoint_mod::postStatusReport()
       postMessage((m_var_index + m_var_suffix), current_waypt);
     }
   }
+
+  // Post route completion percentage as a standalone variable
+  postMessage(("WPT_PCT_COMPLETE" + m_var_suffix), pct_complete);
+
+  // Post capture and slip radii as a combined variable
+  double capture_radius = m_waypoint_engine.getCaptureRadius();
+  double slip_radius = m_waypoint_engine.getSlipRadius();
+  string radii_str = "capture_radius=" + doubleToStringX(capture_radius, 1) + 
+                     ",slip_radius=" + doubleToStringX(slip_radius, 1);
+  postMessage(("WPT_RADII" + m_var_suffix), radii_str);
 }
 
 //-----------------------------------------------------------
