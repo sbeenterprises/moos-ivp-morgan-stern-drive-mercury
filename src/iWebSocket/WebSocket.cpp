@@ -55,6 +55,7 @@ std::string waypoint;
 std::string wpt_stat;
 std::string view_point;
 std::string id_route;
+std::string wpt_radii;
 bool repeat_mission = false;
 std::string base_coords;
 bool can_send = false; // Variable used to control CAN message flux
@@ -234,6 +235,8 @@ bool WebSocket::OnNewMail(MOOSMSG_LIST &NewMail)
       waypoint = msg.GetString();
     else if(key == "WPT_STAT")
       wpt_stat = msg.GetString();
+    else if(key == "WPT_RADII")
+      wpt_radii = msg.GetString();
     else if(key == "ENGINE_ACCELERATOR_PEDAL_POSITION")
       engine_accelerator_pedal_position = msg.GetDouble();
     else if(key == "ENGINE_PERCENT_LOAD")
@@ -414,6 +417,7 @@ bool WebSocket::Iterate()
   root["ENGINE_INTAKE_MANIFOLD_PRESSURE"] = engine_intake_manifold_pressure;
   root["ENGINE_BATTERY_VOLTAGE"] = engine_battery_voltage;
   root["WPT_PCT_COMPLETE"] = wpt_pct_complete;
+  root["WPT_RADII"] = wpt_radii;
 
   // Add contact info as nested object
   Json::Value contact;
@@ -509,6 +513,7 @@ void WebSocket::registerVariables()
   Register("REGION", 0); //Variable used to control region
   Register("WAYPOINT", 0); //Variable to control waypoint behavior
   Register("WPT_PCT_COMPLETE", 0); //Route completion percentage
+  Register("WPT_RADII", 0); //Waypoint radii configuration
   
 }
 
