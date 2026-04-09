@@ -27,6 +27,9 @@ Behavior = BHV_Waypoint_mod
       capture_radius = 35
          slip_radius = 40
 	efficiency_measure = all
+
+    wpt_dist_to_prev = SURVEY_DIST_TO_PREV
+    wpt_dist_to_next = SURVEY_DIST_TO_NEXT
 	           
     visual_hints = nextpt_color=yellow
     visual_hints = nextpt_vertex_size=8
@@ -105,4 +108,19 @@ Behavior = BHV_OpRegionV24
    save_dist = 5
    halt_dist = 100
    recover_spd = 5 // 5 knots of recovery speed
+ }
+
+
+//This behavior has the purpose to slow down when getting closer to a waypoint
+
+ Behavior=BHV_ConstantSpeed
+{
+  name       = slow_in_turn
+  pwt        = 500
+  condition  = ((SURVEY_DIST_TO_NEXT < 80) and (SURVEY_DIST_TO_NEXT > 0)) or ((SURVEY_DIST_TO_PREV < 80) and (SURVEY_DIST_TO_PREV > 0))
+  condition  = WAYPOINT = true
+  perpetual  = true
+
+           speed = 4
+        duration = no-time-limit
  }
