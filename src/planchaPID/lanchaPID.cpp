@@ -86,8 +86,8 @@ PIDController::PIDController(double kp, double ki, double kd)
 double PIDController::CalculateSpeed(double desired, double current, double dt)
 {
     // ------- 1. Feed-forward (static map) -----------------
-    static const std::vector<double> ff_speed  = {0,4,6,10,12,15,20,25,28,30,32,35,40,45,50};
-    static const std::vector<double> ff_thrust = {0,1,4,33,36,40,55,70,80,88,95,100,100,100,100};
+    static const std::vector<double> ff_speed  = {0, 7, 12.5, 19.2, 22.5, 25,  26.2};
+    static const std::vector<double> ff_thrust = {0, 30, 35,   40,   45,   50,  55};
 
 
     // linear interpolation
