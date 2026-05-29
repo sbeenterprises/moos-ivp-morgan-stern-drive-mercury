@@ -46,10 +46,7 @@ class CAN : public AppCastingMOOSApp
 
  private: // State variables
   double m_desired_rudder;
-  double m_desired_thrust;     // target thrust (%)
-  double m_commanded_thrust;   // actual thrust being sent, ramped toward target
-  double m_thrust_slew_rate;   // max ramp-up rate (% per second)
-  double m_last_thrust_time;   // MOOSTime of last ramp update
+  double m_desired_thrust;     // desired thrust (%)
   double m_current_trim;
   std::string m_can_send;  // Controls whether CAN frames should be sent
   int m_can_socket;

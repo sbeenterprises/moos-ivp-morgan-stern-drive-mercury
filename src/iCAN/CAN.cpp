@@ -22,9 +22,6 @@ CAN::CAN()
 {
   m_desired_rudder = 0.0;
   m_desired_thrust = 0.0;
-  m_commanded_thrust = 0.0;
-  m_thrust_slew_rate = 20.0;   // % per second (ramp-up limit)
-  m_last_thrust_time = 0.0;
   m_current_trim = 0.0;
   m_can_send = "false";  // Disable CAN sending by default
   m_can_socket = -1;
@@ -65,8 +62,6 @@ bool CAN::OnNewMail(MOOSMSG_LIST &NewMail)
      if(key == "FOO") 
        cout << "great!";
      else if(key == "DESIRED_THRUST") {
-       // Only update the target; Iterate() ramps the commanded thrust
-       // toward it so speed-ups are smooth and steady.
        m_desired_thrust = msg.GetDouble();
      }
      else if(key == "DESIRED_RUDDER") {
@@ -107,20 +102,7 @@ bool CAN::Iterate()
 
   sendRudderCommand(m_desired_rudder);
 
-  // Slew-rate limit the thrust: ramp up gradually toward the target, but
-  // allow immediate decreases (e.g. for collision avoidance / stop).
-  double now = MOOSTime();
-  double dt  = (m_last_thrust_time > 0.0) ? (now - m_last_thrust_time) : 0.0;
-  m_last_thrust_time = now;
-
-  double rise = m_desired_thrust - m_commanded_thrust;
-  double max_step = m_thrust_slew_rate * dt;
-  if(rise > max_step)
-    m_commanded_thrust += max_step;   // rising faster than allowed: clamp the rate
-  else
-    m_commanded_thrust = m_desired_thrust;  // within step, or decreasing: apply now
-
-  sendThrustCommand(m_commanded_thrust);
+  sendThrustCommand(m_desired_thrust);
 
   AppCastingMOOSApp::PostReport();
   return(true);
@@ -147,12 +129,6 @@ bool CAN::OnStartUp()
     string value = line;
 
     bool handled = false;
-    if(param == "thrust_slew_rate") {
-      double rate = atof(value.c_str());
-      if(rate > 0.0)
-        m_thrust_slew_rate = rate;
-      handled = true;
-    }
 
     if(!handled)
       reportUnhandledConfigWarning(orig);
@@ -198,9 +174,7 @@ bool CAN::buildReport()
 
   // Current Values
   m_msgs << "Current Rudder Command: " << m_desired_rudder << "%" << endl;
-  m_msgs << "Target Thrust: " << m_desired_thrust << "%" << endl;
-  m_msgs << "Commanded Thrust (ramped): " << m_commanded_thrust << "%"
-         << "  [slew " << m_thrust_slew_rate << " %/s]" << endl;
+  m_msgs << "Desired Thrust: " << m_desired_thrust << "%" << endl;
   m_msgs << "Current TRIM Value: " << m_current_trim << endl;
   m_msgs << endl;
 
@@ -216,17 +190,17 @@ bool CAN::buildReport()
   m_msgs << "Rudder Percentage: " << abs((int)m_desired_rudder) << "%" << endl;
   m_msgs << endl;
 
-  // Thrust Information (reflects the actually-sent, ramped value)
-  string gear_command = getGearCommand(m_commanded_thrust);
-  string thrust_state = (m_commanded_thrust > 0) ? "FORWARD" : "NEUTRAL";
+  // Thrust Information
+  string gear_command = getGearCommand(m_desired_thrust);
+  string thrust_state = (m_desired_thrust > 0) ? "FORWARD" : "NEUTRAL";
   m_msgs << "Current Gear Command: " << gear_command << endl;
   m_msgs << "Thrust State: " << thrust_state << endl;
 
-  if(m_commanded_thrust > 0) {
-    string current_thrust_frame = getThrustCANFrame(m_commanded_thrust);
+  if(m_desired_thrust > 0) {
+    string current_thrust_frame = getThrustCANFrame(m_desired_thrust);
     m_msgs << "Current Thrust CAN Frame: " << current_thrust_frame << endl;
   }
-  m_msgs << "Thrust Percentage: " << ((int)m_commanded_thrust) << "%" << endl;
+  m_msgs << "Thrust Percentage: " << ((int)m_desired_thrust) << "%" << endl;
   m_msgs << endl;
 
   // Statistics Table

@@ -495,6 +495,10 @@ bool lanchaPID::Iterate()
   //Speed controller - New function
   desired_thrust = speedController.CalculateSpeed(desired_speed, nav_speed,dt);
 
+  // Limit maximum thrust to 50 %
+  if(desired_thrust > 50.0)
+    desired_thrust = 50.0;
+
   // Imprima as saídas dos controladores
 
   //Publico DESIRED_RUDDER e DESIRED_THRUST
