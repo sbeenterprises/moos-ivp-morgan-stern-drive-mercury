@@ -179,20 +179,25 @@ double PIDController::Calculate(double desired, double current, double dt) {
     double derivative = (error - prevError)/dt;
 
     //Gain Scheduling
+    eff_ki      = 0;
+    eff_kd      = 0.2;
+    upper_bound = 100;  // Modified value for USV
+    lower_bound = -100; // Modified value for USV
 
-    
-    if (nav_speed < 5) {             
-        eff_kp = 0.65; //it was 0.55, increased to 0.75
-        eff_ki = 0;
-        eff_kd = 0.060;  
-        upper_bound = 100; // Modified value for USV
-        lower_bound = -100; // Modified value for USV
+    if (nav_speed < 5) {
+        eff_kp = 0.40;
+    } else if (nav_speed < 10) {
+        eff_kp = 0.35;
+    } else if (nav_speed < 15) {
+        eff_kp = 0.30;
+    } else if (nav_speed < 20) {
+        eff_kp = 0.25;
+    } else if (nav_speed < 25) {
+        eff_kp = 0.20;
+    } else if (nav_speed < 30) {
+        eff_kp = 0.15;
     } else {
-        eff_kp = 0.7;
-        eff_ki = 0;
-        eff_kd = 0.2;
-        upper_bound = 100;
-        lower_bound = -100;
+        eff_kp = 0.08;
     }
 
     output = eff_kp * error + eff_ki * integral + eff_kd * derivative;
