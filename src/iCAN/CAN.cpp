@@ -23,7 +23,7 @@ CAN::CAN()
   m_desired_rudder = 0.0;
   m_desired_thrust = 0.0;
   m_commanded_thrust = 0.0;
-  m_thrust_slew_rate = 5.0;   // % per second (ramp-up limit)
+  m_thrust_slew_rate = 20.0;   // % per second (ramp-up limit)
   m_last_thrust_time = 0.0;
   m_current_trim = 0.0;
   m_can_send = "false";  // Disable CAN sending by default

@@ -71,13 +71,14 @@ PIDController::PIDController(double kp, double ki, double kd)
   kp          = kp;
   ki          = ki;
   kd          = kd;
-  upper_bound = 60; //Modified value for USV
-  lower_bound = -60;
+  upper_bound = 20; //Modified value for USV
+  lower_bound = -20;
   integral    = 0;
   prevError   = 0;
   eff_kp      = 0;
   eff_ki      = 0;
   eff_kd      = 0;
+  prevMeas    = 0;
 
 }
 
@@ -86,8 +87,11 @@ PIDController::PIDController(double kp, double ki, double kd)
 double PIDController::CalculateSpeed(double desired, double current, double dt)
 {
     // ------- 1. Feed-forward (static map) -----------------
-    static const std::vector<double> ff_speed  = {0, 7, 12.5, 19.2, 22.5, 25,  26.2};
-    static const std::vector<double> ff_thrust = {0, 30, 35,   40,   45,   50,  55};
+    // Recalibrated from log MOOSLog_29_5_2026_____09_33_03: sustained ~38 %
+    // thrust settled the hull near ~18 kt and ~24-28 % held ~5-6 kt, so the
+    // old map (10 kt -> 32.7 %) was over-driving. Equilibrium thrust vs speed:
+    static const std::vector<double> ff_speed  = {0,  6,  10, 14, 18, 22, 26};
+    static const std::vector<double> ff_thrust = {0, 24,  28, 33, 38, 44, 52};
 
 
     // linear interpolation
@@ -102,45 +106,56 @@ double PIDController::CalculateSpeed(double desired, double current, double dt)
 
     // ------- 2. PID feedback (gain-scheduled) -------------
     double error      = desired - current;
-    integral         += error * dt;
     double derivative = (error - prevError)/dt;
     prevError         = error;
 
-    // anti-wind-up
-
-    if (integral > 100.0) {
-        integral = 100.0;
-    } else if (integral < -100.0) {
-        integral = -100.0;
-    }
-    
-    // gain scheduling on *measured* speed
-    double v = current;
+    // gain scheduling on the *desired* speed (not the measured one):
+    // the gains stay constant throughout a setpoint, so they no longer
+    // jump as the boat accelerates across the 2 kt / 6 kt thresholds.
+    double v = desired;
     if(v < 2.0){           // “get moving”
-        eff_kp =  4.0;
+        eff_kp =  2.0;
         eff_ki =  1.2;
         eff_kd =  0.0;
     }
     else if(v < 6.0){      // “cruise”
-        eff_kp =  2.0; 
+        eff_kp =  1.0;
         eff_ki =  0.4;
         eff_kd =  0.05;
     }
     else{                  // “high drag”
-        eff_kp =  1.8; // old value 1.2
-        eff_ki =  0.15; // old value 0.1
-        eff_kd =  0.12; // old value 0.12 
+        eff_kp =  0.8;
+        eff_ki =  0.15;
+        eff_kd =  0.12;
+    }
+
+    // Integral with *bounded authority* anti-wind-up. The old code clamped
+    // the raw integral to +/-100, letting the I-term alone command up to
+    // eff_ki*100 (40..120 %!) of thrust and stay pinned high while the hull
+    // lag caught up -> overshoot. Now we cap the integral so its
+    // *contribution* never exceeds +/- I_AUTHORITY percent of thrust.
+    const double I_AUTHORITY = 15.0;   // max thrust (%) the I-term may add
+    integral += error * dt;
+    if(eff_ki > 1e-6){
+        double i_max = I_AUTHORITY / eff_ki;
+        if(integral >  i_max) integral =  i_max;
+        if(integral < -i_max) integral = -i_max;
     }
 
     double fb = eff_kp*error + eff_ki*integral + eff_kd*derivative;
 
     // ------- 3. Combine and clamp -------------------------
     output = ff + fb;
-    if (output < 0.0) {
-        output = 0.0; // no negative thrust
-    } else if (output > 100.0) {
-        output = 100.0; // max thrust of 100%
-    }
+
+    // Back-calculation anti-wind-up: when the output saturates, pull the
+    // integral back so it does not keep accumulating authority the actuator
+    // cannot deliver (removes the long "stuck high" phase of the cycle).
+    double clamped = output;
+    if(clamped > 100.0)    clamped = 100.0;   // max thrust 100 %
+    else if(clamped < 0.0) clamped = 0.0;     // no negative thrust
+    if(clamped != output && eff_ki > 1e-6)
+        integral += (clamped - output) / eff_ki;
+    output = clamped;
     //upper_bound = 40;                             // for AppCasting table
     //lower_bound = 0;
 
@@ -176,28 +191,42 @@ double PIDController::Calculate(double desired, double current, double dt) {
       integral = lower_bound;
     }
 
-    double derivative = (error - prevError)/dt;
+    // Derivative on *measurement* (yaw rate), not on the error: avoids the
+    // derivative "kick" when DESIRED_HEADING steps between waypoints and
+    // provides true rate damping against the heading overshoot.
+    double dmeas = current - prevMeas;
+    if (dmeas >  180) dmeas -= 360;
+    else if (dmeas < -180) dmeas += 360;
+    double derivative = -dmeas / dt;
+    prevMeas = current;
 
     //Gain Scheduling
     eff_ki      = 0;
     eff_kd      = 0.2;
-    upper_bound = 100;  // Modified value for USV
-    lower_bound = -100; // Modified value for USV
+    // Rudder bounds now come from the .moos config (HEADING_UPPER/LOWER_BOUND
+    // via setUpper/setLower, e.g. +/-20). They are no longer overwritten here,
+    // so the rudder no longer slams to +/-60/100 and over-builds yaw rate.
 
     if (nav_speed < 5) {
-        eff_kp = 0.40;
+        eff_kp = 0.2;
+        eff_kd = 0.016;
     } else if (nav_speed < 10) {
-        eff_kp = 0.35;
-    } else if (nav_speed < 15) {
-        eff_kp = 0.30;
-    } else if (nav_speed < 20) {
-        eff_kp = 0.25;
-    } else if (nav_speed < 25) {
-        eff_kp = 0.20;
-    } else if (nav_speed < 30) {
         eff_kp = 0.15;
+        eff_kd = 0.014;
+    } else if (nav_speed < 15) {
+        eff_kp = 0.10;
+        eff_kd= 0.012;
+    } else if (nav_speed < 20) {
+        eff_kp = 0.05;
+        eff_kd = 0.01;
+    } else if (nav_speed < 25) {
+        eff_kp = 0.04;
+        eff_kd = 0.008;
+    } else if (nav_speed < 30) {
+        eff_kp = 0.03;
+        eff_kd = 0.004;
     } else {
-        eff_kp = 0.08;
+        eff_kp = 0.02;
     }
 
     output = eff_kp * error + eff_ki * integral + eff_kd * derivative;

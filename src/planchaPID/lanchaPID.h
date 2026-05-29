@@ -69,7 +69,7 @@ class PIDController
     double eff_kp;
     double eff_ki;
     double eff_kd;
-
+    double prevMeas;
 
 };
 
