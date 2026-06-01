@@ -90,9 +90,8 @@ double PIDController::CalculateSpeed(double desired, double current, double dt)
     // Recalibrated from log MOOSLog_29_5_2026_____09_33_03: sustained ~38 %
     // thrust settled the hull near ~18 kt and ~24-28 % held ~5-6 kt, so the
     // old map (10 kt -> 32.7 %) was over-driving. Equilibrium thrust vs speed:
-    static const std::vector<double> ff_speed  = {0,  6,  10, 14, 18, 22, 26};
-    static const std::vector<double> ff_thrust = {0, 24,  28, 33, 38, 44, 52};
-
+    static const std::vector<double> ff_speed  = {0, 3, 5, 7, 8, 10, 12, 15, 18, 20};
+    static const std::vector<double> ff_thrust = {0, 8, 13, 23, 28, 37, 40, 44, 48, 50};
 
     // linear interpolation
     double ff = ff_thrust.back();                 // default (highest bin)
@@ -113,20 +112,20 @@ double PIDController::CalculateSpeed(double desired, double current, double dt)
     // the gains stay constant throughout a setpoint, so they no longer
     // jump as the boat accelerates across the 2 kt / 6 kt thresholds.
     double v = desired;
-    if(v < 2.0){           // “get moving”
-        eff_kp =  2.0;
-        eff_ki =  1.2;
-        eff_kd =  0.0;
+    if(v < 2.0) {
+        eff_kp = 0.6;
+        eff_ki = 0.02;
+        eff_kd = 0.0;
     }
-    else if(v < 6.0){      // “cruise”
-        eff_kp =  1.0;
-        eff_ki =  0.4;
-        eff_kd =  0.05;
+    else if(v < 6.0) {
+        eff_kp = 0.45;
+        eff_ki = 0.015;
+        eff_kd = 0.0;
     }
-    else{                  // “high drag”
-        eff_kp =  0.8;
-        eff_ki =  0.15;
-        eff_kd =  0.12;
+    else {
+        eff_kp = 0.30;
+        eff_ki = 0.010;
+        eff_kd = 0.0;
     }
 
     // Integral with *bounded authority* anti-wind-up. The old code clamped
@@ -134,7 +133,7 @@ double PIDController::CalculateSpeed(double desired, double current, double dt)
     // eff_ki*100 (40..120 %!) of thrust and stay pinned high while the hull
     // lag caught up -> overshoot. Now we cap the integral so its
     // *contribution* never exceeds +/- I_AUTHORITY percent of thrust.
-    const double I_AUTHORITY = 15.0;   // max thrust (%) the I-term may add
+    const double I_AUTHORITY = 4.0;   // max thrust (%) the I-term may add
     integral += error * dt;
     if(eff_ki > 1e-6){
         double i_max = I_AUTHORITY / eff_ki;
@@ -208,25 +207,25 @@ double PIDController::Calculate(double desired, double current, double dt) {
     // so the rudder no longer slams to +/-60/100 and over-builds yaw rate.
 
     if (nav_speed < 5) {
-        eff_kp = 0.2;
-        eff_kd = 0.016;
-    } else if (nav_speed < 10) {
         eff_kp = 0.15;
-        eff_kd = 0.014;
+        eff_kd = 0.03;
+    } else if (nav_speed < 10) {
+        eff_kp = 0.1;
+        eff_kd = 0.025;
     } else if (nav_speed < 15) {
-        eff_kp = 0.10;
-        eff_kd= 0.012;
+        eff_kp = 0.07;
+        eff_kd= 0.02;
     } else if (nav_speed < 20) {
-        eff_kp = 0.05;
-        eff_kd = 0.01;
+        eff_kp = 0.045;
+        eff_kd = 0.018;
     } else if (nav_speed < 25) {
-        eff_kp = 0.04;
-        eff_kd = 0.008;
-    } else if (nav_speed < 30) {
         eff_kp = 0.03;
-        eff_kd = 0.004;
+        eff_kd = 0.016;
+    } else if (nav_speed < 30) {
+        eff_kp = 0.025;
+        eff_kd = 0.0014;
     } else {
-        eff_kp = 0.02;
+        eff_kp = 0.002;
     }
 
     output = eff_kp * error + eff_ki * integral + eff_kd * derivative;
