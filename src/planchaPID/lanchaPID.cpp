@@ -42,6 +42,13 @@ double heading_kp = 0.3; //kp do heading - Modified value for USV
 double heading_ki = 0.0; //ki do heading
 double heading_kd = 0.06; //kd do heading
 
+// Speed-based rudder angle limit (configurable via .moos)
+double rudder_limit_max        = 20.0;
+double rudder_limit_min        = 8.0;
+double rudder_limit_speed_low  = 5.0;
+double rudder_limit_speed_high = 18.0;
+double rudder_limit_active     = 20.0;
+
 double dt = 0.0;
 double output = 0;
 std::string deploy; //deploy
@@ -68,18 +75,18 @@ PIDController headingController(heading_kp, heading_ki, heading_kd);
 
 PIDController::PIDController(double kp, double ki, double kd)
 {
-  kp          = kp;
-  ki          = ki;
-  kd          = kd;
-  upper_bound = 20; //Modified value for USV
-  lower_bound = -20;
-  integral    = 0;
-  prevError   = 0;
-  eff_kp      = 0;
-  eff_ki      = 0;
-  eff_kd      = 0;
-  prevMeas    = 0;
+  this->kp = kp;
+  this->ki = ki;
+  this->kd = kd;
 
+  upper_bound = 20;
+  lower_bound = -20;
+  integral = 0;
+  prevError = 0;
+  eff_kp = 0;
+  eff_ki = 0;
+  eff_kd = 0;
+  prevMeas = 0;
 }
 
 // CalculateSpeed() – gain-scheduled PID + feed-forward
@@ -457,43 +464,32 @@ bool lanchaPID::OnConnectToServer()
 }
 
 //---------------------------------------------------------
+// Procedure: speedRudderLimit()
+//   Max rudder magnitude (deg) allowed for a given speed.
+
+static double speedRudderLimit(double speed)
+{
+  if(speed <= rudder_limit_speed_low)
+    return rudder_limit_max;
+  if(speed >= rudder_limit_speed_high)
+    return rudder_limit_min;
+
+  double w = (speed - rudder_limit_speed_low) /
+             (rudder_limit_speed_high - rudder_limit_speed_low);
+  return rudder_limit_max + w * (rudder_limit_min - rudder_limit_max);
+}
+
+//---------------------------------------------------------
 // Procedure: Iterate()
 //            happens AppTick times per second
 
 bool lanchaPID::Iterate()
 {
   AppCastingMOOSApp::Iterate();
-  // Do your thing here!
 
   // Loop de controle
-  
-  // Calcule o controle de velocidade 
-  // NÃO ESTÁ SENDO USADO
-  if (thrust_map == 1) 
-  {
-    switch ((int) desired_speed) {
-      case 0:
-        desired_thrust = 0;
-        break;
-      case 1:
-        desired_thrust = 20;
-        break;
-      case 4:
-        desired_thrust = 34;
-        break;
-      case 5:
-        desired_thrust = 44;
-        break;
-      case 6:
-        desired_thrust = 48;
-        break;
-      default:
-        desired_thrust = 0;
-    } // end switch
 
-  } else {
-    desired_thrust = speedController.Calculate(desired_speed, nav_speed,dt);
-  }
+  desired_thrust = speedController.Calculate(desired_speed, nav_speed,dt);
 
   // Calcule o controle de rumo
   //Caso o rumo constante esteja ativado o setpoint vai ser esse rumo
@@ -502,6 +498,11 @@ bool lanchaPID::Iterate()
   } else {
     desired_rudder = headingController.Calculate(desired_heading, nav_heading,dt);
   }
+
+  // Speed-based rudder limit (tightens HEADING_UPPER/LOWER_BOUND, never relaxes)
+  rudder_limit_active = speedRudderLimit(nav_speed);
+  if(desired_rudder >  rudder_limit_active) desired_rudder =  rudder_limit_active;
+  if(desired_rudder < -rudder_limit_active) desired_rudder = -rudder_limit_active;
 
   //Speed controller - New function
   desired_thrust = speedController.CalculateSpeed(desired_speed, nav_speed,dt);
@@ -570,6 +571,22 @@ bool lanchaPID::OnStartUp()
       headingController.setLower(value);
       handled = true;
     }
+    else if(param == "rudder_limit_max") {
+      rudder_limit_max = value;
+      handled = true;
+    }
+    else if(param == "rudder_limit_min") {
+      rudder_limit_min = value;
+      handled = true;
+    }
+    else if(param == "rudder_limit_speed_low") {
+      rudder_limit_speed_low = value;
+      handled = true;
+    }
+    else if(param == "rudder_limit_speed_high") {
+      rudder_limit_speed_high = value;
+      handled = true;
+    }
     if(!handled)
       reportUnhandledConfigWarning(orig);
   }
@@ -630,8 +647,14 @@ bool lanchaPID::buildReport()
         << headingController.getEffKD();
   m_msgs << actab2.getFormattedString();
   m_msgs << endl;
+  m_msgs << "---------------------------------------------------" << endl;
 
-  
+  ACTable actab3(2);
+  actab3 << "NAV_SPEED (kt) | RUDDER_LIMIT (deg)";
+  actab3.addHeaderLines();
+  actab3 << nav_speed << rudder_limit_active;
+  m_msgs << actab3.getFormattedString();
+  m_msgs << endl;
 
   return(true);
 }
