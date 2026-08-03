@@ -80,8 +80,8 @@ int main(int argc, char *argv[])
           // Update connection timestamp on message receive
           WebSocket.UpdateConnectionTime(&webSocket);
           
-          //Adiciono o valor de msg ao objeto
-          WebSocket.msg_recebida = msg -> str;
+          //Adiciono o valor de msg a fila lida pelo Iterate()
+          WebSocket.QueueMessage(msg -> str);
 
           // Parse the incoming message to publish to MOOS
           std::string message = msg->str;

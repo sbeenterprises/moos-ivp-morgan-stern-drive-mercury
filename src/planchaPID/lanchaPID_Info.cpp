@@ -80,6 +80,10 @@ void showExampleConfigAndExit()
   blk("  HEADING_KI=0.5                                                 ");
   blk("  HEADING_KD=0                                                 ");
   blk("                                                                ");
+  blk("  // Service mode: apply the gains above as-is instead of the    ");
+  blk("  // built-in speed gain schedule (live UI calibration).         ");
+  blk("  SERVICE_MODE=false                                            ");
+  blk("                                                                ");
   blk("}                                                               ");
   blk("                                                                ");
   exit(0);
@@ -100,12 +104,23 @@ void showInterfaceAndExit()
   blk("                                                                ");
   blk("SUBSCRIPTIONS:                                                  ");
   blk("------------------------------------                            ");
-  blk("  NODE_MESSAGE = src_node=alpha,dest_node=bravo,var_name=FOO,   ");
-  blk("                 string_val=BAR                                 ");
+  blk("  NAV_HEADING, NAV_SPEED, NAV_COG                               ");
+  blk("  DESIRED_HEADING, DESIRED_SPEED                                ");
+  blk("  SPEED_KP, SPEED_KI, SPEED_KD                                  ");
+  blk("  HEADING_KP, HEADING_KI, HEADING_KD                            ");
+  blk("  SERVICE_MODE = true/false                                     ");
+  blk("      When true the K* values above are applied directly,       ");
+  blk("      bypassing the speed-based gain schedule. Used by the UI   ");
+  blk("      to calibrate the boat without changing the backend.       ");
+  blk("  DEPLOY, MOOS_MANUAL_OVERRIDE, CONSTANT_HEADING,               ");
+  blk("  SETPOINT_HEADING, WAYPOINT, RETURN, STATIONING, REGION        ");
   blk("                                                                ");
   blk("PUBLICATIONS:                                                   ");
   blk("------------------------------------                            ");
-  blk("  Publications are determined by the node message content.      ");
+  blk("  DESIRED_THRUST, DESIRED_RUDDER                                ");
+  blk("  PID_GAINS = service_mode=false,heading_kp=0.28,...            ");
+  blk("      Gains actually applied this cycle, reported back to the   ");
+  blk("      UI so the operator sees what the controller is running.   ");
   blk("                                                                ");
   exit(0);
 }

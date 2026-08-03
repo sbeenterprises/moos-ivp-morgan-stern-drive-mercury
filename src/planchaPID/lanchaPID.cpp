@@ -33,14 +33,22 @@ bool   nav_heading_init  = false;  // first-sample flag
 double desired_thrust;  // Saída do controle de velocidade
 double desired_rudder;  // Saída do controle de rumo
 
-double speed_kp = 0.0; //kp da veloc
-double speed_ki = 0.0; //ki da veloc
+// Manual speed gains: only used in service mode (normal operation is gain
+// scheduled). Seeded with the mid-band schedule values so enabling service mode
+// without touching the UI sliders keeps the boat driving sensibly.
+double speed_kp = 0.16; //kp da veloc
+double speed_ki = 0.003; //ki da veloc
 double speed_kd = 0.0; //kd da veloc
 int thrust_map = 1;  // set to 1 to use thrust_map speed control
 
 double heading_kp = 0.3; //kp do heading - Modified value for USV
 double heading_ki = 0.0; //ki do heading
 double heading_kd = 0.06; //kd do heading
+
+// Service mode: when true the gain-scheduling tables below are bypassed and the
+// kp/ki/kd pushed from the UI (HEADING_K* / SPEED_K*) are applied directly, so
+// the boat can be calibrated live without rebuilding/reconfiguring the backend.
+bool service_mode = false;
 
 // Speed-based rudder angle limit (configurable via .moos)
 double rudder_limit_max        = 20.0;
@@ -87,6 +95,7 @@ PIDController::PIDController(double kp, double ki, double kd)
   eff_ki = 0;
   eff_kd = 0;
   prevMeas = 0;
+  service_mode = false;
 }
 
 // CalculateSpeed() – gain-scheduled PID + feed-forward
@@ -115,29 +124,39 @@ double PIDController::CalculateSpeed(double desired, double current, double dt)
     double derivative = (error - prevError)/dt;
     prevError         = error;
 
+    // Service mode: apply the gains pushed from the UI as-is so the operator
+    // sees exactly the effect of the values being calibrated. The feed-forward
+    // map above is kept - only the feedback term is under manual control.
+    if(service_mode) {
+        eff_kp = kp;
+        eff_ki = ki;
+        eff_kd = kd;
+    }
     // gain scheduling on the *desired* speed (not the measured one):
     // the gains stay constant throughout a setpoint, so they no longer
     // jump as the boat accelerates across the 2 kt / 6 kt thresholds.
-    double v = desired;
-    if(v < 2.0) {
-      eff_kp = 0.35;
-      eff_ki = 0.005;
-      eff_kd = 0.0;
-    }
-    else if(v < 6.0) {
-        eff_kp = 0.25;
-        eff_ki = 0.004;
-        eff_kd = 0.0;
-    }
-    else if(v < 12.0) {
-        eff_kp = 0.16;
-        eff_ki = 0.003;
-        eff_kd = 0.0;
-    }
     else {
-        eff_kp = 0.10;
-        eff_ki = 0.002;
-        eff_kd = 0.0;
+        double v = desired;
+        if(v < 2.0) {
+          eff_kp = 0.35;
+          eff_ki = 0.005;
+          eff_kd = 0.0;
+        }
+        else if(v < 6.0) {
+            eff_kp = 0.25;
+            eff_ki = 0.004;
+            eff_kd = 0.0;
+        }
+        else if(v < 12.0) {
+            eff_kp = 0.16;
+            eff_ki = 0.003;
+            eff_kd = 0.0;
+        }
+        else {
+            eff_kp = 0.10;
+            eff_ki = 0.002;
+            eff_kd = 0.0;
+        }
     }
 
     // Integral with *bounded authority* anti-wind-up. The old code clamped
@@ -211,6 +230,15 @@ double PIDController::Calculate(double desired, double current, double dt) {
     double derivative = -dmeas / dt;
     prevMeas = current;
 
+    // Service mode: the gains pushed from the UI (HEADING_KP/KI/KD) are applied
+    // directly, bypassing the speed-based schedule below, so the operator can
+    // calibrate the boat live and read the result on the rudder.
+    if (service_mode) {
+      eff_kp = kp;
+      eff_ki = ki;
+      eff_kd = kd;
+    }
+    else {
     //Gain Scheduling
     eff_ki      = 0;
     eff_kd      = 0.2;
@@ -245,6 +273,7 @@ double PIDController::Calculate(double desired, double current, double dt) {
     else {
         eff_kp = 0.05;
         eff_kd = 0.025;
+    }
     }
 
     output = eff_kp * error + eff_ki * integral + eff_kd * derivative;
@@ -281,6 +310,25 @@ void PIDController::setKI(double KI) {
 void PIDController::setKD(double KD) {
   kd = KD;
 } // setKD()
+
+//---------------------------------------------------------
+// setServiceMode()
+//   Switches between the built-in gain schedule and the kp/ki/kd pushed from
+//   the UI. The integral is dropped on every transition so the controller does
+//   not carry accumulated authority from one gain set into the other.
+
+void PIDController::setServiceMode(bool enabled) {
+  if(service_mode != enabled)
+    integral = 0;
+  service_mode = enabled;
+} // setServiceMode()
+
+//---------------------------------------------------------
+// getServiceMode()
+
+bool PIDController::getServiceMode() const {
+  return service_mode;
+} // getServiceMode()
 
 //---------------------------------------------------------
 // setUpper()
@@ -423,8 +471,13 @@ bool lanchaPID::OnNewMail(MOOSMSG_LIST &NewMail)
        headingController.setKP(msg.GetDouble());
      else if(key == "HEADING_KI") 
        headingController.setKI(msg.GetDouble());
-     else if(key == "HEADING_KD") 
+     else if(key == "HEADING_KD")
        headingController.setKD(msg.GetDouble());
+     else if(key == "SERVICE_MODE") {
+       service_mode = (msg.GetString() == "true");
+       headingController.setServiceMode(service_mode);
+       speedController.setServiceMode(service_mode);
+       }
      else if(key == "DEPLOY") {
        deploy = msg.GetString(); 
        // Reset PID error  
@@ -519,9 +572,21 @@ bool lanchaPID::Iterate()
   if ((waypoint == "true" && moos_manual_overide == "false") || stationing == "true" || region == "true") {
     Notify("DESIRED_THRUST", desired_thrust);
     Notify("DESIRED_RUDDER", desired_rudder);
-  } 
+  }
 
-  
+  // Report the gains actually being applied this cycle so the UI can show the
+  // operator what the controller is running on (the manual values in service
+  // mode, the scheduled ones otherwise).
+  string pid_gains = "service_mode=";
+  pid_gains += (service_mode ? "true" : "false");
+  pid_gains += ",heading_kp=" + doubleToString(headingController.getEffKP(), 4);
+  pid_gains += ",heading_ki=" + doubleToString(headingController.getEffKI(), 4);
+  pid_gains += ",heading_kd=" + doubleToString(headingController.getEffKD(), 4);
+  pid_gains += ",speed_kp="   + doubleToString(speedController.getEffKP(), 4);
+  pid_gains += ",speed_ki="   + doubleToString(speedController.getEffKI(), 4);
+  pid_gains += ",speed_kd="   + doubleToString(speedController.getEffKD(), 4);
+  Notify("PID_GAINS", pid_gains);
+
   AppCastingMOOSApp::PostReport();
   return(true);
 }
@@ -544,6 +609,16 @@ bool lanchaPID::OnStartUp()
     string orig  = *p;
     string line  = *p;
     string param = tolower(biteStringX(line, '='));
+
+    // SERVICE_MODE is the only boolean parameter - handle it before the
+    // numeric conversion below, which would throw on "true"/"false".
+    if(param == "service_mode") {
+      service_mode = (tolower(line) == "true");
+      headingController.setServiceMode(service_mode);
+      speedController.setServiceMode(service_mode);
+      continue;
+    }
+
     double value = std::stod(line);
 
     bool handled = false;
@@ -561,6 +636,19 @@ bool lanchaPID::OnStartUp()
     }
     else if(param == "heading_kd") {
       headingController.setKD(value);
+      handled = true;
+    }
+    // Manual speed gains: applied only while service mode is active.
+    else if(param == "speed_kp") {
+      speedController.setKP(value);
+      handled = true;
+    }
+    else if(param == "speed_ki") {
+      speedController.setKI(value);
+      handled = true;
+    }
+    else if(param == "speed_kd") {
+      speedController.setKD(value);
       handled = true;
     }
     else if(param == "heading_upper_bound") {
@@ -620,6 +708,7 @@ void lanchaPID::registerVariables()
   Register("RETURN",0);
   Register("STATIONING",0);
   Register("REGION",0);
+  Register("SERVICE_MODE",0);
 }
 
 //------------------------------------------------------------
@@ -639,12 +728,21 @@ bool lanchaPID::buildReport()
   m_msgs << endl;
   m_msgs << "---------------------------------------------------" << endl;
 
-  ACTable actab2(3);
-  actab2 << "EFF_KP | EFF_KI | EFF_KD";
+  m_msgs << "SERVICE MODE (manual gains): "
+         << (service_mode ? "ON" : "off") << endl;
+  m_msgs << "---------------------------------------------------" << endl;
+
+  ACTable actab2(4);
+  actab2 << "LOOP | EFF_KP | EFF_KI | EFF_KD";
   actab2.addHeaderLines();
-  actab2 << headingController.getEffKP()
+  actab2 << "heading"
+        << headingController.getEffKP()
         << headingController.getEffKI()
         << headingController.getEffKD();
+  actab2 << "speed"
+        << speedController.getEffKP()
+        << speedController.getEffKI()
+        << speedController.getEffKD();
   m_msgs << actab2.getFormattedString();
   m_msgs << endl;
   m_msgs << "---------------------------------------------------" << endl;

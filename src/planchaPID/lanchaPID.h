@@ -49,6 +49,8 @@ class PIDController
     void setKD(double KD);
     void setUpper(double Upper);
     void setLower(double Lower);
+    void setServiceMode(bool enabled);
+    bool getServiceMode() const;
     void resetIntegral();
     double getKP();
     double getKI();
@@ -70,6 +72,9 @@ class PIDController
     double eff_ki;
     double eff_kd;
     double prevMeas;
+    // When true the gain-scheduling tables are bypassed and the kp/ki/kd set
+    // from the UI (SERVICE_MODE calibration) are applied directly.
+    bool service_mode;
 
 };
 

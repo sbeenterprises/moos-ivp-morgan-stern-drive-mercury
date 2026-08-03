@@ -60,6 +60,8 @@ bool repeat_mission = false;
 std::string base_coords;
 bool can_send = false; // Variable used to control CAN message flux
 bool region_active = false; // Variable used to control region activation
+bool service_mode = false; // PID calibration mode driven from the UI
+std::string pid_gains; // Gains planchaPID is actually applying (see PID_GAINS)
 
 
 // NODE_REPORT contact variables
@@ -267,6 +269,10 @@ bool WebSocket::OnNewMail(MOOSMSG_LIST &NewMail)
       can_send = (msg.GetString() == "true");
     else if(key == "REGION")
       region_active = (msg.GetString() == "true");
+    else if(key == "SERVICE_MODE")
+      service_mode = (msg.GetString() == "true");
+    else if(key == "PID_GAINS")
+      pid_gains = msg.GetString();
     else if(key == "NODE_REPORT") {
       // Parse NODE_REPORT to extract NAME, X, Y, SPD, HDG
       std::string node_report = msg.GetString();
@@ -336,6 +342,23 @@ bool WebSocket::OnConnectToServer()
 }
 
 //---------------------------------------------------------
+// Procedure: QueueMessage()
+//            called from the websocket thread for every message the UI sends
+
+void WebSocket::QueueMessage(const std::string& message)
+{
+  std::lock_guard<std::mutex> lock(m_inbox_mutex);
+
+  // Bound the queue so a stalled MOOS thread cannot grow it without limit.
+  // Dropping the oldest keeps the most recent commands, which are the ones
+  // the operator is waiting on.
+  while (m_inbox.size() >= 512)
+    m_inbox.pop_front();
+
+  m_inbox.push_back(message);
+}
+
+//---------------------------------------------------------
 // Procedure: Iterate()
 //            happens AppTick times per second
 
@@ -359,15 +382,28 @@ bool WebSocket::Iterate()
   
   // Aqui você pode incluir outras operações se necessário
 
-  //Analysis the variable coming from Freeboard
-  //Only process if there's a new message
-  if (!msg_recebida.empty()) {
+  //Analysis the variables coming from Freeboard
+  // Take everything the websocket thread queued since the last tick. The UI
+  // sends messages in bursts - enabling service mode pushes SERVICE_MODE
+  // followed immediately by the six PID gains - and every one of them has to be
+  // dispatched, not just whichever arrived last.
+  std::deque<std::string> inbox;
+  {
+    std::lock_guard<std::mutex> lock(m_inbox_mutex);
+    inbox.swap(m_inbox);
+  }
+
+  for (const std::string& message : inbox) {
+    msg_recebida = message; // keep the appcast report showing the last message
+
     //Split in the equal sign
-    size_t equalsPos = msg_recebida.find('=');
+    size_t equalsPos = message.find('=');
+    if (equalsPos == std::string::npos)
+      continue;
 
     //take the two sides
-    std::string key = msg_recebida.substr(0, equalsPos);
-    std::string value = msg_recebida.substr(equalsPos + 1);
+    std::string key = message.substr(0, equalsPos);
+    std::string value = message.substr(equalsPos + 1);
 
     std::cout << "Key: " << key << "\n";
     std::cout << "Value: " << value << "\n";
@@ -377,9 +413,6 @@ bool WebSocket::Iterate()
     if (handler != m_messageHandlers.end()) {
       (this->*(handler->second))(value);
     }
-    
-    // Clear the message after processing to prevent re-execution
-    msg_recebida = "";
   }
 
   // If you have pending messages to send
@@ -418,6 +451,8 @@ bool WebSocket::Iterate()
   root["ENGINE_BATTERY_VOLTAGE"] = engine_battery_voltage;
   root["WPT_PCT_COMPLETE"] = wpt_pct_complete;
   root["WPT_RADII"] = wpt_radii;
+  root["SERVICE_MODE"] = service_mode;
+  root["PID_GAINS"] = pid_gains;
 
   // Add contact info as nested object
   Json::Value contact;
@@ -514,7 +549,9 @@ void WebSocket::registerVariables()
   Register("WAYPOINT", 0); //Variable to control waypoint behavior
   Register("WPT_PCT_COMPLETE", 0); //Route completion percentage
   Register("WPT_RADII", 0); //Waypoint radii configuration
-  
+  Register("SERVICE_MODE", 0); //PID calibration mode (manual gains)
+  Register("PID_GAINS", 0); //Gains planchaPID is currently applying
+
 }
 
 //---------------------------------------------------------
@@ -583,6 +620,10 @@ void WebSocket::initializeMessageHandlers()
   m_messageHandlers["HEADING_KP"] = &WebSocket::handleHeadingKp;
   m_messageHandlers["HEADING_KI"] = &WebSocket::handleHeadingKi;
   m_messageHandlers["HEADING_KD"] = &WebSocket::handleHeadingKd;
+  m_messageHandlers["SPEED_KP"] = &WebSocket::handleSpeedKp;
+  m_messageHandlers["SPEED_KI"] = &WebSocket::handleSpeedKi;
+  m_messageHandlers["SPEED_KD"] = &WebSocket::handleSpeedKd;
+  m_messageHandlers["SERVICE_MODE"] = &WebSocket::handleServiceMode;
   m_messageHandlers["TRIM"] = &WebSocket::handleTrim;
   m_messageHandlers["STATION_KEEP_WAYPOINT"] = &WebSocket::handleStationKeepWaypoint;
   m_messageHandlers["HEARTBEAT_PING"] = &WebSocket::handleHeartbeatPing;
@@ -1000,6 +1041,35 @@ void WebSocket::handleHeadingKd(const std::string& value)
 {
   double value_heading_kd = std::stod(value);
   Notify("HEADING_KD", value_heading_kd);
+}
+
+void WebSocket::handleSpeedKp(const std::string& value)
+{
+  double value_speed_kp = std::stod(value);
+  Notify("SPEED_KP", value_speed_kp);
+}
+
+void WebSocket::handleSpeedKi(const std::string& value)
+{
+  double value_speed_ki = std::stod(value);
+  Notify("SPEED_KI", value_speed_ki);
+}
+
+void WebSocket::handleSpeedKd(const std::string& value)
+{
+  double value_speed_kd = std::stod(value);
+  Notify("SPEED_KD", value_speed_kd);
+}
+
+// Service mode: while active planchaPID applies the HEADING_K*/SPEED_K* gains
+// pushed from the UI instead of its built-in gain schedule.
+void WebSocket::handleServiceMode(const std::string& value)
+{
+  if (value == "true") {
+    Notify("SERVICE_MODE", "true");
+  } else if (value == "false") {
+    Notify("SERVICE_MODE", "false");
+  }
 }
 
 void WebSocket::handleStationKeepWaypoint(const std::string& value)

@@ -15,6 +15,8 @@
 #include <iostream>
 #include <map>
 #include <vector>
+#include <deque>
+#include <mutex>
 #include "MOOS/libMOOSGeodesy/MOOSGeodesy.h"
 
 
@@ -23,8 +25,15 @@ class WebSocket : public AppCastingMOOSApp
  public:
    WebSocket();
    ~WebSocket();
-   std::string msg_recebida;
-   
+   std::string msg_recebida; // last message dispatched, shown in the appcast report
+
+   // Queue a message received from the UI. Called from the websocket thread;
+   // the messages are dispatched later from Iterate() on the MOOS thread.
+   // This must be a queue and not a single slot: the UI sends bursts (a mode
+   // switch immediately followed by its gains) and everything but the last
+   // message of a burst would otherwise be overwritten before it is read.
+   void QueueMessage(const std::string& message);
+
    // Add a method to send messages
    void SendMessage(const std::string& message, bool binary = false);
    
@@ -63,6 +72,11 @@ class WebSocket : public AppCastingMOOSApp
  private: // Configuration variables
 
  private: // State variables
+  // Messages received from the UI, waiting to be dispatched by Iterate().
+  // Written from the websocket thread, drained from the MOOS thread.
+  std::deque<std::string> m_inbox;
+  std::mutex m_inbox_mutex;
+
   std::vector<ix::WebSocket*> m_webSockets; // Store multiple web socket connections
   std::map<ix::WebSocket*, double> m_lastMessageTime; // Track last message time for each connection
   CMOOSGeodesy m_geodesy;
@@ -99,6 +113,10 @@ class WebSocket : public AppCastingMOOSApp
   void handleHeadingKp(const std::string& value);
   void handleHeadingKi(const std::string& value);
   void handleHeadingKd(const std::string& value);
+  void handleSpeedKp(const std::string& value);
+  void handleSpeedKi(const std::string& value);
+  void handleSpeedKd(const std::string& value);
+  void handleServiceMode(const std::string& value);
   void handleTrim(const std::string& value);
   void handleStationKeepWaypoint(const std::string& value);
   void handleHeartbeatPing(const std::string& value);
