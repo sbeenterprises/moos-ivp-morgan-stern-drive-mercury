@@ -5,6 +5,7 @@ initialize   RETURN = false
 initialize   WAYPOINT = false
 initialize   STATIONING = false
 initialize   REGION = false
+initialize   TRAILING = false
 	
 //----------------------------------------------
 Behavior = BHV_Waypoint_mod
@@ -124,3 +125,39 @@ Behavior = BHV_OpRegionV24
 //          speed = 4
 //        duration = no-time-limit
 // }
+
+//----------------------------------------------
+// Follow an AIS contact.
+//
+// Driven from the UI: iWebSocket turns a "follow this MMSI at this range and
+// angle" request into TRAIL_UPDATES + TRAILING. The contact name is derived
+// from the MMSI (AIS<mmsi>) by pTrafficSim, so no lookup table is needed.
+//
+// One static instance is enough - the updates variable can rewrite contact,
+// trail_range and trail_angle at runtime.
+
+Behavior = BHV_Trail
+{
+  name             = trail_contact
+  pwt              = 100
+  condition        = TRAILING = true
+  endflag          = TRAILING = false
+  endflag          = DESIRED_THRUST = 0
+  endflag          = DESIRED_RUDDER = 0
+  updates          = TRAIL_UPDATES
+  perpetual        = true
+
+  contact          = unset          // replaced at runtime via TRAIL_UPDATES
+  trail_range      = 100
+  trail_angle      = 180            // 180 = directly astern of the contact
+  trail_angle_type = relative
+  nm_radius        = 20
+  pwt_outer_dist   = 0              // 0 = no range gate; the operator picked this target
+  on_no_contact_ok = true
+  extrapolate      = true
+  decay            = 30,60
+
+  // pContactMgrV20 here runs with hold_alerts_for_helm, so the behaviour has
+  // to ask for contact information rather than assume it is being fed.
+  no_alert_request = false
+}

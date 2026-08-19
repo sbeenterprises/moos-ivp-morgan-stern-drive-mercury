@@ -35,6 +35,7 @@ ProcessConfig = ANTLER
   Run = iWebSocket	      @ NewConsole = false
   Run = iCANRec	      @ NewConsole = false
   Run = pContactSpawn	      @ NewConsole = false
+  Run = pTrafficSim   @ NewConsole = false
   Run = pContactMgrV20 @ NewConsole = false
   Run = iMOOSGateway  @ NewConsole = false
   Run = iRadarTargets @ NewConsole = false
@@ -59,6 +60,50 @@ ProcessConfig = pContactSpawn
 {
   AppTick 	= 1
   CommsTick = 1 
+}
+
+// pTrafficSim Config Block
+//
+// Simulated AIS boat traffic. Publishes NODE_REPORT (so the helm and
+// pContactMgrV20 see the contacts) and !AIVDM over UDP to the Signal K
+// server (so the chart plotter sees them as genuine AIS targets).
+//
+// SAFETY: enable_simulation must be true for anything to be emitted. Never
+// add this app to real.moos / realvision.moos - injecting fake AIS traffic
+// on a real vessel would be dangerous and is illegal on the air.
+
+ProcessConfig = pTrafficSim
+{
+  AppTick   = 4
+  CommsTick = 4
+
+  enable_simulation = true
+
+  // origin defaults to LatOrigin/LongOrigin above; stated here for clarity
+  origin_lat = 29.71970895316288
+  origin_lon = -91.14705165281887
+
+  aivdm_host = 127.0.0.1     // Signal K NMEA0183 UDP listener (settings.json)
+  aivdm_port = 10112
+  mmsi_base  = 366999000     // clearly fake MMSI block
+
+  position_interval = 1      // AIS msg 1 per contact, seconds
+  static_interval   = 30     // AIS msg 5 per contact, seconds
+
+  // (a) scripted contacts - deterministic, repeatable
+  // x/y are absolute MOOS grid metres - these sit near uSimMarine's start_pos
+  // (x=-6289, y=400) so they are in range of the USV from the first second.
+  contact = name=TUG_ALPHA, type=tug, x=-6000, y=600, hdg=270, spd=4, length=25, beam=9
+  contact = name=FERRY_BRAVO, type=ferry, x=-6800, y=1000, hdg=90, spd=8, length=60, beam=14
+
+  // (b) random traffic around the USV
+  random_contacts = 6
+  random_radius   = 1500
+  random_spd_min  = 2
+  random_spd_max  = 9
+
+  // (c) closed-loop patrol - a predictable target to test Follow against
+  loop = name=WORKBOAT_ECHO, type=cargo, spd=5, pts=-6000,200:-5600,200:-5600,800:-6000,800
 }
 
 // iCANRec config block

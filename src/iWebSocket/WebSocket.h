@@ -95,6 +95,7 @@ class WebSocket : public AppCastingMOOSApp
   void initializeMessageHandlers();
   
   // Message handler methods
+  void handleTrailFollow(const std::string& value);
   void handleControleManual(const std::string& value);
   void handleAutonomousControl(const std::string& value);
   void handleDesiredHeading(const std::string& value);

@@ -64,6 +64,11 @@ bool service_mode = false; // PID calibration mode driven from the UI
 std::string pid_gains; // Gains planchaPID is actually applying (see PID_GAINS)
 
 
+// Trail (follow-a-contact) state, mirrored back to the UI so it can show what
+// the helm is really doing rather than what the UI asked for.
+bool trailing = false;
+std::string trail_updates;
+
 // NODE_REPORT contact variables
 std::string contact_name = "";
 double contact_lat = 0;
@@ -273,6 +278,10 @@ bool WebSocket::OnNewMail(MOOSMSG_LIST &NewMail)
       service_mode = (msg.GetString() == "true");
     else if(key == "PID_GAINS")
       pid_gains = msg.GetString();
+    else if(key == "TRAILING")
+      trailing = (msg.GetString() == "true");
+    else if(key == "TRAIL_UPDATES")
+      trail_updates = msg.GetString();
     else if(key == "NODE_REPORT") {
       // Parse NODE_REPORT to extract NAME, X, Y, SPD, HDG
       std::string node_report = msg.GetString();
@@ -453,6 +462,8 @@ bool WebSocket::Iterate()
   root["WPT_RADII"] = wpt_radii;
   root["SERVICE_MODE"] = service_mode;
   root["PID_GAINS"] = pid_gains;
+  root["TRAILING"] = trailing;
+  root["TRAIL_UPDATES"] = trail_updates;
 
   // Add contact info as nested object
   Json::Value contact;
@@ -551,6 +562,8 @@ void WebSocket::registerVariables()
   Register("WPT_RADII", 0); //Waypoint radii configuration
   Register("SERVICE_MODE", 0); //PID calibration mode (manual gains)
   Register("PID_GAINS", 0); //Gains planchaPID is currently applying
+  Register("TRAILING", 0); //Follow-a-contact behaviour active
+  Register("TRAIL_UPDATES", 0); //Contact/range/angle the trail behaviour is using
 
 }
 
@@ -632,6 +645,71 @@ void WebSocket::initializeMessageHandlers()
   m_messageHandlers["CAN_SEND"] = &WebSocket::handleCanSend;
   m_messageHandlers["REGION_UPDATES"] = &WebSocket::handleRegionUpdates;
   m_messageHandlers["REGION"] = &WebSocket::handleRegion;
+  m_messageHandlers["TRAIL_FOLLOW"] = &WebSocket::handleTrailFollow;
+}
+
+//---------------------------------------------------------
+// Procedure: handleTrailFollow()
+//   TRAIL_FOLLOW=mmsi=366999001#range=150#angle=180
+//   TRAIL_FOLLOW=off
+//
+//   The contact name is the MMSI with an AIS prefix - pTrafficSim names its
+//   NODE_REPORTs the same way, so the UI never needs a name/MMSI lookup.
+
+void WebSocket::handleTrailFollow(const std::string& value)
+{
+  if (value == "off" || value == "false") {
+    Notify("TRAILING", "false");
+    // Same safety pair AUTONOMOUS_STOP uses: leave the boat with no residual
+    // command once the behaviour releases the helm.
+    Notify("DESIRED_RUDDER", 0.0);
+    Notify("DESIRED_THRUST", 0.0);
+    std::cout << "[TRAIL_FOLLOW] stopped" << std::endl;
+    return;
+  }
+
+  std::string mmsi;
+  std::string range;
+  std::string angle;
+
+  std::stringstream ss(value);
+  std::string token;
+  while (std::getline(ss, token, '#')) {
+    size_t eq = token.find('=');
+    if (eq == std::string::npos)
+      continue;
+    std::string k = token.substr(0, eq);
+    std::string v = token.substr(eq + 1);
+    if (k == "mmsi")       mmsi  = v;
+    else if (k == "range") range = v;
+    else if (k == "angle") angle = v;
+  }
+
+  if (mmsi.empty()) {
+    std::cerr << "[TRAIL_FOLLOW] no mmsi in: " << value << std::endl;
+    return;
+  }
+
+  std::string updates = "contact=AIS" + mmsi;
+  if (!range.empty())
+    updates += " # trail_range=" + range;
+  if (!angle.empty())
+    updates += " # trail_angle=" + angle;
+
+  // A waypoint mission and a trail pursuit fight over the helm - BHV_Waypoint_mod
+  // and BHV_AvdColregsV22 both run on WAYPOINT=true and outweigh the trail
+  // behaviour - so engaging Follow ends the mission, the same way
+  // AUTONOMOUS_STOP does.
+  Notify("WAYPOINT", "false");
+  Notify("STATIONING", "false");
+
+  // Without this the helm computes a trail solution that never reaches the
+  // actuators. AUTONOMOUS_START does the same thing for the same reason.
+  Notify("MOOS_MANUAL_OVERRIDE", "false");
+
+  Notify("TRAIL_UPDATES", updates);
+  Notify("TRAILING", "true");
+  std::cout << "[TRAIL_FOLLOW] " << updates << std::endl;
 }
 
 void WebSocket::handleTrim(const std::string& value)

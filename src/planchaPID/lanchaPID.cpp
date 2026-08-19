@@ -63,6 +63,7 @@ std::string deploy; //deploy
 std::string moos_manual_overide;
 std::string moos_manual_override;
 std::string stationing; // verify station keep
+std::string trailing; // verify follow-a-contact (BHV_Trail)
 
 std::string constant_heading; //Variável para verificar se o rumo constante é verdadeiro
 double setpoint_heading; //Variável em que eu coloco o setpoint de rumo
@@ -498,6 +499,8 @@ bool lanchaPID::OnNewMail(MOOSMSG_LIST &NewMail)
         nav_cog = msg.GetDouble();
       else if(key == "STATIONING")
         stationing = msg.GetString();
+      else if(key == "TRAILING")
+        trailing = msg.GetString();
       else if(key == "REGION")
         region = msg.GetString();
      else if(key != "APPCAST_REQ") // handled by AppCastingMOOSApp
@@ -569,7 +572,12 @@ bool lanchaPID::Iterate()
   //Publico DESIRED_RUDDER e DESIRED_THRUST
   //Just publish when waypoint behavior is true and manual override is false
   //BHV_Waypoint is active, or StationKeep is active, or OpRegion is active
-  if ((waypoint == "true" && moos_manual_overide == "false") || stationing == "true" || region == "true") {
+  // TRAILING is the follow-a-contact mode (BHV_Trail). Without it here the helm
+  // computes a pursuit solution that never reaches the actuators, because
+  // engaging Follow deliberately clears WAYPOINT to stop the mission fighting it.
+  if ((waypoint == "true" && moos_manual_overide == "false") ||
+      (trailing == "true" && moos_manual_overide == "false") ||
+      stationing == "true" || region == "true") {
     Notify("DESIRED_THRUST", desired_thrust);
     Notify("DESIRED_RUDDER", desired_rudder);
   }
@@ -707,6 +715,7 @@ void lanchaPID::registerVariables()
   Register("WAYPOINT",0);
   Register("RETURN",0);
   Register("STATIONING",0);
+  Register("TRAILING",0);
   Register("REGION",0);
   Register("SERVICE_MODE",0);
 }
