@@ -63,14 +63,6 @@ ProcessConfig = pContactSpawn
 }
 
 // pTrafficSim Config Block
-//
-// Simulated AIS boat traffic. Publishes NODE_REPORT (so the helm and
-// pContactMgrV20 see the contacts) and !AIVDM over UDP to the Signal K
-// server (so the chart plotter sees them as genuine AIS targets).
-//
-// SAFETY: enable_simulation must be true for anything to be emitted. Never
-// add this app to real.moos / realvision.moos - injecting fake AIS traffic
-// on a real vessel would be dangerous and is illegal on the air.
 
 ProcessConfig = pTrafficSim
 {
@@ -89,6 +81,12 @@ ProcessConfig = pTrafficSim
 
   position_interval = 1      // AIS msg 1 per contact, seconds
   static_interval   = 30     // AIS msg 5 per contact, seconds
+
+  // pMarineViewer sizes each contact icon from the NODE_REPORT LENGTH field.
+  // One value for every contact keeps them all the same size on the viewer;
+  // set 0 to fall back to each contact's real length. The AIS message 5
+  // dimensions sent to Signal K always use the real length/beam either way.
+  report_length = 60
 
   // (a) scripted contacts - deterministic, repeatable
   // x/y are absolute MOOS grid metres - these sit near uSimMarine's start_pos
@@ -363,7 +361,7 @@ ProcessConfig = pNodeReporter
   cross_fill_policy = global
   platform_type   = ship
   platform_color  = red
-  platform_length = 100
+  platform_length = 70
 }
 
 //--------------------------------------------------------

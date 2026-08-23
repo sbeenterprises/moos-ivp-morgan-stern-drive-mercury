@@ -101,6 +101,12 @@ class TrafficSim : public AppCastingMOOSApp
   double       m_pos_interval;     // seconds between AIS message 1
   double       m_static_interval;  // seconds between AIS message 5
 
+  // pMarineViewer scales each contact's icon by the LENGTH it reads out of
+  // NODE_REPORT, so a mixed fleet renders at mixed sizes. This is the single
+  // length reported to the viewer / helm; 0 falls back to each contact's own
+  // length. The AIS message 5 dimensions always use the real length and beam.
+  double       m_report_length;
+
  private: // State
   std::vector<Contact> m_contacts;
   unsigned int         m_mmsi_next;

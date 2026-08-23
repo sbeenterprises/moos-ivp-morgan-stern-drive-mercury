@@ -58,6 +58,7 @@ TrafficSim::TrafficSim()
 
   m_pos_interval    = 1.0;
   m_static_interval = 30.0;
+  m_report_length   = 30.0;
 
   m_mmsi_next      = 0;
   m_ownship_x      = 0;
@@ -227,6 +228,10 @@ bool TrafficSim::OnStartUp()
     }
     else if(param == "static_interval") {
       m_static_interval = atof(value.c_str());
+      handled = true;
+    }
+    else if(param == "report_length") {
+      m_report_length = atof(value.c_str());
       handled = true;
     }
     else if(param == "contact")
@@ -538,7 +543,8 @@ void TrafficSim::postNodeReport(const Contact& c)
   report += "HDG=" + doubleToString(c.hdg, 2) + ",";
   report += "YAW=" + doubleToString(c.hdg, 2) + ",";
   report += "DEPTH=0.0,";
-  report += "LENGTH=" + doubleToString(c.length, 1) + ",";
+  double rep_len = (m_report_length > 0) ? m_report_length : c.length;
+  report += "LENGTH=" + doubleToString(rep_len, 1) + ",";
   report += "MODE=SIM";
 
   Notify("NODE_REPORT", report);
