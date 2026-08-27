@@ -25,6 +25,7 @@
 //Includes do divisor NMEA
 
 #include "DivisorNMEA.h"
+#include "AisDecode.h"
 #include "NMEAParserLib/NMEAParser.h"
 #include "NMEAParserLib/NMEAParser.cpp"
 #include "NMEAParserLib/NMEAParserData.h"
@@ -81,8 +82,13 @@ double nav_depth;
 int contador_ais;
 double heading_giro;
 double angulo_leme;
-char* saida_pCmd;
-char* saida_pData;
+// Set only from inside ProcessRxCommand(), i.e. not until a sentence has
+// actually been parsed. They must not start as null: buildReport() builds
+// std::strings from them, and constructing a std::string from null throws.
+// The old blocking recvfrom() hid this by guaranteeing a sentence had arrived
+// before the first appcast; a non-blocking read does not.
+char* saida_pCmd  = (char*) "";
+char* saida_pData = (char*) "";
 int msg_debug;
 int current_gear;
 
@@ -194,10 +200,20 @@ DivisorNMEA::DivisorNMEA()
   //endereco_porta_serial = "/dev/pts/3"; // Porta para testes
   //baudrate = 9600;
 
-  //Valores iniciais
-  //lat_gps = 0;
-  //long_gps = 0;
+  // Port the Signal K udp-nmea-sender plugin forwards every received NMEA0183
+  // sentence to (~/.signalk/plugin-config-data/udp-nmea-sender.json).
+  m_udp_port           = LOCAL_SERVER_PORT;
+  m_ownship_mmsi       = 710400014;   // the launch's own transponder
+  m_publish_nav        = true;
+  m_report_interval    = 1.0;
+  m_default_length     = 30.0;
+  m_contact_stale_secs = 120.0;
 
+  m_node_reports_sent  = 0;
+  m_datagrams_seen     = 0;
+
+  memset(read_buf,  0, sizeof(read_buf));
+  memset(nmea_data, 0, sizeof(nmea_data));
 }
 
 //---------------------------------------------------------
@@ -256,36 +272,50 @@ bool DivisorNMEA::OnConnectToServer()
 bool DivisorNMEA::Iterate()
 {
   AppCastingMOOSApp::Iterate();
-  // Do your thing here!
-  // Crio o buffer para receber as sentenças NMEA
 
-  memset(msg,0x0,MAX_MSG);
+  // The socket is non-blocking (see OnStartUp), so drain everything that has
+  // arrived since the last tick instead of taking one datagram per Iterate.
+  // Blocking here - which is what this app used to do - freezes the whole
+  // process the moment the sender goes quiet, and caps throughput at AppTick
+  // sentences per second even when it does not.
+  const int max_per_tick = 200;
 
-  /* receive message */
-  cliLen = sizeof(cliAddr);
+  for(int i = 0; i < max_per_tick; i++) {
+    memset(msg, 0x0, MAX_MSG);
+    cliLen = sizeof(cliAddr);
 
-  try {
-    n = recvfrom(sd, msg, MAX_MSG, 0, 
-      (struct sockaddr *) &cliAddr, &cliLen);
+    n = recvfrom(sd, msg, MAX_MSG - 1, 0,
+                 (struct sockaddr *) &cliAddr, &cliLen);
+
+    if(n < 0) {
+      if((errno == EAGAIN) || (errno == EWOULDBLOCK))
+        break;                       // nothing left to read this tick
+      reportRunWarning("recvfrom failed: " + string(strerror(errno)));
+      break;
+    }
+    if(n == 0)
+      continue;
+
+    msg[n] = '\0';
+    m_datagrams_seen++;
+    processSentence(string(msg));
   }
-  catch (std::system_error& e)
-  {
-    std::cout << e.what();
-  }
 
-  if(n<0) {
-    printf(": cannot receive data \n");
-    //continue;
-  }
-    
-  /* print received message */
-  printf(": from %s:UDP%u : %s \n", 
-    inet_ntoa(cliAddr.sin_addr),
-    ntohs(cliAddr.sin_port),msg);
+  m_ais.expireFragments(MOOSTime());
+  postContactReports();
 
-  Notify("MSG_UDP",msg); //Declarar uma variável pro MOOSDB
+  AppCastingMOOSApp::PostReport();
+  return(true);
+}
 
-  std::string msg_string = msg;
+//---------------------------------------------------------
+// Procedure: processSentence()
+//   One complete NMEA0183 sentence, as forwarded by the Signal K
+//   udp-nmea-sender plugin (one sentence per datagram).
+
+void DivisorNMEA::processSentence(const std::string& msg_string)
+{
+  Notify("MSG_UDP", msg_string); //Declarar uma variável pro MOOSDB
 
     //Parser de msg caso seja profundidade
   // Create a string stream to split the input string by commas
@@ -309,138 +339,88 @@ bool DivisorNMEA::Iterate()
 
   //Processo a sentença
   try {
-    NMEAParser.ProcessNMEABuffer((char *)msg, (int)strlen(msg));
+    NMEAParser.ProcessNMEABuffer((char *) msg_string.c_str(),
+                                 (int) msg_string.size());
   }
   catch (std::system_error& e)
   {
     std::cout << e.what();
   }
 
-  //Publico NAV_X e NAV_Y
-  //TODO deixar parametrizavel pra localização
+  // NAV_X / NAV_Y are not published here: pNodeReporter cross-fills them from
+  // NAV_LAT / NAV_LONG (cross_fill_policy = global) and pXYpublisher puts them
+  // back on the DB. The geodesy origin is set once in OnStartUp from the
+  // mission's LatOrigin / LongOrigin - it used to be re-initialised from a
+  // hard-coded literal on every single sentence.
+  if(m_publish_nav) {
+    //Atualizo variáveis necessárias para o movimento do navio
+    Notify("NAV_LAT", lat_gps);
+    Notify("NAV_LONG", long_gps);
+    Notify("NAV_SPEED", speed_gps);
+    Notify("NAV_HEADING", heading_giro);  // Notify NAV_HEADING
 
-  // Morgan City
-  double lat_origin = 29.71970895316288; //ALTERAR AQUI SE MUDAR A CARTA NÁUTICA !!!
-  double lon_origin = -91.14705165281887;
-
-  // Salvador
-  //double lat_origin = -12.97933112028696;
-  //double lon_origin = -38.5666610393065;
-  double nav_x = 0.0;
-  double nav_y = 0.0;
-  m_geodesy.Initialise(lat_origin, lon_origin);
-  //m_geodesy.SetRefEllipsoid(23); // Set the ellipsoid to WGS-84
-  m_geodesy.LatLong2LocalGrid(lat_gps, long_gps, nav_y, nav_x);
-
-  string x = to_string(nav_x);
-  string y = to_string(nav_y);
-
-  //Notify("NAV_X",x);
-  //Notify("NAV_Y",y);
-
-  //Atualizo variáveis necessárias para o movimento do navio
-  Notify("NAV_LAT", lat_gps);
-  Notify("NAV_LONG", long_gps);
-  Notify("NAV_SPEED", speed_gps);
-  Notify("NAV_HEADING", heading_giro);  // Notify NAV_HEADING
-  
-  //para testes
-  Notify("GPS_HEADING", heading_gps);
-  /*
-  if (heading_giro == 0){ //Caso o rumo verdadeiro da giro venha zerada, pego do gps
-    Notify("NAV_HEADING", heading_gps); //Alterei para pegar o heading da giro ao invés do gps
-  } else {
-    Notify("NAV_HEADING", heading_giro);
-  }*/
+    //para testes
+    Notify("GPS_HEADING", heading_gps);
+  }
 
   NMEAParser.ResetData(); //Reseto dados NMEA
   
-  //Iteração pelas mensagens e salvo a que contém dados AIS
-  
-    //msg_debug = msg.substr(0,6);
-    //Verifica o inicio da string para fazer o parsing da msg ais
-    //PARSING DA MSG AIS
-    
-  if (msg_string.substr(0,6) == "!AIVDM"){
-    try {
-      
-      const std::string body(libais::GetBody(msg));
-      
-      const int pad = libais::GetPad(msg);
-      //std::string chksum_block = libais::GetNthField(msg, 6, ",");
-      //Removendo espacos em branco da string
-      //remove(chksum_block.begin(), chksum_block.end(), ' ');
-      
-      msg_debug = pad;
-      
-      //std::string chksum_block(libais::GetNthField(msg, 6, ","));
-      if (pad >= 0){
-        
-        std::unique_ptr<libais::Ais1_2_3> msg(new libais::Ais1_2_3(body.c_str(), pad));
-        
-        //Caso o código MMSI do contato seja diferente do da lancha, adicionar no quadro de contatos
-        // MMSI da lancha : 710400014
+  // ---- AIS -------------------------------------------------------------
+  // Decoded by AisDecode.{cpp,h}, the mirror of pTrafficSim's AisEncode. The
+  // libais copy vendored here only ever built ais1_2_3.cpp, so it could not see
+  // type 5 ship names or Class B at all.
+  if((msg_string.compare(0, 6, "!AIVDM") == 0) ||
+     (msg_string.compare(0, 6, "!AIVDO") == 0)) {
 
-        //if (msg->mmsi != 710400014 && msg->mmsi != 0) { //Colocar aqui o MMSI da lancha
-        
-        if (msg->mmsi != 710400014) {
-          Notify("MESSAGE_ID", msg->message_id);
-          Notify("MESSAGE_MMSI", msg->mmsi);
-          Notify("MESSAGE_NAVSTATUS", msg->nav_status);
-          Notify("MESSAGE_SOG", msg->sog);
-          Notify("MESSAGE_LONGITUDE", msg->position.lng_deg);
-          Notify("MESSAGE_LATITUDE", msg->position.lat_deg);
-          Notify("MESSAGE_TRUEHEADING", msg->true_heading);
+    AisReport rep;
+    if(!m_ais.handleSentence(msg_string, rep, MOOSTime()))
+      return;                        // buffered fragment, or not for us
 
-          string msg_lat = to_string(msg->position.lat_deg); //Latitude do ctt
-          string msg_lon = to_string(msg->position.lng_deg); //Longitude do ctt
-          string msg_spd = to_string(msg->sog); //Veloc do ctt
-          string msg_cog = to_string(msg->cog); //Rumo no chão
-          string msg_mmsi = to_string(msg->mmsi); //Codigo MMSI
-          //msg_debug = msg_mmsi;
-          double time = MOOSTime(); //Tempo no MOOS
-          string time_string = to_string(time); //Passo o tempo para string
+    // Our own transponder echo must never become a contact, or the USV ends up
+    // avoiding - or following - itself.
+    if(rep.mmsi == m_ownship_mmsi)
+      return;
 
-          //Colocar a Latitude e Longitude de Origem
-          //!!!!!!! ALTERAR ESSES DADOS SE MUDAR A CARTA NÁUTICA !!!!!!!!!!!!
+    AisContact& c = m_contacts[rep.mmsi];
+    c.mmsi = rep.mmsi;
 
-          // Rio de Janeiro
-          double lat_origin = -22.93335; //ALTERAR AQUI SE MUDAR A CARTA NÁUTICA !!!
-          double lon_origin = -43.136666665;
+    if(rep.has_position) {
+      c.lat = rep.lat;
+      c.lon = rep.lon;
 
-          // Salvador
-          //double lat_origin = -12.97933112028696;
-          //double lon_origin = -38.5666610393065;
-          double nav_x = 0;
-          double nav_y = 0;
+      // AIS speed is knots; NODE_REPORT wants metres/second. Skipping this
+      // conversion makes every contact appear to move at twice its real speed
+      // and quietly poisons every CPA the helm computes.
+      if(rep.sog >= 0)
+        c.sog_ms = rep.sog / 1.94384449;
 
-          //Faz a conversão da Lat/Long para coordenadas locais
+      // Small craft very often report heading as 511 (not available); course
+      // over ground is the usable stand-in.
+      if((rep.hdg >= 0) && (rep.hdg < 360))
+        c.hdg = rep.hdg;
+      else if(rep.cog >= 0)
+        c.hdg = rep.cog;
 
-          //m_geodesy.Initialise(lat_origin, lon_origin);
-          //m_geodesy.LatLong2LocalGrid(msg->position.lat_deg, msg->position.lng_deg, nav_y, nav_x);
-
-          //string x = to_string(nav_x);
-          //string y = to_string(nav_y);
-          
-          //Coloquei essa lógica para não confundir contato AIS com o navio principal no início da execução
-          /*
-          if (contador_ais > 10) {
-            Notify("NODE_REPORT","NAME=contato_"+msg_mmsi+",TYPE=SHIP,TIME="+time_string+",LAT="+msg_lat+",LON="+msg_lon+",SPD="+msg_spd+",HDG="+msg_cog+",LENGTH=3.8,MODE=DRIVE,X="+x+",Y="+y);
-          }
-          contador_ais +=1;
-          */
-        }
-      }
-    }
-    catch (std::system_error& e) {
-      std::cout << e.what();
+      c.last_heard = MOOSTime();
     }
 
+    if(rep.has_static) {
+      if(!rep.shipname.empty())
+        c.shipname = rep.shipname;
+      if(!rep.callsign.empty())
+        c.callsign = rep.callsign;
+      if(rep.shiptype > 0)
+        c.shiptype = rep.shiptype;
+      if((rep.dim_a + rep.dim_b) > 0)
+        c.length = rep.dim_a + rep.dim_b;
+    }
+
+    msg_debug = rep.msg_type;
   } //fechamento do if 
   //Parser do ângulo do leme
   else if (msg_string.substr(0,6) == "$AGRSA") {
     try {
-      angulo_leme = stod(libais::GetNthField(msg,1,",")); //Pega o segundo campo da string NMEA
+      angulo_leme = stod(libais::GetNthField(msg_string,1,",")); //Pega o segundo campo da string NMEA
     }
     catch (std::system_error& e)
     {
@@ -448,13 +428,14 @@ bool DivisorNMEA::Iterate()
     }
     double ang = angulo_leme;
     Notify("ANGULO_LEME", ang);
-    Notify("NAV_YAW", ang); //Variável de retorno do valor do ângulo do leme para o PID
+    if(m_publish_nav)
+      Notify("NAV_YAW", ang); //Variável de retorno do valor do ângulo do leme para o PID
   }
 
   //Parser do Rumo Verdadeiro dado pela Giro
   /*else if (msg_string.substr(0,6) == "$GPHDT") {
     try {
-      heading_giro = stod(libais::GetNthField(msg,1,",")); //Pega o primeiro campo da string NMEA
+      heading_giro = stod(libais::GetNthField(msg_string,1,",")); //Pega o primeiro campo da string NMEA
       Notify("NAV_HEADING", heading_giro);      
     }
     catch (std::system_error& e)
@@ -465,13 +446,14 @@ bool DivisorNMEA::Iterate()
 
   // Parser da Velocidade dada pelo GPS
   else if (msg_string.rfind("$GPRMC", 0) == 0) {  // rfind evita substr + ==  
-    std::string sog_field = libais::GetNthField(msg, 7, ",");
-    std::string cog_field = libais::GetNthField(msg, 8, ",");
+    std::string sog_field = libais::GetNthField(msg_string, 7, ",");
+    std::string cog_field = libais::GetNthField(msg_string, 8, ",");
 
     if (!sog_field.empty()) {
         try {
             speed_gps = std::stod(sog_field);
-            Notify("NAV_SPEED", speed_gps);
+            if(m_publish_nav)
+              Notify("NAV_SPEED", speed_gps);
         } catch (const std::invalid_argument&) {
             reportRunWarning("SOG inválido no GPRMC: '" + sog_field + "'");
         }
@@ -483,7 +465,8 @@ bool DivisorNMEA::Iterate()
     if (!cog_field.empty()) {
         try {
             heading_gps = std::stod(cog_field);   // graus verdadeiros 0-359.9
-            Notify("NAV_COG", heading_gps);          // publique como preferir
+            if(m_publish_nav)
+              Notify("NAV_COG", heading_gps);        // publique como preferir
         } catch (const std::invalid_argument&) {
             reportRunWarning("COG inválido no GPRMC: '" + cog_field + "'");
         }
@@ -492,9 +475,9 @@ bool DivisorNMEA::Iterate()
     }
 }
   else if (msg_string.rfind("$VNYMR", 0) == 0) {
-    std::string gyro_x = libais::GetNthField(msg, 9, ",");
-    std::string gyro_y = libais::GetNthField(msg, 10, ",");
-    std::string gyro_z = libais::GetNthField(msg, 11, ",");
+    std::string gyro_x = libais::GetNthField(msg_string, 9, ",");
+    std::string gyro_y = libais::GetNthField(msg_string, 10, ",");
+    std::string gyro_z = libais::GetNthField(msg_string, 11, ",");
 
     if (!gyro_x.empty()) {
         try {
@@ -536,9 +519,9 @@ bool DivisorNMEA::Iterate()
   //Parser da leitura do Anemômetro
   else if (msg_string.substr(0,6) == "$WIMWV") {
     try {
-      wind_angle = stod(libais::GetNthField(msg,1,",")); //Pega o primeiro campo da string NMEA
+      wind_angle = stod(libais::GetNthField(msg_string,1,",")); //Pega o primeiro campo da string NMEA
       Notify("WIND_ANGLE", wind_angle);
-      wind_speed = stold(libais::GetNthField(msg,3,",")); //Pega o terceiro campo da string NMEA
+      wind_speed = stold(libais::GetNthField(msg_string,3,",")); //Pega o terceiro campo da string NMEA
       Notify("WIND_SPEED", wind_speed);
     }
     catch (std::system_error& e) {
@@ -587,9 +570,73 @@ bool DivisorNMEA::Iterate()
 
   //Reseto os dados
   //NMEAParser.ResetData();
+}
 
-  AppCastingMOOSApp::PostReport();
-  return(true);
+//---------------------------------------------------------
+// Procedure: postContactReports()
+//   Field list matches pTrafficSim exactly - which is already proven to be
+//   what pContactMgrV20 accepts. Local X/Y only, no LAT/LON: pContactMgrV20
+//   runs with contact_local_coords = force_lat_lon and fills those in itself.
+
+void DivisorNMEA::postContactReports()
+{
+  double now = MOOSTime();
+
+  std::map<unsigned int, AisContact>::iterator p = m_contacts.begin();
+  while(p != m_contacts.end()) {
+    AisContact& c = p->second;
+
+    if((now - c.last_heard) > m_contact_stale_secs) {
+      m_contacts.erase(p++);         // gone quiet - stop reporting it
+      continue;
+    }
+
+    // Only report what we have actually heard. Re-posting the last known
+    // position with a fresh TIME would make a contact that has stopped
+    // transmitting look permanently current to pContactMgrV20, defeating its
+    // own aging and leaving a ghost in the helm's contact picture.
+    if((c.last_heard <= 0) ||        // static data only, never a position
+       (c.last_heard <= c.last_posted) ||
+       ((now - c.last_posted) < m_report_interval)) {
+      ++p;
+      continue;
+    }
+
+    // pNodeReporter cross-fills ownship's x/y from lat/lon with LatLong2LocalUTM
+    // (cross_fill_policy = global), so contacts have to use the same projection
+    // or they land in a frame ~100 m away from ownship and every CPA the helm
+    // computes is wrong. See USE_UTM in the top-level CMakeLists.
+    double nav_x = 0, nav_y = 0;
+#ifdef USE_UTM
+    m_geodesy.LatLong2LocalUTM(c.lat, c.lon, nav_y, nav_x);
+#else
+    m_geodesy.LatLong2LocalGrid(c.lat, c.lon, nav_y, nav_x);
+#endif
+
+    // vname is AIS<mmsi>, the same convention pTrafficSim uses. The MMSI is
+    // the join key between MOOS and the UI, so the "Follow AIS contact"
+    // right-click resolves these contacts with no UI change.
+    double length = (c.length > 0) ? c.length : m_default_length;
+
+    string report = "NAME=AIS" + to_string(c.mmsi) + ",";
+    report += "TYPE=ship,";
+    // The time the position was received, not the time we got round to
+    // posting it - pContactMgrV20 ages contacts off this field.
+    report += "TIME=" + doubleToString(c.last_heard, 2) + ",";
+    report += "X=" + doubleToString(nav_x, 2) + ",";
+    report += "Y=" + doubleToString(nav_y, 2) + ",";
+    report += "SPD=" + doubleToString(c.sog_ms, 2) + ",";
+    report += "HDG=" + doubleToString(c.hdg, 2) + ",";
+    report += "YAW=" + doubleToString(c.hdg, 2) + ",";
+    report += "DEPTH=0.0,";
+    report += "LENGTH=" + doubleToString(length, 1) + ",";
+    report += "MODE=AIS";
+
+    Notify("NODE_REPORT", report);
+    m_node_reports_sent++;
+    c.last_posted = now;
+    ++p;
+  }
 }
 
 //---------------------------------------------------------
@@ -599,29 +646,6 @@ bool DivisorNMEA::Iterate()
 bool DivisorNMEA::OnStartUp()
 {
   AppCastingMOOSApp::OnStartUp();
-
-  //Cria o socket para receber UDP na porta 10110
-
-  /* socket creation */
-  sd=socket(AF_INET, SOCK_DGRAM, 0);
-  if(sd<0) {
-    printf(" cannot open socket \n");
-    exit(1);
-  }
-
-  /* bind local server port */
-  servAddr.sin_family = AF_INET;
-  servAddr.sin_addr.s_addr = htonl(INADDR_ANY);
-  servAddr.sin_port = htons(LOCAL_SERVER_PORT);
-  rc = bind (sd, (struct sockaddr *) &servAddr,sizeof(servAddr));
-  if(rc<0) {
-    printf(" cannot bind port number %d \n", 
-      LOCAL_SERVER_PORT);
-    exit(1);
-  }
-
-  printf(" waiting for data on port UDP %u\n", 
-    LOCAL_SERVER_PORT);
 
   STRING_LIST sParams;
   m_MissionReader.EnableVerbatimQuoting(false);
@@ -636,18 +660,77 @@ bool DivisorNMEA::OnStartUp()
     string value = line;
 
     bool handled = false;
-    if(param == "foo") {
+    if(param == "udp_port") {
+      m_udp_port = atoi(value.c_str());
+      handled = (m_udp_port > 0);
+    }
+    else if(param == "ownship_mmsi") {
+      m_ownship_mmsi = (unsigned int) atol(value.c_str());
       handled = true;
     }
-    else if(param == "bar") {
-      handled = true;
+    else if(param == "publish_nav") {
+      handled = setBooleanOnString(m_publish_nav, value);
+    }
+    else if(param == "report_interval") {
+      m_report_interval = atof(value.c_str());
+      handled = (m_report_interval >= 0);
+    }
+    else if(param == "default_length") {
+      m_default_length = atof(value.c_str());
+      handled = (m_default_length > 0);
+    }
+    else if(param == "contact_stale_secs") {
+      m_contact_stale_secs = atof(value.c_str());
+      handled = (m_contact_stale_secs > 0);
     }
 
     if(!handled)
       reportUnhandledConfigWarning(orig);
-
   }
-  
+
+  // Geodesy origin comes from the mission's global LatOrigin / LongOrigin, so
+  // AIS contacts and ownship land on the same grid. The old code used a
+  // Morgan City literal for ownship and a Rio de Janeiro one for AIS, which
+  // would have put contacts thousands of kilometres away had the conversion
+  // not also been commented out.
+  double lat_origin = 0, lon_origin = 0;
+  if(!m_MissionReader.GetValue("LatOrigin", lat_origin) ||
+     !m_MissionReader.GetValue("LongOrigin", lon_origin)) {
+    reportConfigWarning("LatOrigin / LongOrigin missing from the mission file");
+    return(false);
+  }
+  if(!m_geodesy.Initialise(lat_origin, lon_origin)) {
+    reportConfigWarning("Geodesy failed to initialise");
+    return(false);
+  }
+
+  /* socket creation */
+  sd = socket(AF_INET, SOCK_DGRAM, 0);
+  if(sd < 0) {
+    reportConfigWarning("cannot open UDP socket");
+    return(false);
+  }
+
+  /* bind local server port */
+  servAddr.sin_family = AF_INET;
+  servAddr.sin_addr.s_addr = htonl(INADDR_ANY);
+  servAddr.sin_port = htons(m_udp_port);
+  rc = bind(sd, (struct sockaddr *) &servAddr, sizeof(servAddr));
+  if(rc < 0) {
+    reportConfigWarning("cannot bind UDP port " + intToString(m_udp_port) +
+                        ": " + string(strerror(errno)));
+    return(false);
+  }
+
+  // Non-blocking is what lets Iterate() drain the socket and move on. Left
+  // blocking, this app stalls the instant the sender pauses - which reads on
+  // the appcast exactly like Signal K having stopped forwarding.
+  int flags = fcntl(sd, F_GETFL, 0);
+  if((flags < 0) || (fcntl(sd, F_SETFL, flags | O_NONBLOCK) < 0)) {
+    reportConfigWarning("cannot set the UDP socket non-blocking");
+    return(false);
+  }
+
   registerVariables();	
 
   return(true);
@@ -687,7 +770,10 @@ bool DivisorNMEA::buildReport()
   ACTable actab(4);
   actab << "msg_debug | Saida_PCmd | Saida_PData | String Recebida ";
   actab.addHeaderLines();
-  actab << msg_debug << saida_pCmd << saida_pData << read_buf;
+  actab << msg_debug
+        << (saida_pCmd  ? saida_pCmd  : "")
+        << (saida_pData ? saida_pData : "")
+        << read_buf;
   m_msgs << actab.getFormattedString();
   m_msgs << endl << "============================================" << endl;
 
@@ -704,6 +790,32 @@ bool DivisorNMEA::buildReport()
   actab3 << wind_speed << wind_angle;
   m_msgs << actab3.getFormattedString();
   m_msgs << endl << "============================================" << endl;
+
+  m_msgs << "UDP port:        " << m_udp_port
+         << "   datagrams: "    << m_datagrams_seen << endl;
+  m_msgs << "Ownship MMSI:    " << m_ownship_mmsi
+         << "   publish NAV_*: " << (m_publish_nav ? "yes" : "no") << endl;
+  m_msgs << "AIVDM sentences: " << m_ais.sentencesSeen()
+         << "   decoded: "      << m_ais.messagesDecoded()
+         << "   rejected: "     << m_ais.badSentences() << endl;
+  m_msgs << "NODE_REPORTs:    " << m_node_reports_sent << endl;
+  m_msgs << "============================================" << endl;
+
+  ACTable actab4(6);
+  actab4 << "MMSI | Name | Type | Len | Spd(m/s) | Hdg";
+  actab4.addHeaderLines();
+  std::map<unsigned int, AisContact>::const_iterator q;
+  for(q = m_contacts.begin(); q != m_contacts.end(); ++q) {
+    const AisContact& c = q->second;
+    actab4 << c.mmsi
+           << (c.shipname.empty() ? "-" : c.shipname)
+           << c.shiptype
+           << ((c.length > 0) ? c.length : m_default_length)
+           << c.sog_ms
+           << c.hdg;
+  }
+  m_msgs << actab4.getFormattedString();
+  m_msgs << endl;
 
   return(true);
 }

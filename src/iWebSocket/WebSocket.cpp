@@ -314,18 +314,23 @@ bool WebSocket::OnNewMail(MOOSMSG_LIST &NewMail)
         }
       }
 
-      // Convert local X,Y to lat/lon
+      // Convert local X,Y to lat/lon, using the same projection as
+      // pMarineViewer and pNodeReporter (see USE_UTM in the top-level
+      // CMakeLists). This used the flat-earth grid plus a hand-tuned
+      // "y += 100" that cancelled most - not all - of the resulting error;
+      // the projection is the actual fix, so the fudge is gone.
       double lat_origin = 29.71970895316288;
       double lon_origin = -91.14705165281887;
 
       CMOOSGeodesy geodesy;
       geodesy.Initialise(lat_origin, lon_origin);
 
-      // OFfset to y by 100meters
-      y +=100;
-
       double lat, lon;
+#ifdef USE_UTM
+      geodesy.UTM2LatLong(x, y, lat, lon);
+#else
       geodesy.LocalGrid2LatLong(x, y, lat, lon);
+#endif
 
       // Store the values
       contact_name = name;

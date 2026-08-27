@@ -91,6 +91,14 @@ bool XYpublisher::Iterate()
   //Get the node_report_local in the string like
   //NAME=alpha,X=-6045.75,Y=17.67,SPD=0.07,HDG=216.34,LAT=29.72072828,LON=-91.20952668,TYPE=ship,COLOR=red,MODE=PARK,ALLSTOP=unknown,INDEX=1014,TIME=1746120319.79,LENGTH=100
 
+  // Nothing to parse until pNodeReporter has posted its first report. Without
+  // this, the stod() calls below throw std::invalid_argument on the empty
+  // string and take the app down before the mission has even started.
+  if(node_report_local.empty()) {
+    AppCastingMOOSApp::PostReport();
+    return(true);
+  }
+
   //Get the X and Y values from the string
   std::stringstream ss(node_report_local);
   std::string token;
@@ -110,10 +118,15 @@ bool XYpublisher::Iterate()
   y = token.substr(token.find('=') + 1);
 
   //Convert the X and Y values to double
-
-  m_nav_x = std::stod(x);
-
-  m_nav_y = std::stod(y);
+  try {
+    m_nav_x = std::stod(x);
+    m_nav_y = std::stod(y);
+  }
+  catch(const std::exception&) {
+    reportRunWarning("Could not read X/Y out of NODE_REPORT_LOCAL");
+    AppCastingMOOSApp::PostReport();
+    return(true);
+  }
 
   //Notify the values
   Notify("NAV_X", m_nav_x);

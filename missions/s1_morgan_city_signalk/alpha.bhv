@@ -87,11 +87,15 @@ Behavior = BHV_AvdColregsV22
 	post_per_contact_info = false
 	
           use_refinery = true
-        pwt_outer_dist = 50
-        pwt_inner_dist = 30
-        completed_dist = 1000
-     min_util_cpa_dist = 30
-     max_util_cpa_dist = 50
+     // Engagement envelope. Was 50/30 outer/inner with a 30-50 m CPA band,
+     // which only reacted inside ~50 m - late and abrupt on a boat that does
+     // 15 m/s. Widened so the deflection starts far enough out to be visible
+     // and to leave real standoff. Constraint: inner <= outer <= completed.
+        pwt_outer_dist = 300
+        pwt_inner_dist = 150
+        completed_dist = 1500
+     min_util_cpa_dist = 100
+     max_util_cpa_dist = 300
              pwt_grade = linear
    bearing_line_config = white:0, green:0.65, yellow:0.8, red:1.0
 }

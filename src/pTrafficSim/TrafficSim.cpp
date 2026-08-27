@@ -561,8 +561,16 @@ void TrafficSim::postAis(Contact& c, double now)
   if(!m_udp_ok || !m_geodesy_ok)
     return;
 
+  // Same projection as pMarineViewer and pNodeReporter (see USE_UTM in the
+  // top-level CMakeLists). Getting this wrong does not move the contact in
+  // MOOS - it stays at c.x/c.y - but it broadcasts it to Signal K about 100 m
+  // from there, so the UI and the viewer disagree about where the traffic is.
   double lat = 0, lon = 0;
+#ifdef USE_UTM
+  if(!m_geodesy.UTM2LatLong(c.x, c.y, lat, lon))
+#else
   if(!m_geodesy.LocalGrid2LatLong(c.x, c.y, lat, lon))
+#endif
     return;
 
   if(now >= c.next_pos_post) {

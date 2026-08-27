@@ -103,7 +103,30 @@ ELSE( ${WIN32} )
 
 ENDIF( ${WIN32} )
 
+#======================================================================
+# Local grid projection - must match the moos-ivp core build
+#======================================================================
+# moos-ivp/ivp/src/CMakeLists.txt declares this same option, default ON, and
+# pMarineViewer, pNodeReporter and the chart alignment in lib_marineview are
+# all compiled against it. Every app here that converts between lat/lon and
+# MOOS x/y has to choose the same projection or it ends up in a different
+# frame: at Morgan City, ~6 km from the origin, UTM and the flat-earth local
+# grid disagree by about 100 m. Flip this only together with the core's flag.
+SET(USE_UTM ON CACHE BOOL "Use UTM coordinates vs Local coordinates.")
+
+IF("${USE_UTM}" STREQUAL "ON")
+  ADD_DEFINITIONS(-DUSE_UTM)
+ENDIF()
+
+message("----------------------------------------Use UTM:" ${USE_UTM})
+
 #=======================================================================
 # Add Subdirectories
 #=======================================================================
+# tools/ comes first on purpose. src/pVisionDetector_ref does not build on
+# this machine (it needs openvino/openvino.hpp), and build.sh runs a plain
+# `make`, which stops at the first failure - so anything listed after src/
+# would silently never be built.
+ADD_SUBDIRECTORY( tools )
+
 ADD_SUBDIRECTORY( src )

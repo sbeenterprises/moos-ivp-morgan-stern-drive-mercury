@@ -6,6 +6,7 @@
 SET(SRC
   DivisorNMEA.cpp
   DivisorNMEA_Info.cpp
+  AisDecode.cpp
   main.cpp
 )
 add_subdirectory (NMEAParserLib)

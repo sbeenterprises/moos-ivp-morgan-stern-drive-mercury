@@ -89,19 +89,27 @@ ProcessConfig = pTrafficSim
   report_length = 60
 
   // (a) scripted contacts - deterministic, repeatable
-  // x/y are absolute MOOS grid metres - these sit near uSimMarine's start_pos
-  // (x=-6289, y=400) so they are in range of the USV from the first second.
-  contact = name=TUG_ALPHA, type=tug, x=-6000, y=600, hdg=270, spd=4, length=25, beam=9
-  contact = name=FERRY_BRAVO, type=ferry, x=-6800, y=1000, hdg=90, spd=8, length=60, beam=14
+  // x/y are absolute MOOS grid metres. Two stationary contacts abeam of each
+  // other on the same heading, ~1 km ahead of uSimMarine's start_pos
+  // (x=-6289, y=400, heading=0) and offset to starboard: the pair sits 100 m
+  // further east again, and both now heading 218.7 - the reciprocal of the
+  // bearing from uSimMarine's start_pos to TARGET_BRAVO - so the USV closes
+  // BRAVO bow to bow (head-on) with ALPHA 200 m off its port side.
+  contact = name=TARGET_ALPHA, type=cargo, x=-5689, y=1400, hdg=218.7, spd=0, length=25, beam=9
+  contact = name=TARGET_BRAVO, type=cargo, x=-5489, y=1400, hdg=218.7, spd=0, length=25, beam=9
 
-  // (b) random traffic around the USV
-  random_contacts = 6
+  // Previous mixed traffic - kept for reference, uncomment to restore
+  //contact = name=TUG_ALPHA, type=tug, x=-6000, y=600, hdg=270, spd=4, length=25, beam=9
+  //contact = name=FERRY_BRAVO, type=ferry, x=-6800, y=1000, hdg=90, spd=8, length=60, beam=14
+
+  // (b) random traffic around the USV - off, this test needs exactly 2 contacts
+  random_contacts = 0
   random_radius   = 1500
   random_spd_min  = 2
   random_spd_max  = 9
 
-  // (c) closed-loop patrol - a predictable target to test Follow against
-  loop = name=WORKBOAT_ECHO, type=cargo, spd=5, pts=-6000,200:-5600,200:-5600,800:-6000,800
+  // (c) closed-loop patrol - off for the same reason
+  //loop = name=WORKBOAT_ECHO, type=cargo, spd=5, pts=-6000,200:-5600,200:-5600,800:-6000,800
 }
 
 // iCANRec config block
@@ -222,7 +230,7 @@ ProcessConfig = uSimMarineV22
   AppTick  	= 4
   CommsTick	= 4
 
-  start_pos     = x=-6289, y=400, heading=0, speed=0
+  start_pos     = x=-6289, y=400, heading=38.7, speed=0   // aimed straight at TARGET_BRAVO
   prefix        = NAV
   turn_rate     = 95
   thrust_map    = 0:0, 20:3, 40:6, 60:9, 80:12, 100:15
@@ -387,7 +395,10 @@ ProcessConfig = pContactMgrV20
   cpa_range_color   = gray30
 
 	alert = id=avdcol_, var=CONTACT_INFO, val="name=$[VNAME] # contact=$[VNAME]"
-  alert = id=avdcol_, alert_range=1000, cpa_range=500
+  // Must reach past the behavior's pwt_outer_dist/completed_dist in alpha.bhv
+  // (300 / 1500), otherwise the contact drops out of the alert set while the
+  // avdcol_ behavior still wants it. Was alert_range=1000, cpa_range=500.
+  alert = id=avdcol_, alert_range=1500, cpa_range=1000
 	
 	//match_region = pts = {60,-40 : 60,-160 : 150,-160 : 180,-100 : 150,-40}
 	//match_type = kayak, uuv
