@@ -1,5 +1,5 @@
 /************************************************************/
-/*    NAME: Douglas Lima                                              */
+/*    NAME: DL                                                        */
 /*    ORGN: MIT, Cambridge MA                               */
 /*    FILE: DivisorNMEA.h                                          */
 /*    DATE: December 29th, 1963                             */

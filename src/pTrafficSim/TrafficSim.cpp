@@ -1,5 +1,5 @@
 /************************************************************/
-/*    NAME: Douglas Lima                                    */
+/*    NAME: DL                                              */
 /*    FILE: TrafficSim.cpp                                  */
 /*    DATE: 2026                                            */
 /************************************************************/
@@ -22,6 +22,11 @@ static const double MPS_TO_KNOTS = 1.94384;
 static const double DEG_TO_RAD   = M_PI / 180.0;
 static const double MAX_TURN_RATE = 15.0;   // degrees/second, keeps loops plausible
 
+// hdg=at_ownship in a spawn request cannot be resolved while the string is
+// being parsed - it needs the USV's current position - so the parser stores
+// this sentinel and handleSpawnRequest() turns it into a real heading.
+static const double AIM_AT_OWNSHIP = -999.0;
+
 //---------------------------------------------------------
 // Contact constructor
 
@@ -37,6 +42,8 @@ TrafficSim::Contact::Contact()
   loop_idx = 0;
   next_pos_post = 0;
   next_static_post = 0;
+  runtime = false;
+  aiming = false;
 }
 
 //---------------------------------------------------------
@@ -50,6 +57,11 @@ TrafficSim::TrafficSim()
   m_aivdm_host    = "127.0.0.1";
   m_aivdm_port    = 10112;
   m_mmsi_base     = 366999000;
+  m_spawn_mmsi_base = 366999900;
+  m_expunge_var   = "XYZ_EXPUNGE_TARGET";
+  m_spawn_max_range = 10000;
+  m_max_runtime_contacts = 8;
+  m_aim_lock_range = 400;
 
   m_random_count    = 0;
   m_random_radius   = 1500;
@@ -61,8 +73,11 @@ TrafficSim::TrafficSim()
   m_report_length   = 30.0;
 
   m_mmsi_next      = 0;
+  m_spawn_mmsi_next = 0;
   m_ownship_x      = 0;
   m_ownship_y      = 0;
+  m_ownship_hdg    = 0;
+  m_ownship_spd    = 0;
   m_ownship_known  = false;
   m_last_iterate   = 0;
   m_random_spawned = false;
@@ -75,6 +90,9 @@ TrafficSim::TrafficSim()
   m_aivdm_sent        = 0;
   m_node_reports_sent = 0;
   m_seq_id            = 0;
+
+  m_spawns_made = 0;
+  m_clears_made = 0;
 }
 
 //---------------------------------------------------------
@@ -105,6 +123,18 @@ bool TrafficSim::OnNewMail(MOOSMSG_LIST &NewMail)
     else if(key == "NAV_Y") {
       m_ownship_y = msg.GetDouble();
       m_ownship_known = true;
+    }
+    else if(key == "NAV_HEADING")
+      m_ownship_hdg = msg.GetDouble();
+    else if(key == "NAV_SPEED")
+      m_ownship_spd = msg.GetDouble();
+    else if(key == "TRAFFIC_SPAWN") {
+      if(!handleSpawnRequest(msg.GetString()))
+        reportRunWarning("Bad TRAFFIC_SPAWN: " + msg.GetString());
+    }
+    else if(key == "TRAFFIC_CLEAR") {
+      if(!handleClearRequest(msg.GetString()))
+        reportRunWarning("Bad TRAFFIC_CLEAR: " + msg.GetString());
     }
     else if(key != "APPCAST_REQ")
       reportRunWarning("Unhandled Mail: " + key);
@@ -206,6 +236,26 @@ bool TrafficSim::OnStartUp()
       m_mmsi_base = (unsigned int) atol(value.c_str());
       handled = true;
     }
+    else if(param == "spawn_mmsi_base") {
+      m_spawn_mmsi_base = (unsigned int) atol(value.c_str());
+      handled = true;
+    }
+    else if(param == "expunge_var") {
+      m_expunge_var = value;
+      handled = true;
+    }
+    else if(param == "spawn_max_range") {
+      m_spawn_max_range = atof(value.c_str());
+      handled = true;
+    }
+    else if(param == "max_runtime_contacts") {
+      m_max_runtime_contacts = (unsigned int) atoi(value.c_str());
+      handled = true;
+    }
+    else if(param == "aim_lock_range") {
+      m_aim_lock_range = atof(value.c_str());
+      handled = true;
+    }
     else if(param == "random_contacts") {
       m_random_count = (unsigned int) atoi(value.c_str());
       handled = true;
@@ -243,16 +293,11 @@ bool TrafficSim::OnStartUp()
       reportUnhandledConfigWarning(orig);
   }
 
-  m_mmsi_next = m_mmsi_base;
+  m_mmsi_next       = m_mmsi_base;
+  m_spawn_mmsi_next = m_spawn_mmsi_base;
   // Contacts declared before mmsi_base was read still need their identity.
-  for(unsigned int i=0; i<m_contacts.size(); i++) {
-    if(m_contacts[i].mmsi == 0) {
-      m_contacts[i].mmsi  = nextMmsi();
-      m_contacts[i].vname = "AIS" + uintToString(m_contacts[i].mmsi);
-      if(m_contacts[i].callsign == "")
-        m_contacts[i].callsign = "SIM" + uintToString(m_contacts[i].mmsi % 10000);
-    }
-  }
+  for(unsigned int i=0; i<m_contacts.size(); i++)
+    assignIdentity(m_contacts[i]);
 
   if(!m_enabled) {
     reportConfigWarning("pTrafficSim is INACTIVE: set enable_simulation=true to "
@@ -280,6 +325,10 @@ void TrafficSim::registerVariables()
   AppCastingMOOSApp::RegisterVariables();
   Register("NAV_X", 0);
   Register("NAV_Y", 0);
+  Register("NAV_HEADING", 0);
+  Register("NAV_SPEED", 0);
+  Register("TRAFFIC_SPAWN", 0);
+  Register("TRAFFIC_CLEAR", 0);
 }
 
 //---------------------------------------------------------
@@ -289,6 +338,92 @@ unsigned int TrafficSim::nextMmsi()
 {
   m_mmsi_next++;
   return(m_mmsi_next);
+}
+
+//---------------------------------------------------------
+// Procedure: nextSpawnMmsi()
+//   Runtime spawns get their own MMSI block so a click-placed test target can
+//   never be handed an MMSI the mission file already gave a scenario contact.
+
+unsigned int TrafficSim::nextSpawnMmsi()
+{
+  m_spawn_mmsi_next++;
+  return(m_spawn_mmsi_next);
+}
+
+//---------------------------------------------------------
+// Procedure: interceptHeading()
+//   The heading a contact at (cx,cy) making spd must hold to meet the USV,
+//   given where the USV is and where it is going.
+//
+//   Aiming at where the boat is right now looks right and misses: the boat is
+//   under way, so by the time the contact arrives the boat has gone. Solving
+//   for the intercept instead is what makes 'aim at the USV' produce the
+//   closing encounter the operator asked for, and it is also the honest
+//   geometry - a real vessel on a collision course holds a constant bearing.
+//
+//   With R the vector from contact to ownship and Vo the ownship velocity, the
+//   contact meets the boat at time t where |R + Vo*t| = spd*t, i.e.
+//     (|Vo|^2 - spd^2) t^2 + 2 (R.Vo) t + |R|^2 = 0
+//   Falls back to pure pursuit when the contact is too slow to catch the boat,
+//   which is the best it can do and still closes if the boat turns back.
+
+double TrafficSim::interceptHeading(double cx, double cy, double spd) const
+{
+  double rx = m_ownship_x - cx;
+  double ry = m_ownship_y - cy;
+
+  double vox = m_ownship_spd * sin(m_ownship_hdg * DEG_TO_RAD);
+  double voy = m_ownship_spd * cos(m_ownship_hdg * DEG_TO_RAD);
+
+  double a = (vox*vox + voy*voy) - (spd * spd);
+  double b = 2 * ((rx * vox) + (ry * voy));
+  double c = (rx * rx) + (ry * ry);
+
+  double t = -1;
+  if(fabs(a) < 1e-6) {
+    // Contact and boat are equally fast: the quadratic degenerates to linear.
+    if(fabs(b) > 1e-6)
+      t = -c / b;
+  }
+  else {
+    double disc = (b * b) - (4 * a * c);
+    if(disc >= 0) {
+      double root = sqrt(disc);
+      double t1 = (-b - root) / (2 * a);
+      double t2 = (-b + root) / (2 * a);
+      // The earliest meeting that is actually in the future.
+      if((t1 > 0) && (t2 > 0)) t = (t1 < t2) ? t1 : t2;
+      else if(t1 > 0)          t = t1;
+      else if(t2 > 0)          t = t2;
+    }
+  }
+
+  double aim_x = rx;
+  double aim_y = ry;
+  if(t > 0) {
+    aim_x = rx + (vox * t);
+    aim_y = ry + (voy * t);
+  }
+  return(atan2(aim_x, aim_y) / DEG_TO_RAD);
+}
+
+//---------------------------------------------------------
+// Procedure: assignIdentity()
+//   A contact that named its own mmsi keeps it, but still needs the vname and
+//   callsign derived from it - without a vname its NODE_REPORT goes out with an
+//   empty NAME field, so pContactMgrV20 and the helm can never address it.
+
+void TrafficSim::assignIdentity(Contact& c)
+{
+  if(c.mmsi == 0)
+    c.mmsi = c.runtime ? nextSpawnMmsi() : nextMmsi();
+  if(c.vname == "")
+    c.vname = "AIS" + uintToString(c.mmsi);
+  if(c.callsign == "")
+    c.callsign = "SIM" + uintToString(c.mmsi % 10000);
+  if(c.label == "")
+    c.label = c.vname;
 }
 
 //---------------------------------------------------------
@@ -332,14 +467,13 @@ static string configLabel(const string& raw)
 // Procedure: handleConfigContact()
 //   contact = name=TUG_ALPHA, type=tug, x=300, y=200, hdg=270, spd=4
 
-bool TrafficSim::handleConfigContact(const string& value)
+bool TrafficSim::parseContactSpec(const string& value, Contact& c)
 {
-  Contact c;
-  c.mode = MODE_TRANSIT;
-
   vector<string> kvs = parseString(value, ',');
   for(unsigned int i=0; i<kvs.size(); i++) {
     string kv  = stripBlankEnds(kvs[i]);
+    if(kv == "")
+      continue;
     string key = tolower(biteStringX(kv, '='));
     string val = kv;
 
@@ -351,7 +485,15 @@ bool TrafficSim::handleConfigContact(const string& value)
     else if(key == "callsign") c.callsign = val;
     else if(key == "x")        c.x   = atof(val.c_str());
     else if(key == "y")        c.y   = atof(val.c_str());
-    else if(key == "hdg")      c.hdg = atof(val.c_str());
+    else if(key == "hdg") {
+      // Runtime spawns may ask for a heading straight at the USV, which cannot
+      // be resolved here - handleSpawnRequest() turns the sentinel into a real
+      // heading once it has the current ownship position.
+      if(tolower(val) == "at_ownship")
+        c.hdg = AIM_AT_OWNSHIP;
+      else
+        c.hdg = atof(val.c_str());
+    }
     else if(key == "spd")      c.spd = atof(val.c_str());
     else if(key == "length")   c.length = atof(val.c_str());
     else if(key == "beam")     c.beam   = atof(val.c_str());
@@ -359,12 +501,208 @@ bool TrafficSim::handleConfigContact(const string& value)
     else if(key == "navstatus") c.navstatus = atoi(val.c_str());
     else return(false);
   }
+  return(true);
+}
+
+//---------------------------------------------------------
+// Procedure: handleConfigContact()
+//   contact = name=TUG_ALPHA, type=tug, x=300, y=200, hdg=270, spd=4
+
+bool TrafficSim::handleConfigContact(const string& value)
+{
+  Contact c;
+  c.mode = MODE_TRANSIT;
+
+  if(!parseContactSpec(value, c))
+    return(false);
+
+  // There is no ownship position yet at configuration time.
+  if(c.hdg == AIM_AT_OWNSHIP)
+    return(false);
 
   if(c.label == "")
     return(false);
 
   m_contacts.push_back(c);
   return(true);
+}
+
+//---------------------------------------------------------
+// Procedure: handleSpawnRequest()
+//   TRAFFIC_SPAWN = x=-6000,y=800,hdg=at_ownship,spd=2.5,type=cargo
+//
+//   Same grammar as the config 'contact' line, so the two paths cannot drift,
+//   plus hdg=at_ownship. The heading is resolved once, here: the contact then
+//   holds course and speed, which is the steady-contact assumption every
+//   COLREGS behaviour is built around.
+
+void TrafficSim::postSpawnRefusal(const string& why)
+{
+  string ack = "ok=false,why=" + why;
+  ack += ",utc=" + doubleToString(MOOSTime(), 2);
+  m_last_spawn_msg = ack;
+  Notify("TRAFFIC_SPAWNED", ack);
+  reportRunWarning("TRAFFIC_SPAWN refused: " + why);
+}
+
+bool TrafficSim::handleSpawnRequest(const string& value)
+{
+  // The same interlock that gates Iterate(). Refusing here rather than silently
+  // accepting means a UI click can never inject fake AIS on a real vessel.
+  if(!m_enabled) {
+    postSpawnRefusal("disabled");
+    return(true);
+  }
+
+  Contact c;
+  c.mode    = MODE_TRANSIT;
+  c.runtime = true;
+
+  if(!parseContactSpec(value, c)) {
+    postSpawnRefusal("bad_spec");
+    return(true);
+  }
+
+  if(!m_ownship_known) {
+    // Needed for the range guard, and for at_ownship headings.
+    postSpawnRefusal("no_ownship");
+    return(true);
+  }
+
+  // A target placed far outside the behaviour's envelope would never trigger
+  // anything, which reads as a broken feature rather than a bad click.
+  if(hypot(c.x - m_ownship_x, c.y - m_ownship_y) > m_spawn_max_range) {
+    postSpawnRefusal("out_of_range");
+    return(true);
+  }
+
+  unsigned int runtime_count = 0;
+  for(unsigned int i=0; i<m_contacts.size(); i++) {
+    if(m_contacts[i].runtime)
+      runtime_count++;
+  }
+  if(runtime_count >= m_max_runtime_contacts) {
+    postSpawnRefusal("limit");
+    return(true);
+  }
+
+  if(c.hdg == AIM_AT_OWNSHIP) {
+    c.hdg = interceptHeading(c.x, c.y, c.spd);
+    // Keep correcting until it is close enough for the encounter to be decided,
+    // then hold. See the note on Contact::aiming.
+    c.aiming = true;
+  }
+  while(c.hdg >= 360) c.hdg -= 360;
+  while(c.hdg < 0)    c.hdg += 360;
+
+  assignIdentity(c);
+
+  // Reject a duplicate rather than run two contacts under one name - the helm
+  // keys its avoidance behaviours by contact name.
+  for(unsigned int i=0; i<m_contacts.size(); i++) {
+    if(m_contacts[i].vname == c.vname) {
+      postSpawnRefusal("duplicate");
+      return(true);
+    }
+  }
+
+  m_contacts.push_back(c);
+  m_spawns_made++;
+
+  // Ack in both frames: the UI thinks in lat/lon, the helm in local x/y, and
+  // whoever asked for the spawn needs the assigned name to follow it.
+  double lat = 0, lon = 0;
+  string ack = "ok=true";
+  ack += ",name=" + c.vname;
+  ack += ",mmsi="  + uintToString(c.mmsi);
+  ack += ",x="     + doubleToString(c.x, 2);
+  ack += ",y="     + doubleToString(c.y, 2);
+  if(m_geodesy_ok) {
+#ifdef USE_UTM
+    if(m_geodesy.UTM2LatLong(c.x, c.y, lat, lon))
+#else
+    if(m_geodesy.LocalGrid2LatLong(c.x, c.y, lat, lon))
+#endif
+    {
+      ack += ",lat=" + doubleToString(lat, 8);
+      ack += ",lon=" + doubleToString(lon, 8);
+    }
+  }
+  ack += ",hdg=" + doubleToString(c.hdg, 1);
+  ack += ",spd=" + doubleToString(c.spd, 2);
+  ack += ",type=" + c.node_type;
+  ack += ",utc=" + doubleToString(MOOSTime(), 2);
+
+  m_last_spawn_msg = ack;
+  Notify("TRAFFIC_SPAWNED", ack);
+  postTargetList();
+  return(true);
+}
+
+//---------------------------------------------------------
+// Procedure: handleClearRequest()
+//   TRAFFIC_CLEAR = all | name=AIS366999901 | mmsi=366999901
+//
+//   Only ever removes runtime-spawned contacts, so clearing test targets can
+//   never take the mission file's scenario traffic with it.
+//
+//   NODE_REPORT has no delete, so removal is: stop publishing (the contact ages
+//   out of pContactMgrV20 via contact_max_age) and poke the contact manager's
+//   expunge variable, which tells the helm to end the avoidance behaviour now
+//   rather than leave it running against a contact that stopped reporting.
+
+bool TrafficSim::handleClearRequest(const string& value)
+{
+  string spec = stripBlankEnds(value);
+  string want_name;
+  unsigned int want_mmsi = 0;
+
+  if(tolower(spec) != "all") {
+    string line = spec;
+    string key  = tolower(biteStringX(line, '='));
+    if(key == "name")      want_name = line;
+    else if(key == "mmsi") want_mmsi = (unsigned int) atol(line.c_str());
+    else return(false);
+    if((want_name == "") && (want_mmsi == 0))
+      return(false);
+  }
+
+  vector<Contact> keep;
+  for(unsigned int i=0; i<m_contacts.size(); i++) {
+    const Contact& c = m_contacts[i];
+    bool match = c.runtime &&
+                 ((want_name == "" && want_mmsi == 0) ||
+                  (want_name != "" && c.vname == want_name) ||
+                  (want_mmsi != 0  && c.mmsi  == want_mmsi));
+    if(!match) {
+      keep.push_back(c);
+      continue;
+    }
+    if(m_expunge_var != "")
+      Notify(m_expunge_var, c.vname);
+    m_clears_made++;
+  }
+  m_contacts = keep;
+  postTargetList();
+  return(true);
+}
+
+//---------------------------------------------------------
+// Procedure: postTargetList()
+//   The runtime-spawned contacts, so the UI can show what is currently placed
+//   without having to track the spawn/clear traffic itself.
+
+void TrafficSim::postTargetList()
+{
+  string list;
+  for(unsigned int i=0; i<m_contacts.size(); i++) {
+    if(!m_contacts[i].runtime)
+      continue;
+    if(list != "")
+      list += ",";
+    list += m_contacts[i].vname;
+  }
+  Notify("TRAFFIC_TARGETS", list);
 }
 
 //---------------------------------------------------------
@@ -489,6 +827,15 @@ void TrafficSim::respawnRandom(Contact& c)
 
 void TrafficSim::advanceContact(Contact& c, double dt)
 {
+  // A target still making for the USV re-solves its intercept until it reaches
+  // the lock range, then holds course for the rest of the encounter.
+  if(c.aiming && m_ownship_known) {
+    if(hypot(c.x - m_ownship_x, c.y - m_ownship_y) > m_aim_lock_range)
+      c.hdg = interceptHeading(c.x, c.y, c.spd);
+    else
+      c.aiming = false;
+  }
+
   if(c.mode == MODE_LOOP && !c.loop_x.empty()) {
     double tx = c.loop_x[c.loop_idx % c.loop_x.size()];
     double ty = c.loop_y[c.loop_idx % c.loop_y.size()];
@@ -671,16 +1018,22 @@ bool TrafficSim::buildReport()
   m_msgs << "Ownship    : " << (m_ownship_known
             ? (doubleToString(m_ownship_x,1) + ", " + doubleToString(m_ownship_y,1))
             : string("(waiting for NAV_X/NAV_Y)")) << endl;
+  m_msgs << "Spawns     : " << uintToString(m_spawns_made) << " placed, "
+                            << uintToString(m_clears_made) << " cleared"
+                            << "   (block " << uintToString(m_spawn_mmsi_base) << "+)" << endl;
+  if(m_last_spawn_msg != "")
+    m_msgs << "Last spawn : " << m_last_spawn_msg << endl;
   m_msgs << endl;
 
-  ACTable actab(6);
-  actab << "VName | Name | MMSI | X | Y | Spd/Hdg";
+  ACTable actab(7);
+  actab << "VName | Name | MMSI | X | Y | Spd/Hdg | Src";
   actab.addHeaderLines();
   for(unsigned int i=0; i<m_contacts.size(); i++) {
     const Contact& c = m_contacts[i];
     actab << c.vname << c.label << uintToString(c.mmsi)
           << doubleToString(c.x, 1) << doubleToString(c.y, 1)
-          << (doubleToString(c.spd, 1) + " / " + doubleToString(c.hdg, 0));
+          << (doubleToString(c.spd, 1) + " / " + doubleToString(c.hdg, 0))
+          << (c.runtime ? "spawn" : "cfg");
   }
   m_msgs << actab.getFormattedString();
 

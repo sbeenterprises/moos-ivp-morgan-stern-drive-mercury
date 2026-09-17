@@ -118,6 +118,11 @@ class WebSocket : public AppCastingMOOSApp
   void handleSpeedKi(const std::string& value);
   void handleSpeedKd(const std::string& value);
   void handleServiceMode(const std::string& value);
+  void handleColavTest(const std::string& value);
+  void handlePutTarget(const std::string& value);
+  void handleClearTargets(const std::string& value);
+  void handleColavDist(const std::string& value);
+  void applyColavDist();
   void handleTrim(const std::string& value);
   void handleStationKeepWaypoint(const std::string& value);
   void handleHeartbeatPing(const std::string& value);

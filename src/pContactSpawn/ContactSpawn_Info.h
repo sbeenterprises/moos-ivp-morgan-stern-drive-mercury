@@ -1,5 +1,5 @@
 /****************************************************************/
-/*   NAME: Douglas Lima                                             */
+/*   NAME: DL                                                       */
 /*   ORGN: MIT, Cambridge MA                                    */
 /*   FILE: ContactSpawn_Info.h                                      */
 /*   DATE: Dececmber 29th, 1963                                 */

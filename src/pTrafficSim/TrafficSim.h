@@ -1,5 +1,5 @@
 /************************************************************/
-/*    NAME: Douglas Lima                                    */
+/*    NAME: DL                                              */
 /*    FILE: TrafficSim.h                                    */
 /*    DATE: 2026                                            */
 /*                                                          */
@@ -65,13 +65,34 @@ class TrafficSim : public AppCastingMOOSApp
     double       next_pos_post;    // next AIS message 1
     double       next_static_post; // next AIS message 5
 
+    // Spawned at runtime (TRAFFIC_SPAWN) rather than declared in the mission
+    // file. TRAFFIC_CLEAR only ever removes these, so a test target can never
+    // take the configured scenario contacts with it.
+    bool         runtime;
+
+    // Still steering for an intercept. A course solved once at spawn goes stale
+    // the moment the USV accelerates or turns onto its next leg, and the target
+    // then sails past a few hundred metres away without ever triggering the
+    // avoidance it was placed to test. So an at_ownship target keeps correcting
+    // while it is far out, and locks its course at aim_lock_range - well
+    // outside the behaviour's envelope, so everything the helm ever sees is a
+    // steady contact holding course and speed.
+    bool         aiming;
+
     Contact();
   };
 
   void   registerVariables();
 
+  bool   parseContactSpec(const std::string& value, Contact& c);
   bool   handleConfigContact(const std::string& value);
   bool   handleConfigLoop(const std::string& value);
+  bool   handleSpawnRequest(const std::string& value);
+  bool   handleClearRequest(const std::string& value);
+  void   postSpawnRefusal(const std::string& why);
+  void   postTargetList();
+  void   assignIdentity(Contact& c);
+  double interceptHeading(double cx, double cy, double spd) const;
   void   spawnRandomContacts();
   void   respawnRandom(Contact& c);
 
@@ -83,6 +104,7 @@ class TrafficSim : public AppCastingMOOSApp
   void   sendAis(const std::string& sentence);
 
   unsigned int nextMmsi();
+  unsigned int nextSpawnMmsi();
   static int   shipTypeToAisCode(const std::string& type);
 
  private: // Configuration
@@ -92,6 +114,20 @@ class TrafficSim : public AppCastingMOOSApp
   std::string  m_aivdm_host;
   int          m_aivdm_port;
   unsigned int m_mmsi_base;
+  // Runtime spawns draw from their own block so a click-placed target can never
+  // collide with an MMSI the mission file already handed to a scenario contact.
+  unsigned int m_spawn_mmsi_base;
+  // Poked with a cleared contact's name so pContactMgrV20 tells the helm to
+  // expunge the avoidance behaviour immediately, instead of leaving it running
+  // against a contact that has stopped reporting. Must match the mission file's
+  // pContactMgrV20 expunge_var; empty disables the post.
+  std::string  m_expunge_var;
+  // A target placed far outside the avoidance envelope would just sit there
+  // doing nothing, and a runaway caller could fill the fleet. Both refusals are
+  // reported back in the ack rather than failing silently.
+  double       m_spawn_max_range;
+  unsigned int m_max_runtime_contacts;
+  double       m_aim_lock_range;
 
   unsigned int m_random_count;
   double       m_random_radius;
@@ -110,8 +146,13 @@ class TrafficSim : public AppCastingMOOSApp
  private: // State
   std::vector<Contact> m_contacts;
   unsigned int         m_mmsi_next;
+  unsigned int         m_spawn_mmsi_next;
   double               m_ownship_x;
   double               m_ownship_y;
+  // Course and speed as well as position: a target aimed at where the USV is
+  // right now misses a moving boat, so hdg=at_ownship solves for an intercept.
+  double               m_ownship_hdg;
+  double               m_ownship_spd;
   bool                 m_ownship_known;
   double               m_last_iterate;
   bool                 m_random_spawned;
@@ -126,6 +167,10 @@ class TrafficSim : public AppCastingMOOSApp
   unsigned long m_aivdm_sent;
   unsigned long m_node_reports_sent;
   int           m_seq_id;
+
+  unsigned int  m_spawns_made;
+  unsigned int  m_clears_made;
+  std::string   m_last_spawn_msg;
 };
 
 #endif

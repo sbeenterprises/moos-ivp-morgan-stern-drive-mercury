@@ -37,6 +37,13 @@ ProcessConfig = ANTLER
   Run = pContactSpawn	      @ NewConsole = false
   Run = pTrafficSim   @ NewConsole = false
   Run = pContactMgrV20 @ NewConsole = false
+  Run = pColavEval    @ NewConsole = false
+  // Off: it needs a NODE_REPORT for ownship as well as for the contacts, and
+  // in this community pNodeReporter publishes the boat's own report as
+  // NODE_REPORT_LOCAL. Pointing it at NODE_REPORT instead would make
+  // pContactMgrV20 treat the boat as its own contact. See the config block
+  // below - pColavEval already folds UCD_REPORT in if it ever does run.
+  //Run = uFldCollisionDetect @ NewConsole = false
   Run = iMOOSGateway  @ NewConsole = false
   Run = iRadarTargets @ NewConsole = false
 }
@@ -79,6 +86,22 @@ ProcessConfig = pTrafficSim
   aivdm_port = 10112
   mmsi_base  = 366999000     // clearly fake MMSI block
 
+  // Targets placed at runtime from the UI (right-click > Put Target) draw from
+  // their own MMSI block, so AIS3669999xx is unambiguously a test target and
+  // can never collide with an MMSI handed to a scenario contact below.
+  spawn_mmsi_base      = 366999900
+  max_runtime_contacts = 8
+  spawn_max_range      = 10000   // metres from the USV; further just refuses
+  expunge_var          = XYZ_EXPUNGE_TARGET
+
+  // A target told to aim at the USV keeps correcting its intercept until it is
+  // this close, then locks course for the rest of the run. Well outside the
+  // behaviour's 300 m envelope, so the helm only ever sees a steady contact -
+  // but close enough that the encounter actually happens instead of the target
+  // sailing past a few hundred metres away because the boat accelerated after
+  // the course was first solved.
+  aim_lock_range       = 400
+
   position_interval = 1      // AIS msg 1 per contact, seconds
   static_interval   = 30     // AIS msg 5 per contact, seconds
 
@@ -89,20 +112,63 @@ ProcessConfig = pTrafficSim
   report_length = 60
 
   // (a) scripted contacts - deterministic, repeatable
-  // x/y are absolute MOOS grid metres. Two stationary contacts abeam of each
-  // other on the same heading, ~1 km ahead of uSimMarine's start_pos
-  // (x=-6289, y=400, heading=0) and offset to starboard: the pair sits 100 m
-  // further east again, and both now heading 218.7 - the reciprocal of the
-  // bearing from uSimMarine's start_pos to TARGET_BRAVO - so the USV closes
-  // BRAVO bow to bow (head-on) with ALPHA 200 m off its port side.
-  contact = name=TARGET_ALPHA, type=cargo, x=-5689, y=1400, hdg=218.7, spd=0, length=25, beam=9
-  contact = name=TARGET_BRAVO, type=cargo, x=-5489, y=1400, hdg=218.7, spd=0, length=25, beam=9
+  // Three targets laid out on uSimMarine's outbound track (start_pos
+  // x=-6289, y=400, heading 38.7): one dead ahead, one 300 m to starboard and
+  // one 300 m to port, all 2500 m out along the track to the northeast.
+  //
+  //                  PORT  *          * ALPHA          * STBD
+  //                   (-6.8 deg)      (dead ahead)      (+6.8 deg)
+  //                          \           |           /
+  //                           \          |          /   all three closing
+  //                            \         |         /    on hdg 218.7
+  //                                    [USV] hdg 38.7
+  //
+  // All three run the reciprocal heading (218.7) at 2.572 m/s = 5.0 knots -
+  // spd is in m/s, pTrafficSim converts to knots for the AIS SOG field. Because
+  // the tracks are parallel and opposing, each target holds its side of the
+  // track all the way in: ALPHA stays a head-on collision course, BRAVO passes
+  // 300 m down the starboard side and CHARLIE 300 m down the port side.
+  // For a crossing encounter instead, give a flanker hdg 308.7 (from starboard,
+  // USV gives way) or hdg 128.7 (from port, USV stands on).
+  contact = name=TARGET_ALPHA,   type=cargo, x=-4725.9, y=2351.1, hdg=218.7, spd=2.572, length=25, beam=9
+  contact = name=TARGET_BRAVO,   type=cargo, x=-4491.8, y=2163.5, hdg=218.7, spd=2.572, length=25, beam=9
+  contact = name=TARGET_CHARLIE, type=cargo, x=-4960.0, y=2538.6, hdg=218.7, spd=2.572, length=25, beam=9
 
-  // Previous mixed traffic - kept for reference, uncomment to restore
+  // Escort for the follow-by-AIS test (BHV_Trail / TRAIL_FOLLOW).
+  //
+  // Runs the SAME heading as the USV (38.7) instead of the reciprocal, so it
+  // passes down the starboard side and then stays ahead on a parallel track -
+  // something the boat can actually chase. Start is 250 m up the track and
+  // 120 m to starboard of start_pos (x=-6289, y=400):
+  //
+  //            ESCORT * -->  hdg 38.7, 3.0 m/s (5.8 kn)
+  //                    \  120 m to starboard, 250 m ahead
+  //             [USV] --/    hdg 38.7
+  //
+  // 3.0 m/s is well under the USV's 15 m/s top speed, so the trail closes.
+  // The mmsi is pinned (rather than auto-assigned from mmsi_base) so the UI
+  // always has the same target to click: pTrafficSim names the NODE_REPORT
+  // AIS366999777, which is exactly what
+  //   TRAIL_FOLLOW=mmsi=366999777#range=100#angle=180
+  // resolves to in iWebSocket.
+  contact = name=ESCORT_DELTA, type=tug, mmsi=366999777, x=-6039.0, y=520.1, hdg=38.7, spd=3.0, length=25, beam=9
+
+  // Same trio 1000 m out - closer start, wider relative bearings (+/-16.7 deg)
+  //contact = name=TARGET_ALPHA,   type=cargo, x=-5663.8, y=1180.4, hdg=218.7, spd=2.572, length=25, beam=9
+  //contact = name=TARGET_BRAVO,   type=cargo, x=-5429.6, y=992.9,  hdg=218.7, spd=2.572, length=25, beam=9
+  //contact = name=TARGET_CHARLIE, type=cargo, x=-5897.9, y=1368.0, hdg=218.7, spd=2.572, length=25, beam=9
+
+  // Previous setups - kept for reference, uncomment to restore
+  // Two stationary targets abeam of each other, head-on test:
+  //contact = name=TARGET_ALPHA, type=cargo, x=-5689, y=1400, hdg=218.7, spd=0, length=25, beam=9
+  //contact = name=TARGET_BRAVO, type=cargo, x=-5489, y=1400, hdg=218.7, spd=0, length=25, beam=9
+  // Single 5 kn tug just west of the USV:
+  //contact = name=TUG_CHARLIE, type=tug, x=-6650, y=400, hdg=270, spd=2.572, length=25, beam=9
+  // Original mixed traffic:
   //contact = name=TUG_ALPHA, type=tug, x=-6000, y=600, hdg=270, spd=4, length=25, beam=9
   //contact = name=FERRY_BRAVO, type=ferry, x=-6800, y=1000, hdg=90, spd=8, length=60, beam=14
 
-  // (b) random traffic around the USV - off, this test needs exactly 2 contacts
+  // (b) random traffic around the USV - off, this test needs exactly 3 contacts
   random_contacts = 0
   random_radius   = 1500
   random_spd_min  = 2
@@ -110,6 +176,67 @@ ProcessConfig = pTrafficSim
 
   // (c) closed-loop patrol - off for the same reason
   //loop = name=WORKBOAT_ECHO, type=cargo, spd=5, pts=-6000,200:-5600,200:-5600,800:-6000,800
+}
+
+// pColavEval Config Block
+//
+// Measures each avdcol_ encounter: how long the behaviour took to react, how
+// close it actually got, which COLREGS mode it chose, how far it deflected.
+// It needs the COLAV_BHV_* flags on the avdcol_ block in alpha.bhv - without
+// those it sees nothing.
+
+ProcessConfig = pColavEval
+{
+  AppTick   = 4
+  CommsTick = 4
+
+  // Verdict thresholds on the achieved closest range. Scaled to this boat and
+  // to the behaviour's own envelope (min_util_cpa_dist 100, pwt_outer 300),
+  // not to the shore-trial defaults uFldCollisionDetect ships with.
+  collision_range = 20
+  near_miss_range = 60
+
+  // How far the range must open again before the panel calls the CPA passed.
+  // The behaviour's own cpa_reached() is unlatched with a 5 cm threshold and
+  // runs on an extrapolated position, so it trips while the boat is still
+  // settling onto its leg; this is measured on real positions instead.
+  cpa_confirm     = 15
+
+  report_interval = 0.5
+  max_records     = 6
+
+  // Must match pTrafficSim's spawn_mmsi_base block, so a contact placed from
+  // the UI is told apart from the scenario traffic by its MMSI alone.
+  test_mmsi_low  = 366999900
+  test_mmsi_high = 366999999
+}
+
+// uFldCollisionDetect Config Block
+//
+// An independent second opinion on the achieved CPA: pColavEval folds
+// UCD_REPORT into its own record, so if the two ever disagree the panel shows
+// it rather than hiding it. Ranges are scaled up from the stock 3/6/10 m,
+// which are shore-trial numbers and meaningless for a 15 m/s USV.
+//
+// Not launched - see the note in the Antler block. It computes CPA between
+// pairs of NODE_REPORTs and never sees ownship here, so it would run and
+// report nothing. Kept configured so it is one line away if the ownship
+// report is ever bridged in.
+
+ProcessConfig = uFldCollisionDetect
+{
+  AppTick   = 4
+  CommsTick = 4
+
+  encounter_range = 400
+  near_miss_range = 60
+  collision_range = 20
+  swing_range     = 5
+
+  report_all_encounters = true
+  pulse_render          = true
+  pulse_range           = 60
+  pulse_duration        = 10
 }
 
 // iCANRec config block
@@ -162,6 +289,19 @@ ProcessConfig = iWebSocket
 {
    AppTick   = 20
    CommsTick = 20
+
+   // Collision avoidance envelope shown in the UI's Calibration tab. These
+   // must mirror the avdcol_ block in alpha.bhv: until the operator edits
+   // them the behaviour is running on its own configuration, and the panel is
+   // only reporting it. Editing them in the panel pushes the new values into
+   // every avdcol_ instance (and into pContactMgrV20's alert range) without
+   // relaunching the mission - but does not write them back here, so a
+   // relaunch returns to the .bhv values.
+   colav_pwt_outer_dist    = 300
+   colav_pwt_inner_dist    = 150
+   colav_completed_dist    = 1500
+   colav_min_util_cpa_dist = 100
+   colav_max_util_cpa_dist = 300
 }
 
 //------------------------------------------------
@@ -200,10 +340,20 @@ ProcessConfig = pLogger
   Log = SUMMARY @ 0 NOSYNC
 
   LogAuxSrc = true
+  // The collision avoidance result, and the same numbers in the stock spec so
+  // alogcd and alogeplot can read a finished run.
+  Log = COLAV_ENCOUNTER @ 0 NOSYNC
+  Log = ENCOUNTER_SUMMARY @ 0 NOSYNC
+  Log = COLLISION_DETECT_PARAMS @ 0 NOSYNC
+
   WildCardLogging = true
   WildCardOmitPattern = *_STATUS
   WildCardOmitPattern = DB_VARSUMMARY
   WildCardOmitPattern = DB_RWSUMMARY
+  // The live feed and the 4 Hz behaviour trace are for the panel, not the log -
+  // the per-encounter records above are what a run is analysed from.
+  WildCardOmitPattern = COLAV_METRICS
+  WildCardOmitPattern = COLAV_BHV_TRACE
   WildCardExclusionLog = true
 }
 
@@ -252,7 +402,9 @@ ProcessConfig = pHelmIvP
   ok_skew = any
   start_in_drive = true
   hold_on_apps = pContactMgrV20
-  ivp_behavior_dir = ../../lib 
+  // The IVP_BEHAVIOR_DIRS env var already points at this same directory, and
+  // loading it twice is a fatal "dangerously ambiguous" error in pHelmIvP.
+  //ivp_behavior_dir = ../../lib
 
 }
 
@@ -405,6 +557,11 @@ ProcessConfig = pContactMgrV20
 
   disable_var = XYZ_DISABLE_TARGET
   enable_var  = XYZ_REENABLE_TARGET
+  // pTrafficSim pokes this with a cleared target's name so the helm ends the
+  // avoidance behaviour immediately, instead of leaving it running against a
+  // contact that has simply stopped reporting. Needs can_disable=true on the
+  // avdcol_ block in alpha.bhv - without it the expunge is a silent no-op.
+  expunge_var = XYZ_EXPUNGE_TARGET
 	
 	post_closest_range   = true
   hold_alerts_for_helm = true

@@ -98,6 +98,46 @@ Behavior = BHV_AvdColregsV22
      max_util_cpa_dist = 300
              pwt_grade = linear
    bearing_line_config = white:0, green:0.65, yellow:0.8, red:1.0
+
+   // Lets pContactMgrV20's expunge_var end this instance on demand. Without it
+   // IvPContactBehavior::applyAbleFilter() returns immediately and the expunge
+   // is a silent no-op, so clearing a test target from the UI would leave the
+   // behaviour running against a contact that has stopped reporting.
+   can_disable = true
+
+   // Instrumentation for pColavEval. All one-shot except the trace at the
+   // bottom, which repeats while an instance runs. Deliberately no $[CPA]
+   // anywhere: it is accepted by postFlag() but never expanded, so it would
+   // post a silent 0.0 - predicted CPA is computed in pColavEval instead.
+   //
+   // spawnxflag fires once on the instance's first iteration, after
+   // updatePlatformInfo(), so the contact macros are already valid. (spawnflag
+   // fires earlier, before that, and its geometry is garbage.)
+   spawnxflag = COLAV_BHV_SPAWN=cn=$[CONTACT],utc=$[UTC],rng=$[RANGE],osx=$[OSX],osy=$[OSY],osh=$[OSH],osv=$[OSV],cnx=$[CNX],cny=$[CNY],cnh=$[CNH],cnv=$[CNV],oscn=$[OS_CN_REL_BNG],cnos=$[CN_OS_REL_BNG],roc=$[ROC]
+
+   // Fires on each transition into ACTIVE - the moment the behaviour first
+   // hands the helm an objective function, i.e. the real reaction instant.
+   activeflag = COLAV_BHV_ACTIVE=cn=$[CONTACT],utc=$[UTC],rng=$[RANGE],mode=$[FULL_MODE],apwt=$[APWT],osh=$[OSH],roc=$[ROC],bngrate=$[BNG_RATE]
+
+   // The behaviour already detects its own CPA turn-over (ContactStateSet::
+   // cpa_reached), so the panel can show a provisional result there rather than
+   // waiting out completed_dist*1.1 = 1650 m for the instance to die.
+   cnflag = @cpa COLAV_BHV_CPA=cn=$[CONTACT],utc=$[UTC],rng=$[RANGE],mode=$[FULL_MODE],osh=$[OSH],oscn=$[OS_CN_REL_BNG],cnos=$[CN_OS_REL_BNG]
+
+   // Closes the active span, so active duration is time actually influencing
+   // the helm rather than wall-clock from first reaction to death.
+   inactiveflag = COLAV_BHV_INACTIVE=cn=$[CONTACT],utc=$[UTC],rng=$[RANGE],mode=$[FULL_MODE]
+
+   endflag = COLAV_BHV_END=cn=$[CONTACT],utc=$[UTC],rng=$[RANGE],mode=$[FULL_MODE],dur=$[DUR_RUN_TIME],osh=$[OSH]
+
+   // One post per contact per helm iteration (4 Hz here) while an instance is
+   // running. It used to be gated on COLAV_TEST, but the COLREGS box the UI
+   // draws over the boat is fed from this: the mode is only re-reported on an
+   // ACTIVE/INACTIVE/CPA transition otherwise, so a mode that changes while
+   // the behaviour stays active - giveway stern to bow, or standon going
+   // inextremis, which is the one the operator most needs to see - would never
+   // reach the chart.
+   runxflag = COLAV_BHV_TRACE=cn=$[CONTACT],utc=$[UTC],rng=$[RANGE],mode=$[FULL_MODE],apwt=$[APWT],osh=$[OSH],roc=$[ROC]
 }
 
 //----------------------------------------------

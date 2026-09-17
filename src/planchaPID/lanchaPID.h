@@ -1,5 +1,5 @@
 /************************************************************/
-/*    NAME: Douglas Lima, Eduardo Eiras                                */
+/*    NAME: DL, Eduardo Eiras                                          */
 /*    ORGN: MIT, Cambridge MA                               */
 /*    FILE: lanchaPID.h                                     */
 /*    DATE: December 29th, 1963                             */

@@ -69,6 +69,32 @@ std::string pid_gains; // Gains planchaPID is actually applying (see PID_GAINS)
 bool trailing = false;
 std::string trail_updates;
 
+// Collision avoidance test state. COLAV_TEST is the request echo; the ack comes
+// from pColavEval and is what actually proves an evaluator is running, so the
+// UI toggle follows the ack rather than its own optimism.
+bool colav_test = false;
+bool colav_test_ack = false;
+std::string colav_metrics;    // JSON array of encounters, latest value only
+std::string traffic_spawned;  // last pTrafficSim ack, ok=true/false
+std::string traffic_targets;  // runtime-spawned contacts currently placed
+
+// Engagement distances of the collision avoidance behaviour (BHV_AvdColregsV22,
+// the avdcol_ block in alpha.bhv). Seeded here with the mission values and
+// overridable from the iWebSocket config block, then owned by this app: the UI
+// edits them, applyColavDist() pushes them into the behaviour, and every
+// spawned instance is brought up to date the same way. Metres.
+double colav_outer     = 300;   // pwt_outer_dist
+double colav_inner     = 150;   // pwt_inner_dist
+double colav_completed = 1500;  // completed_dist
+double colav_min_cpa   = 100;   // min_util_cpa_dist
+double colav_max_cpa   = 300;   // max_util_cpa_dist
+std::string colav_dist;         // the set as last applied, echoed to the UI
+
+// A behaviour instance is built from the template, so it comes up with the
+// values in alpha.bhv rather than the ones in force. Its spawnxflag lands here
+// and the set is pushed again on the next tick.
+bool colav_respawn_seen = false;
+
 // NODE_REPORT contact variables
 std::string contact_name = "";
 double contact_lat = 0;
@@ -282,6 +308,18 @@ bool WebSocket::OnNewMail(MOOSMSG_LIST &NewMail)
       trailing = (msg.GetString() == "true");
     else if(key == "TRAIL_UPDATES")
       trail_updates = msg.GetString();
+    else if(key == "COLAV_TEST")
+      colav_test = (msg.GetString() == "true");
+    else if(key == "COLAV_TEST_ACK")
+      colav_test_ack = (msg.GetString() == "true");
+    else if(key == "COLAV_METRICS")
+      colav_metrics = msg.GetString();
+    else if(key == "TRAFFIC_SPAWNED")
+      traffic_spawned = msg.GetString();
+    else if(key == "TRAFFIC_TARGETS")
+      traffic_targets = msg.GetString();
+    else if(key == "COLAV_BHV_SPAWN")
+      colav_respawn_seen = true;
     else if(key == "NODE_REPORT") {
       // Parse NODE_REPORT to extract NAME, X, Y, SPD, HDG
       std::string node_report = msg.GetString();
@@ -429,6 +467,14 @@ bool WebSocket::Iterate()
     }
   }
 
+  // A fresh avdcol_ instance carries the template's distances, not the ones
+  // the operator set. Push them again so a contact that spawned a behaviour is
+  // avoided with the same envelope as the one before it.
+  if (colav_respawn_seen) {
+    colav_respawn_seen = false;
+    applyColavDist();
+  }
+
   // If you have pending messages to send
   //Send messages to the websocket in FreeboardSK
   //SendMessage("NAV_LAT=50.0"); // Exemplo de envio de mensagem
@@ -469,6 +515,12 @@ bool WebSocket::Iterate()
   root["PID_GAINS"] = pid_gains;
   root["TRAILING"] = trailing;
   root["TRAIL_UPDATES"] = trail_updates;
+  root["COLAV_TEST"] = colav_test;
+  root["COLAV_TEST_ACK"] = colav_test_ack;
+  root["COLAV_METRICS"] = colav_metrics;
+  root["TRAFFIC_SPAWNED"] = traffic_spawned;
+  root["TRAFFIC_TARGETS"] = traffic_targets;
+  root["COLAV_DIST"] = colav_dist;
 
   // Add contact info as nested object
   Json::Value contact;
@@ -509,7 +561,31 @@ bool WebSocket::OnStartUp()
     string value = line;
 
     bool handled = false;
-    if(param == "foo") {
+    // Startup state of the collision avoidance envelope. These have to mirror
+    // the avdcol_ block in the .bhv file: until the operator touches the panel
+    // the behaviour is running on its own configuration, and what is reported
+    // to the UI has to be the truth about it, not a second opinion.
+    if(param == "colav_pwt_outer_dist" && isNumber(value)) {
+      colav_outer = atof(value.c_str());
+      handled = true;
+    }
+    else if(param == "colav_pwt_inner_dist" && isNumber(value)) {
+      colav_inner = atof(value.c_str());
+      handled = true;
+    }
+    else if(param == "colav_completed_dist" && isNumber(value)) {
+      colav_completed = atof(value.c_str());
+      handled = true;
+    }
+    else if(param == "colav_min_util_cpa_dist" && isNumber(value)) {
+      colav_min_cpa = atof(value.c_str());
+      handled = true;
+    }
+    else if(param == "colav_max_util_cpa_dist" && isNumber(value)) {
+      colav_max_cpa = atof(value.c_str());
+      handled = true;
+    }
+    else if(param == "foo") {
       handled = true;
     }
     else if(param == "bar") {
@@ -519,6 +595,18 @@ bool WebSocket::OnStartUp()
     if(!handled)
       reportUnhandledConfigWarning(orig);
   }
+
+  // Not applied to the behaviour here - at this point it is only what the
+  // .bhv is expected to hold. It gives the UI and the log a starting value;
+  // the first edit from the panel is what actually pushes anything.
+  std::ostringstream echo;
+  echo << std::fixed << std::setprecision(1)
+       << "pwt_outer_dist=" << colav_outer
+       << ",pwt_inner_dist=" << colav_inner
+       << ",completed_dist=" << colav_completed
+       << ",min_util_cpa_dist=" << colav_min_cpa
+       << ",max_util_cpa_dist=" << colav_max_cpa;
+  colav_dist = echo.str();
 
   // Registra variáveis no MOOS, se necessário
   registerVariables();	
@@ -569,6 +657,12 @@ void WebSocket::registerVariables()
   Register("PID_GAINS", 0); //Gains planchaPID is currently applying
   Register("TRAILING", 0); //Follow-a-contact behaviour active
   Register("TRAIL_UPDATES", 0); //Contact/range/angle the trail behaviour is using
+  Register("COLAV_TEST", 0);      //Collision avoidance test mode, request echo
+  Register("COLAV_TEST_ACK", 0);  //...confirmed by pColavEval
+  Register("COLAV_METRICS", 0);   //Live + recent encounter records, JSON
+  Register("TRAFFIC_SPAWNED", 0); //pTrafficSim ack for a placed target
+  Register("TRAFFIC_TARGETS", 0); //Runtime-spawned contacts currently placed
+  Register("COLAV_BHV_SPAWN", 0); //An avdcol_ instance was just spawned
 
 }
 
@@ -651,6 +745,10 @@ void WebSocket::initializeMessageHandlers()
   m_messageHandlers["REGION_UPDATES"] = &WebSocket::handleRegionUpdates;
   m_messageHandlers["REGION"] = &WebSocket::handleRegion;
   m_messageHandlers["TRAIL_FOLLOW"] = &WebSocket::handleTrailFollow;
+  m_messageHandlers["COLAV_TEST"] = &WebSocket::handleColavTest;
+  m_messageHandlers["PUT_TARGET"] = &WebSocket::handlePutTarget;
+  m_messageHandlers["CLEAR_TARGETS"] = &WebSocket::handleClearTargets;
+  m_messageHandlers["COLAV_DIST"] = &WebSocket::handleColavDist;
 }
 
 //---------------------------------------------------------
@@ -715,6 +813,215 @@ void WebSocket::handleTrailFollow(const std::string& value)
   Notify("TRAIL_UPDATES", updates);
   Notify("TRAILING", "true");
   std::cout << "[TRAIL_FOLLOW] " << updates << std::endl;
+}
+
+//---------------------------------------------------------
+// Procedure: handleColavTest()
+//   COLAV_TEST=true|false
+//
+//   Turning the test off also clears whatever targets are still out there -
+//   leaving simulated AIS traffic running after the operator has closed the
+//   test panel is how a test target ends up mistaken for real traffic.
+
+void WebSocket::handleColavTest(const std::string& value)
+{
+  if (value == "true") {
+    Notify("COLAV_TEST", "true");
+  } else if (value == "false") {
+    Notify("COLAV_TEST", "false");
+    Notify("TRAFFIC_CLEAR", "all");
+  }
+}
+
+//---------------------------------------------------------
+// Procedure: handlePutTarget()
+//   PUT_TARGET=lat=29.7231#lon=-91.1102#course=at_usv#speed=5.0#type=cargo
+//
+//   The UI thinks in lat/lon and knots; pTrafficSim thinks in the MOOS local
+//   grid and m/s. This is the only place that conversion happens.
+//
+//   course=at_usv is passed through as hdg=at_ownship rather than resolved
+//   here: pTrafficSim knows where the boat is at the instant it creates the
+//   contact, and a heading computed one websocket round trip earlier would be
+//   subtly stale.
+
+void WebSocket::handlePutTarget(const std::string& value)
+{
+  static constexpr double kLatOrigin = 29.71970895316288;
+  static constexpr double kLonOrigin = -91.14705165281887;
+  m_geodesy.Initialise(kLatOrigin, kLonOrigin);
+
+  std::string lat_s, lon_s, course_s, speed_s, type_s, length_s, beam_s;
+
+  std::stringstream ss(value);
+  std::string token;
+  while (std::getline(ss, token, '#')) {
+    size_t eq = token.find('=');
+    if (eq == std::string::npos)
+      continue;
+    std::string k = token.substr(0, eq);
+    std::string v = token.substr(eq + 1);
+    if (k == "lat")          lat_s = v;
+    else if (k == "lon")     lon_s = v;
+    else if (k == "course")  course_s = v;
+    else if (k == "speed")   speed_s = v;
+    else if (k == "type")    type_s = v;
+    else if (k == "length")  length_s = v;
+    else if (k == "beam")    beam_s = v;
+  }
+
+  if (lat_s.empty() || lon_s.empty()) {
+    std::cerr << "[PUT_TARGET] no lat/lon in: " << value << std::endl;
+    return;
+  }
+
+  double lat = 0, lon = 0, speed_kts = 5.0;
+  try {
+    lat = std::stod(lat_s);
+    lon = std::stod(lon_s);
+    if (!speed_s.empty())
+      speed_kts = std::stod(speed_s);
+  }
+  catch (const std::exception& e) {
+    std::cerr << "[PUT_TARGET] parse error in: " << value << std::endl;
+    return;
+  }
+
+  if (lat < -90.0 || lat > 90.0 || lon < -180.0 || lon > 180.0) {
+    std::cerr << "[PUT_TARGET] out-of-range coords: " << lat << "," << lon << std::endl;
+    return;
+  }
+
+  // LatLong2LocalUTM returns north before east - the (y, x) argument order here
+  // is correct, not a bug. USE_UTM is ON for this build, which is what makes
+  // this the matching inverse of pTrafficSim's UTM2LatLong.
+  double localY = 0.0, localX = 0.0;
+  m_geodesy.LatLong2LocalUTM(lat, lon, localY, localX);
+
+  std::ostringstream oss;
+  oss << std::fixed << std::setprecision(2)
+      << "x=" << localX << ",y=" << localY;
+  oss << ",hdg=" << ((course_s == "at_usv" || course_s.empty()) ? "at_ownship" : course_s);
+  oss << ",spd=" << (speed_kts / 1.94384);          // knots -> m/s
+  oss << ",type=" << (type_s.empty() ? "cargo" : type_s);
+  if (!length_s.empty()) oss << ",length=" << length_s;
+  if (!beam_s.empty())   oss << ",beam=" << beam_s;
+
+  Notify("TRAFFIC_SPAWN", oss.str());
+  std::cout << "[PUT_TARGET] " << oss.str() << std::endl;
+}
+
+//---------------------------------------------------------
+// Procedure: handleColavDist()
+//   COLAV_DIST=pwt_outer_dist=300#pwt_inner_dist=150#completed_dist=1500
+//              #max_util_cpa_dist=300#min_util_cpa_dist=100
+//
+//   The engagement distances of the collision avoidance behaviour, edited from
+//   the Calibration tab. Only the five distances are accepted - this is not a
+//   general back door into the behaviour's parameter set.
+
+void WebSocket::handleColavDist(const std::string& value)
+{
+  double outer = colav_outer, inner = colav_inner, completed = colav_completed;
+  double min_cpa = colav_min_cpa, max_cpa = colav_max_cpa;
+
+  std::stringstream ss(value);
+  std::string token;
+  while (std::getline(ss, token, '#')) {
+    size_t eq = token.find('=');
+    if (eq == std::string::npos)
+      continue;
+    std::string k = token.substr(0, eq);
+    double v = 0;
+    try {
+      v = std::stod(token.substr(eq + 1));
+    }
+    catch (const std::exception& e) {
+      std::cerr << "[COLAV_DIST] parse error in: " << token << std::endl;
+      return;
+    }
+    if (v < 0)
+      continue;
+
+    if (k == "pwt_outer_dist")           outer = v;
+    else if (k == "pwt_inner_dist")      inner = v;
+    else if (k == "completed_dist")      completed = v;
+    else if (k == "min_util_cpa_dist")   min_cpa = v;
+    else if (k == "max_util_cpa_dist")   max_cpa = v;
+  }
+
+  // The behaviour clamps these pairs itself and would silently drag the
+  // partner value; do it here instead so what goes out is what comes back.
+  if (inner > outer)         inner = outer;
+  if (completed < outer)     completed = outer;
+  if (min_cpa > max_cpa)     min_cpa = max_cpa;
+
+  colav_outer     = outer;
+  colav_inner     = inner;
+  colav_completed = completed;
+  colav_min_cpa   = min_cpa;
+  colav_max_cpa   = max_cpa;
+
+  applyColavDist();
+}
+
+//---------------------------------------------------------
+// Procedure: applyColavDist()
+//   Push the distances into the running avdcol_ instances and echo back what
+//   is now in force.
+//
+//   Three postings, and all three are needed:
+//
+//   1. The behaviour's updates variable. No "name=" field, so it reaches every
+//      spawned instance rather than one contact's. It must also stay clear of
+//      the substring "name" altogether - BehaviorSpec::checkForSpawningStrings
+//      tests for that substring, not for "name=", and would read the update as
+//      a spawn request.
+//
+//   2. pContactMgrV20's alert range, which the behaviour set from its own
+//      pwt_outer_dist/completed_dist at helm start and never revisits. Without
+//      this a contact is not alerted until the old range, so the helm would
+//      spawn the behaviour too late to avoid at the new distance.
+//
+//   3. COLAV_DIST, for the UI and the mission log.
+
+void WebSocket::applyColavDist()
+{
+  std::ostringstream upd;
+  upd << std::fixed << std::setprecision(1)
+      << "pwt_outer_dist=" << colav_outer
+      << "#pwt_inner_dist=" << colav_inner
+      << "#completed_dist=" << colav_completed
+      << "#max_util_cpa_dist=" << colav_max_cpa
+      << "#min_util_cpa_dist=" << colav_min_cpa;
+  Notify("CONTACT_INFO", upd.str());
+
+  std::ostringstream alert;
+  alert << std::fixed << std::setprecision(1)
+        << "id=avdcol_, alert_range=" << colav_outer
+        << ", cpa_range=" << colav_completed;
+  Notify("BCM_ALERT_REQUEST", alert.str());
+
+  std::ostringstream echo;
+  echo << std::fixed << std::setprecision(1)
+       << "pwt_outer_dist=" << colav_outer
+       << ",pwt_inner_dist=" << colav_inner
+       << ",completed_dist=" << colav_completed
+       << ",min_util_cpa_dist=" << colav_min_cpa
+       << ",max_util_cpa_dist=" << colav_max_cpa;
+  colav_dist = echo.str();
+  Notify("COLAV_DIST", colav_dist);
+
+  std::cout << "[COLAV_DIST] " << colav_dist << std::endl;
+}
+
+//---------------------------------------------------------
+// Procedure: handleClearTargets()
+//   CLEAR_TARGETS=all | CLEAR_TARGETS=name=AIS366999901
+
+void WebSocket::handleClearTargets(const std::string& value)
+{
+  Notify("TRAFFIC_CLEAR", value.empty() ? "all" : value);
 }
 
 void WebSocket::handleTrim(const std::string& value)
