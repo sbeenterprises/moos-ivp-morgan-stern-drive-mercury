@@ -13,6 +13,8 @@
 The moos-ivp-morgan-stern-drive-mercury repository contains the backend code used in the USV produced by SwiftShips, all based in the MOOS-IvP
 Autonomy system. 
 
+All the backend is based in the MOOS-IvP structure that you can lookup in MIT documentation (https://oceanai.mit.edu/moos-ivp/pmwiki/pmwiki.php?n=Main.HomePage).
+
 # Directory Structure
 
 The directory structure for the moos-ivp-extend is described below:
