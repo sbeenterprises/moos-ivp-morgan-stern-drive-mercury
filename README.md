@@ -1,18 +1,17 @@
-# USV
-# moos-ivp-extend
+# Documentation of the backend code of the SwiftShips USV
+# moos-ivp-morgan-stern-drive-mercury
 
 |              |                        |
 |:------------ |:---------------------- |
-| FILE:        | moos-ivp-extend/README |
-| DATE:        | 2014/01/02             |
-| DESCRIPTION: | Contains important information regarding the moos-ivp-extend repository. |
+| FILE:        | moos-ivp-morgan-stern-drive-mercury/README |
+| DATE:        | 2026            |
+| DESCRIPTION: | Contains important information regarding the moos-ivp-morgan-stern-drive-mercury repository. |
 
 
 # Introduction
 
-The moos-ivp-extend repository contains examples for extending the MOOS-IvP
-Autonomy system. This includes a MOOS application and an IvP behavior.
-
+The moos-ivp-morgan-stern-drive-mercury repository contains the backend code used in the USV produced by SwiftShips, all based in the MOOS-IvP
+Autonomy system. 
 
 # Directory Structure
 
@@ -31,6 +30,22 @@ The directory structure for the moos-ivp-extend is described below:
 | scripts          | Directory for script files                  |
 | src              | Directory for source code                   |
 
+Inside the src folder (That is one of the most important folder of the directory) you have the following:
+
+| Directory        | Description                                 |
+|:---------------- |:------------------------------------------- |
+| iCAN              | App responsible for sending CAN messages through the CAN BUS    |
+| iCANREC            | App that receives data from CAN bus and decode the messages coming from the engine            |
+| IDivisorNMEA   | Parsing of NMEA messages    |
+| iNMEA             | Send NMEA messages to signalk when running in simulated mode                  |
+| iRadarTargets              | MOOS application to receive radar target data via UDP from NMEA $RATTM (Tracked Target Message) sentences and publish them as NODE_REPORT messages to the MOOSDB.       |
+| iWebSocket          | App that makes the connection with the frontend                  |
+| pColavEval              | App to determine metrics for collision avoidance with USVs                   |
+| pContactSpawn            | Directory for build object files            |
+| pSensorFusionTracker         | App used for fusion of contacts coming from camera, radar and ais         |
+| pTrafficSim             | Simulator for AIS contacts                  |
+| pVisionDetector              | Detects targets through the camera and feeds the pHelmIvP       |
+| planchaPID              | PID Controller of the vehicle                   |
 
 # Useful Commands
 ```bash
@@ -90,31 +105,6 @@ within this directory:
 ```
 
 
-## Windows Users
-
-To build on Windows platform, open CMake using your favorite shortcut. Then
-set the source directory to be this directory and set the build directory
-to the "build" directory inside this directory.
-
-The source directory is typically next to the question:
-   "Where is the source code?"
-
-The build directory is typically next to the question:
-   "Where to build the binaries?"
-
-Alternatively, CMake can be invoked via the command line. However, you must
-specify your generator. Use "cmake --help" for a list of generators and
-additional help.
-
-
-# Environment variables
-
-The moos-ivp-extend binaries files should be added to your path to allow them
-to be launched from pAntler.
-
-In order for generated IvP Behaviors to be recognized by the IvP Helm, you
-should add the library directory to the "IVP_BEHAVIOR_DIRS" environment
-variable.
 
 # END of README
 
