@@ -9,6 +9,7 @@
 #include <cstring>
 #include <thread>
 #include <chrono>
+#include <cmath>
 #include "MBUtils.h"
 #include "ACTable.h"
 #include "CAN.h"
@@ -187,7 +188,7 @@ bool CAN::buildReport()
   else if(m_desired_rudder > 0) direction = "RIGHT";
   
   m_msgs << "Rudder Direction: " << direction << endl;
-  m_msgs << "Rudder Percentage: " << abs((int)m_desired_rudder) << "%" << endl;
+  m_msgs << "Rudder Percentage (sent): " << std::labs(std::lround(m_desired_rudder)) << "%" << endl;
   m_msgs << endl;
 
   // Thrust Information
@@ -246,13 +247,22 @@ bool CAN::initCAN()
 
 string CAN::getRudderCANFrame(double rudder_value)
 {
-  if(rudder_value == 0) {
+  // Round to the nearest 1 % step. The old (int) cast truncated toward zero,
+  // so every command between -1 % and +1 % was sent as centre: at speed
+  // (heading KP ~0.12 %/deg) heading errors up to ~8 deg gave no rudder.
+  // Changed 2026-10-09. NaN is treated as centre.
+  if(!std::isfinite(rudder_value))
+    return "18F30A1A#0000FFFFFF1AFD";
+  if(rudder_value > 100.0)  rudder_value = 100.0;
+  if(rudder_value < -100.0) rudder_value = -100.0;
+  long rounded = std::lround(rudder_value);
+
+  if(rounded == 0) {
     return "18F30A1A#0000FFFFFF1AFD";
   }
   
-  if(rudder_value < 0) {
-    int percent = (int)(-rudder_value);
-    if(percent > 100) percent = 100;
+  if(rounded < 0) {
+    int percent = (int)(-rounded);
     
     string left_frames[] = {
       "18F30A1A#FF9DFFFFFFFFE5", "18F30A1A#FF3AFFFFFFFFE5", "18F30A1A#FED7FFFFFFFFE5", "18F30A1A#FE74FFFFFFFFE5", "18F30A1A#FE11FFFFFFFFE5",
@@ -281,8 +291,7 @@ string CAN::getRudderCANFrame(double rudder_value)
       return left_frames[percent-1];
     }
   } else {
-    int percent = (int)rudder_value;
-    if(percent > 100) percent = 100;
+    int percent = (int)rounded;
     
     string right_frames[] = {
       "18F30A1A#01B9FFFFFF1AFD", "18F30A1A#021AFFFFFF1AFD", "18F30A1A#027AFFFFFF1AFD", "18F30A1A#02DAFFFFFF1AFD", "18F30A1A#033BFFFFFF1AFD",

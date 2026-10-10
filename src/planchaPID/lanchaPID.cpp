@@ -544,8 +544,11 @@ bool lanchaPID::Iterate()
   AppCastingMOOSApp::Iterate();
 
   // Loop de controle
-
-  desired_thrust = speedController.Calculate(desired_speed, nav_speed,dt);
+  // NOTE: the speed loop runs only through CalculateSpeed() below. It used to
+  // be run through the heading routine Calculate() first as well, which
+  // clamped the speed integral to +/-20 every tick (so the I-term could add
+  // at most ~0.1 % thrust) and reset prevError (so the speed D-term was
+  // always zero). Removed 2026-10-09.
 
   // Calcule o controle de rumo
   //Caso o rumo constante esteja ativado o setpoint vai ser esse rumo
