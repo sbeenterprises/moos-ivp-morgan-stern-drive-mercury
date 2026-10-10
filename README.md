@@ -60,6 +60,10 @@ sudo ip link set slcan0 up
 # Restart satelital antenna
 printf '$VNRST*4D\r\n' | sudo tee /dev/ttyUSB1
 ```
+# Reset VectorNav INS/GNSS
+PORT=/dev/serial/by-id/usb-FTDI_USB-RS232_Cable_AU04Q2FP-if00-port0
+sudo stty -F $PORT 115200 raw -echo
+printf '$VNRST*4D\r\n' | sudo tee $PORT > /dev/null
 
 # Build Instructions
 
