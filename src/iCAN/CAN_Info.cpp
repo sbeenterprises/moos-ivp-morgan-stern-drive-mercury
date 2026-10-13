@@ -81,6 +81,7 @@ void showExampleConfigAndExit()
   blk("  can_interface = slcan0      // default: from the profile        ");
   blk("  manual_sources   = iWebSocket                                   ");
   blk("  autonomy_sources = planchaPID, pHelmIvP, iWebSocket             ");
+  blk("  trim_sources     = iWebSocket                                   ");
   blk("  link_stale_secs  = 3        // UI_LINK_OK older than this = lost");
   blk("}                                                               ");
   blk("                                                                ");
@@ -107,6 +108,7 @@ void showInterfaceAndExit()
   blk("  MOOS_MANUAL_OVERRIDE = true (SS UI owns the drive) / false     ");
   blk("  UI_LINK_OK           = true/false, posted by iWebSocket        ");
   blk("  CAN_SEND             = true/false, transmit enable             ");
+  blk("  TRIM                 = 1 up pulse, -1 down pulse, 0 stop       ");
   blk("                                                                ");
   blk("PUBLICATIONS:                                                   ");
   blk("------------------------------------                            ");
@@ -115,7 +117,8 @@ void showInterfaceAndExit()
   blk("  CAN_LOST_LINK        = true/false                              ");
   blk("  CAN_CONFLICT         = none | names of messages not sent       ");
   blk("                         because another node sends the same ID ");
-  blk("  CAN_TX_RUDDER_PCT, CAN_TX_THRUST_PCT, CAN_TX_GEAR              ");
+  blk("  CAN_TX_RUDDER_PCT, CAN_TX_THRUST_PCT, CAN_TX_GEAR,             ");
+  blk("  CAN_TRIM_STATE (up | down | idle)                              ");
   blk("                       = what is actually being sent             ");
   blk("  CAN_RUDDER_MISMATCH  = true when rudder feedback disagrees     ");
   blk("  CAN_PROFILE, CAN_PROFILE_HASH                                  ");

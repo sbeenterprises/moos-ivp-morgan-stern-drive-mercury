@@ -120,7 +120,7 @@ WebSocket::WebSocket()
 
   const char* can_vars[] = {"CAN_STATUS", "CAN_CONTROL_OWNER", "CAN_LOST_LINK",
                             "CAN_CONFLICT", "CAN_TX_RUDDER_PCT", "CAN_TX_THRUST_PCT",
-                            "CAN_TX_GEAR", "CAN_RUDDER_MISMATCH", "CAN_PROFILE",
+                            "CAN_TX_GEAR", "CAN_TRIM_STATE", "CAN_RUDDER_MISMATCH", "CAN_PROFILE",
                             "CAN_RUDDER_ACTUAL_PCT", "CAN_HELM_HAS_STEERING",
                             "CAN_ENGINE_GEAR", "CAN_ENGINE_THROTTLE_PCT", "CAN_FUEL_PCT"};
   for (size_t i = 0; i < sizeof(can_vars) / sizeof(can_vars[0]); i++)
@@ -1071,10 +1071,15 @@ void WebSocket::handleClearTargets(const std::string& value)
   Notify("TRAFFIC_CLEAR", value.empty() ? "all" : value);
 }
 
+// TRIM=1 one trim-up pulse, TRIM=-1 one trim-down pulse, TRIM=0 stop.
+// iCAN turns each command into a short timed pulse (profile settings).
 void WebSocket::handleTrim(const std::string& value)
 {
-  double value_trim = std::stod(value);
-  Notify("TRIM", value_trim);
+  if (!isNumber(value)) {
+    reportRunWarning("TRIM ignored, not a number: " + value);
+    return;
+  }
+  Notify("TRIM", atof(value.c_str()));
 }
 
 void WebSocket::handleControleManual(const std::string& value)

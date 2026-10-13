@@ -19,8 +19,10 @@
 namespace canprofile {
 
 enum Gear { GEAR_NEUTRAL = 0, GEAR_FWD = 1, GEAR_REV = -1 };
+enum Trim { TRIM_IDLE = 0, TRIM_UP = 1, TRIM_DOWN = -1 };
 
 std::string gearName(Gear gear);   // "fwd" | "neutral" | "rev"
+std::string trimName(Trim trim);   // "up" | "down" | "idle"
 
 // What the drive layer has decided to send this tick, after limits,
 // ownership and the shift interlock have been applied.
@@ -28,7 +30,8 @@ struct DriveCommand {
   double rudder_pct;   // -100 port .. +100 starboard
   double thrust_pct;   // -100 astern .. +100 ahead
   Gear   gear;
-  DriveCommand() : rudder_pct(0), thrust_pct(0), gear(GEAR_NEUTRAL) {}
+  Trim   trim;         // active trim pulse, TRIM_IDLE when none
+  DriveCommand() : rudder_pct(0), thrust_pct(0), gear(GEAR_NEUTRAL), trim(TRIM_IDLE) {}
 };
 
 struct Frame {
@@ -44,7 +47,7 @@ struct Frame {
 struct Point { double x; double y; };
 
 struct TxField {
-  std::string src;      // rudder_pct | rudder_side | thrust_pct | thrust_abs_pct | gear
+  std::string src;      // rudder_pct | rudder_side | thrust_pct | thrust_abs_pct | gear | trim
   int         byte;     // first byte
   int         bits;     // 8, 16, 24 or 32
   bool        big_endian;
@@ -66,7 +69,7 @@ struct TxConst {
 
 struct TxMsg {
   std::string name;
-  std::string cap;      // steer | thrust
+  std::string cap;      // steer | thrust | trim
   uint32_t    id;
   bool        ext;
   int         dlc;
@@ -137,6 +140,10 @@ class Profile {
   // True if a received frame uses the ID of one of our tx messages
   // (meaning another node is transmitting it).
   bool isTxId(uint32_t id, bool ext, std::string& msg_name) const;
+
+  // True if this (cap=trim) message defines an idle value, i.e. a frame
+  // that stops the trim motor. Without one, nothing is sent after a pulse.
+  bool hasTrimIdle(const TxMsg& msg) const;
 
  private:
   void   parseLine(const std::string& key, const std::string& val, int lineno);

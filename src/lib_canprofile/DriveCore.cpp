@@ -47,6 +47,10 @@ DriveCore::DriveCore()
   m_thrust_rate  = 0;
   m_lost_rudder  = 0;
   m_lost_thrust  = 0;
+  m_trim_up_secs   = 1.0;
+  m_trim_down_secs = 1.0;
+  m_trim         = TRIM_IDLE;
+  m_trim_end     = 0;
 }
 
 void DriveCore::configure(const Profile& p)
@@ -60,6 +64,8 @@ void DriveCore::configure(const Profile& p)
   m_thrust_rate  = p.setting("thrust_rate_pct_s");
   m_lost_rudder  = p.setting("lost_link_rudder_pct");
   m_lost_thrust  = p.setting("lost_link_thrust_pct");
+  m_trim_up_secs   = p.setting("trim_up_secs");
+  m_trim_down_secs = p.setting("trim_down_secs");
 }
 
 void DriveCore::setOwner(Owner owner)
@@ -69,6 +75,21 @@ void DriveCore::setOwner(Owner owner)
   m_owner = owner;
   m_rudder_sp = 0;
   m_thrust_sp = 0;
+  m_trim = TRIM_IDLE;
+}
+
+void DriveCore::trimCommand(int direction, double now)
+{
+  if(direction > 0) {
+    m_trim = TRIM_UP;
+    m_trim_end = now + m_trim_up_secs;
+  }
+  else if(direction < 0) {
+    m_trim = TRIM_DOWN;
+    m_trim_end = now + m_trim_down_secs;
+  }
+  else
+    m_trim = TRIM_IDLE;
 }
 
 void DriveCore::resetToNeutral(double now)
@@ -77,6 +98,7 @@ void DriveCore::resetToNeutral(double now)
   m_thrust_sp  = 0;
   m_rudder_out = 0;
   m_thrust_req = 0;
+  m_trim = TRIM_IDLE;
   if(m_gear != GEAR_NEUTRAL) {
     m_gear = GEAR_NEUTRAL;
     m_gear_time = now;
@@ -104,7 +126,10 @@ DriveCommand DriveCore::update(double now)
   if(lostLink()) {
     m_rudder_sp = m_lost_rudder;
     m_thrust_sp = m_lost_thrust;
+    m_trim = TRIM_IDLE;
   }
+  if(m_trim != TRIM_IDLE && now >= m_trim_end)
+    m_trim = TRIM_IDLE;   // pulse over
 
   double rudder_target = clampAbs(m_rudder_sp, m_rudder_limit);
   double thrust_target = clampAbs(m_thrust_sp, m_thrust_limit);
@@ -138,6 +163,7 @@ DriveCommand DriveCore::update(double now)
   DriveCommand cmd;
   cmd.rudder_pct = m_rudder_out;
   cmd.gear = m_gear;
+  cmd.trim = m_trim;
   if(m_gear == GEAR_NEUTRAL || (now - m_gear_time) < m_settle_secs)
     cmd.thrust_pct = 0;
   else

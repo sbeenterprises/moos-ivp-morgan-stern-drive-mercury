@@ -43,7 +43,7 @@ One `key = value` per line. `//` starts a comment.
 |---|---|---|
 | `profile` | required | Name, posted as `CAN_PROFILE` |
 | `can_interface` | required | `slcan0`, `can0`, `vcan0`... (the iCAN block may override) |
-| `capabilities` | none | `steer`, `thrust`. Messages of a capability not listed are never sent |
+| `capabilities` | none | `steer`, `thrust`, `trim`. Messages of a capability not listed are never sent |
 | `rudder_limit_pct` | 100 | Largest rudder command sent, % of travel |
 | `thrust_limit_pct` | 100 | Largest throttle command sent, % |
 | `thrust_deadband_pct` | 0 | Thrust within this of 0 counts as neutral |
@@ -54,6 +54,7 @@ One `key = value` per line. `//` starts a comment.
 | `guard_secs` | 1.0 | Listen this long before sending; do not send an ID another node sent within this time |
 | `rudder_feedback` | none | rx_field holding the actual rudder %, for the mismatch alarm |
 | `rudder_alarm_pct`, `rudder_alarm_secs` | 0 (off), 3 | `CAN_RUDDER_MISMATCH=true` when feedback stays this far off for this long |
+| `trim_up_secs`, `trim_down_secs` | 1.0, 1.0 | Length of one trim pulse per `TRIM` command (0 < value ≤ 5) |
 
 ### Messages sent
 
@@ -64,7 +65,9 @@ tx_const = msg=tsc1, byte=0, value=C1
 ```
 
 `tx_msg`: `id` in hex (11-bit IDs need `ext=false`), `dlc` 1-8,
-`period_ms` 10-1000, `fill` for unused bytes, `cap` = `steer` or `thrust`.
+`period_ms` 10-1000, `fill` for unused bytes, `cap` = `steer`, `thrust` or `trim`.
+Trim messages are sent only during a trim pulse; when the pulse ends one
+`idle` frame is sent if the enum defines `idle`.
 
 `tx_field` inputs (`src`):
 
@@ -75,6 +78,7 @@ tx_const = msg=tsc1, byte=0, value=C1
 | `thrust_pct` | -100 (astern) .. +100 (ahead) |
 | `thrust_abs_pct` | 0 .. 100 |
 | `gear` | `fwd`, `neutral`, `rev` (after the shift interlock) |
+| `trim` | `up`, `down` (required), `idle` (optional stop frame) |
 
 Mappings (`map`):
 

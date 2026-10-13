@@ -71,7 +71,7 @@ lists use `:`, coordinates are `lat,lon`. Unknown keys are ignored.
 | `SETPOINT_HEADING` | number | same name |
 | `SERVICE_MODE` | `true\|false` | `SERVICE_MODE` (planchaPID uses UI gains) |
 | `HEADING_KP/KI/KD`, `SPEED_KP/KI/KD` | number | same name |
-| `TRIM` | number | `TRIM` (iCAN trim disabled) |
+| `TRIM` | `1\|-1\|0` | `TRIM`: 1 = one trim-up pulse, -1 = one trim-down pulse, 0 = stop. Pulse length and bytes come from the boat profile; ignored unless the profile has the `trim` capability and `CAN_SEND=true`. State comes back as `CAN_TRIM_STATE` |
 | `COLAV_TEST` | `true\|false` | `COLAV_TEST`; false also `TRAFFIC_CLEAR=all` |
 | `PUT_TARGET` | `lat=..#lon=..#course=at_usv\|deg#speed=kn#type=..#length=..#beam=..` | `TRAFFIC_SPAWN=...` (pTrafficSim) |
 | `CLEAR_TARGETS` | `all` / `name=AIS...` | `TRAFFIC_CLEAR` |

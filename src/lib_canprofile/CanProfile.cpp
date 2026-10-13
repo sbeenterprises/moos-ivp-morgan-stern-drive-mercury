@@ -215,7 +215,7 @@ static bool srcIsNumeric(const string& src)
 
 static bool srcIsSymbolic(const string& src)
 {
-  return src == "rudder_side" || src == "gear";
+  return src == "rudder_side" || src == "gear" || src == "trim";
 }
 
 static void srcDomain(const string& src, double& lo, double& hi)
@@ -233,6 +233,11 @@ static vector<string> srcStates(const string& src)
   else if(src == "rudder_side") {
     s.push_back("port"); s.push_back("center"); s.push_back("stbd");
   }
+  else if(src == "trim") {
+    // "idle" is optional: some boats stop the motor simply when the
+    // up/down frames stop arriving
+    s.push_back("up"); s.push_back("down");
+  }
   return s;
 }
 
@@ -240,6 +245,8 @@ static string capOfSrc(const string& src)
 {
   if(src == "rudder_pct" || src == "rudder_side")
     return "steer";
+  if(src == "trim")
+    return "trim";
   return "thrust";
 }
 
@@ -250,6 +257,13 @@ string gearName(Gear gear)
   if(gear == GEAR_FWD) return "fwd";
   if(gear == GEAR_REV) return "rev";
   return "neutral";
+}
+
+string trimName(Trim trim)
+{
+  if(trim == TRIM_UP)   return "up";
+  if(trim == TRIM_DOWN) return "down";
+  return "idle";
 }
 
 string Frame::str() const
@@ -284,6 +298,8 @@ Profile::Profile() : m_loaded(false)
   m_settings["lost_link_thrust_pct"] = 0;
   m_settings["rudder_alarm_pct"]     = 0;    // 0 = no feedback alarm
   m_settings["rudder_alarm_secs"]    = 3.0;
+  m_settings["trim_up_secs"]         = 1.0;  // length of one trim-up pulse
+  m_settings["trim_down_secs"]       = 1.0;  // length of one trim-down pulse
 
   m_string_settings["rudder_feedback"] = "";
 }
@@ -387,8 +403,8 @@ void Profile::parseLine(const string& key, const string& val, int lineno)
       string cap = lower(caps[i]);
       if(cap.empty() || cap == "none")
         continue;
-      if(cap != "steer" && cap != "thrust")
-        addError(lineno, "unknown capability '" + cap + "' (supported: steer, thrust)");
+      if(cap != "steer" && cap != "thrust" && cap != "trim")
+        addError(lineno, "unknown capability '" + cap + "' (supported: steer, thrust, trim)");
       else
         m_caps.push_back(cap);
     }
@@ -425,8 +441,8 @@ void Profile::parseTxMsg(const string& val, int lineno)
     addError(lineno, "tx_msg needs name=");
   else if(findMsg(msg.name))
     addError(lineno, "duplicate tx_msg name '" + msg.name + "'");
-  if(msg.cap != "steer" && msg.cap != "thrust")
-    addError(lineno, "tx_msg " + msg.name + ": cap must be steer or thrust");
+  if(msg.cap != "steer" && msg.cap != "thrust" && msg.cap != "trim")
+    addError(lineno, "tx_msg " + msg.name + ": cap must be steer, thrust or trim");
 
   unsigned long long id;
   if(!parseHexInt(kv["id"], id) || id > 0x1FFFFFFF)
@@ -719,6 +735,12 @@ void Profile::validate()
     if(setting(nonneg[i]) < 0)
       addError(0, string(nonneg[i]) + " must not be negative");
 
+  // Trim motors run as long as up/down is sent; a pulse is always short
+  const char* trim_keys[] = {"trim_up_secs", "trim_down_secs"};
+  for(int i=0; i<2; i++)
+    if(setting(trim_keys[i]) <= 0 || setting(trim_keys[i]) > 5.0)
+      addError(0, string(trim_keys[i]) + " must be more than 0 and at most 5 seconds");
+
   for(size_t i=0; i<m_caps.size(); i++) {
     bool found = false;
     for(size_t j=0; j<m_tx.size(); j++)
@@ -791,7 +813,7 @@ void Profile::validateField(const TxMsg& msg, const TxField& f)
 
   if(f.map == "enum") {
     if(!srcIsSymbolic(f.src))
-      addError(0, where + "map=enum needs src gear or rudder_side");
+      addError(0, where + "map=enum needs src gear, rudder_side or trim");
     vector<string> states = srcStates(f.src);
     for(size_t i=0; i<states.size(); i++) {
       map<string, long long>::const_iterator p = f.enum_values.find(states[i]);
@@ -849,6 +871,8 @@ long long Profile::fieldRaw(const TxField& f, const DriveCommand& cmd) const
     string state;
     if(f.src == "gear")
       state = gearName(cmd.gear);
+    else if(f.src == "trim")
+      state = trimName(cmd.trim);
     else {
       long t = (long)cmd.rudder_pct;   // truncate toward zero, as the legacy tables did
       state = (t < 0) ? "port" : ((t > 0) ? "stbd" : "center");
@@ -962,6 +986,14 @@ vector<RxValue> Profile::decode(uint32_t id, bool ext, const uint8_t* data, int 
     out.push_back(v);
   }
   return out;
+}
+
+bool Profile::hasTrimIdle(const TxMsg& msg) const
+{
+  for(size_t i=0; i<msg.fields.size(); i++)
+    if(msg.fields[i].src == "trim" && msg.fields[i].enum_values.count("idle"))
+      return true;
+  return false;
 }
 
 bool Profile::isTxId(uint32_t id, bool ext, string& msg_name) const

@@ -35,6 +35,7 @@ CAN::CAN()
   m_autonomy_sources.insert("planchaPID");
   m_autonomy_sources.insert("pHelmIvP");     // end-of-mission zeros (alpha.bhv endflags)
   m_autonomy_sources.insert("iWebSocket");   // AUTONOMOUS_STOP / TRAIL_FOLLOW=off zeros
+  m_trim_sources.insert("iWebSocket");       // trim is an operator function only
 
   m_profile_ok        = false;
   m_can_socket        = -1;
@@ -77,6 +78,8 @@ bool CAN::OnNewMail(MOOSMSG_LIST &NewMail)
       handleDemand(msg, true);
     else if(key == "DESIRED_THRUST")
       handleDemand(msg, false);
+    else if(key == "TRIM")
+      handleTrim(msg);
     else if(key == "MOOS_MANUAL_OVERRIDE") {
       bool manual = (tolower(stripBlankEnds(msg.GetString())) == "true");
       m_core.setOwner(manual ? OWNER_MANUAL : OWNER_AUTONOMY);
@@ -131,6 +134,52 @@ void CAN::handleDemand(const CMOOSMsg& msg, bool is_rudder)
 }
 
 //---------------------------------------------------------
+// Procedure: handleTrim()
+//   TRIM = 1 (up), -1 (down), 0 (stop); also accepts up/down/stop.
+//   Each command is one pulse of trim_up_secs / trim_down_secs from the
+//   profile. Only accepted from trim_sources (SS UI) and only while CAN
+//   sending is on and the profile has the trim capability.
+
+void CAN::handleTrim(const CMOOSMsg& msg)
+{
+  double now = MOOSTime();
+  int dir = 0;
+  if(msg.IsDouble())
+    dir = (msg.GetDouble() > 0.5) ? 1 : ((msg.GetDouble() < -0.5) ? -1 : 0);
+  else {
+    string v = tolower(stripBlankEnds(msg.GetString()));
+    if(v == "up" || v == "1")
+      dir = 1;
+    else if(v == "down" || v == "-1")
+      dir = -1;
+  }
+
+  // A stop is always honoured, whoever sends it
+  if(dir == 0) {
+    m_core.stopTrim();
+    return;
+  }
+
+  if(m_trim_sources.count(msg.GetSource()) == 0) {
+    m_rejected++;
+    m_last_rejected = "TRIM from " + msg.GetSource();
+    return;
+  }
+  if(!m_profile_ok || !m_profile.hasCapability("trim")) {
+    m_trim_note = "TRIM ignored: this boat's profile has no trim capability";
+    reportEvent(m_trim_note);
+    return;
+  }
+  if(!m_can_send) {
+    m_trim_note = "TRIM ignored: CAN_SEND is false";
+    reportEvent(m_trim_note);
+    return;
+  }
+  m_trim_note = "";
+  m_core.trimCommand(dir, now);
+}
+
+//---------------------------------------------------------
 // Procedure: OnConnectToServer()
 
 bool CAN::OnConnectToServer()
@@ -164,8 +213,11 @@ bool CAN::Iterate()
   m_core.setLinkOk(link_ok);
   DriveCommand cmd = m_core.update(now);
 
-  if(m_profile_ok && m_can_socket != -1 && m_can_send)
+  if(m_profile_ok && m_can_socket != -1 && m_can_send) {
+    if(m_last_cmd.trim != TRIM_IDLE && cmd.trim == TRIM_IDLE)
+      sendTrimIdle(now);   // pulse just ended: tell the motor to stop
     sendDue(cmd, now);
+  }
 
   checkRudderFeedback(cmd, now);
   postStatus(cmd, now);
@@ -204,8 +256,10 @@ bool CAN::OnStartUp()
       m_can_interface = value;
       handled = true;
     }
-    else if(param == "manual_sources" || param == "autonomy_sources") {
-      set<string>& dest = (param == "manual_sources") ? m_manual_sources : m_autonomy_sources;
+    else if(param == "manual_sources" || param == "autonomy_sources" ||
+            param == "trim_sources") {
+      set<string>& dest = (param == "manual_sources") ? m_manual_sources :
+        ((param == "trim_sources") ? m_trim_sources : m_autonomy_sources);
       dest.clear();
       vector<string> names = parseString(value, ',');
       for(unsigned int i=0; i<names.size(); i++)
@@ -259,6 +313,7 @@ void CAN::registerVariables()
   Register("MOOS_MANUAL_OVERRIDE", 0);
   Register("UI_LINK_OK", 0);
   Register("CAN_SEND", 0);
+  Register("TRIM", 0);
 }
 
 //---------------------------------------------------------
@@ -400,6 +455,8 @@ string CAN::msgState(size_t ix, double now) const
     return "listening";
   if(!m_can_send)
     return "standby (CAN_SEND=false)";
+  if(msg.cap == "trim" && m_core.currentTrim() == TRIM_IDLE)
+    return "idle (sent only during a trim pulse)";
   return "sending";
 }
 
@@ -414,6 +471,8 @@ void CAN::sendDue(const DriveCommand& cmd, double now)
     const TxMsg& msg = tx[i];
     if(!msgEnabled(msg))
       continue;
+    if(msg.cap == "trim" && cmd.trim == TRIM_IDLE)
+      continue;            // trim frames only during a pulse
     if(msg.guard && (now - m_foreign_seen[i] < guard || now - m_start_time < guard))
       continue;
     // Send when the period has elapsed, allowing half a tick of slack
@@ -441,11 +500,35 @@ void CAN::sendNeutralOnce(double now)
   for(size_t i=0; i<tx.size(); i++) {
     if(!msgEnabled(tx[i]))
       continue;
+    if(tx[i].cap == "trim" && !m_profile.hasTrimIdle(tx[i]))
+      continue;            // no stop value defined: just stop sending
     if(tx[i].guard && now - m_foreign_seen[i] < guard)
       continue;
     sendFrame(m_profile.encode(tx[i], neutral));
   }
   m_core.resetToNeutral(now);
+}
+
+//---------------------------------------------------------
+// Procedure: sendTrimIdle()
+//   One idle frame on each trim message that defines one.
+
+void CAN::sendTrimIdle(double now)
+{
+  DriveCommand idle = m_last_cmd;
+  idle.trim = TRIM_IDLE;
+  const vector<TxMsg>& tx = m_profile.txMessages();
+  double guard = m_profile.setting("guard_secs");
+  for(size_t i=0; i<tx.size(); i++) {
+    if(tx[i].cap != "trim" || !msgEnabled(tx[i]) || !m_profile.hasTrimIdle(tx[i]))
+      continue;
+    if(tx[i].guard && now - m_foreign_seen[i] < guard)
+      continue;
+    if(sendFrame(m_profile.encode(tx[i], idle))) {
+      m_last_sent[i] = now;
+      m_sent_count[i]++;
+    }
+  }
 }
 
 bool CAN::sendFrame(const Frame& f)
@@ -523,7 +606,7 @@ void CAN::postStatus(const DriveCommand& cmd, double now)
 
   bool changed = (status != m_last_status) || (conflict != m_last_conflict) ||
     (cmd.rudder_pct != m_last_cmd.rudder_pct) || (cmd.thrust_pct != m_last_cmd.thrust_pct) ||
-    (cmd.gear != m_last_cmd.gear);
+    (cmd.gear != m_last_cmd.gear) || (cmd.trim != m_last_cmd.trim);
   if(!changed && now - m_last_status_post < 1.0)
     return;
 
@@ -537,6 +620,7 @@ void CAN::postStatus(const DriveCommand& cmd, double now)
   Notify("CAN_TX_RUDDER_PCT", cmd.rudder_pct);
   Notify("CAN_TX_THRUST_PCT", cmd.thrust_pct);
   Notify("CAN_TX_GEAR", gearName(cmd.gear));
+  Notify("CAN_TRIM_STATE", trimName(cmd.trim));
   if(m_last_status_post == 0 || status != m_last_status) {
     Notify("CAN_PROFILE", m_profile_ok ? m_profile.name() : "none");
     Notify("CAN_PROFILE_HASH", m_profile.hashHex());
@@ -582,7 +666,10 @@ bool CAN::buildReport()
          << "%  thrust " << doubleToString(m_core.thrustSetpoint(), 1) << "%" << endl;
   m_msgs << "Sending:      rudder " << doubleToString(m_last_cmd.rudder_pct, 1)
          << "%  thrust " << doubleToString(m_last_cmd.thrust_pct, 1)
-         << "%  gear " << gearName(m_last_cmd.gear) << endl;
+         << "%  gear " << gearName(m_last_cmd.gear)
+         << "  trim " << trimName(m_last_cmd.trim) << endl;
+  if(m_trim_note != "")
+    m_msgs << "Trim:         " << m_trim_note << endl;
   if(m_rejected)
     m_msgs << "Rejected:     " << m_rejected << "  last: " << m_last_rejected << endl;
   m_msgs << "Frames:       rx " << m_rx_frames << "  tx errors " << m_tx_errors << endl;

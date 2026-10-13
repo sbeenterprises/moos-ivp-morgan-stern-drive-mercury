@@ -40,6 +40,12 @@ Behaviour common to every boat (`src/lib_canprofile/DriveCore.cpp`):
   steering switched off before the PC can steer.
 - **CAN_SEND.** `false` sends one neutral frame of each message and then
   stops; `true` starts again from neutral.
+- **Trim.** `TRIM=1` (up) or `TRIM=-1` (down) from SS UI starts one pulse of
+  `trim_up_secs` / `trim_down_secs` (at most 5 s); `TRIM=0` stops at once.
+  Frames are sent only during the pulse, then one idle frame if the profile
+  defines one. Lost link, owner change and `CAN_SEND=false` stop trim. Only
+  accepted from `trim_sources` (iWebSocket), only with `CAN_SEND=true`, and
+  only if the profile lists the `trim` capability. State: `CAN_TRIM_STATE`.
 
 ### Mercury stern-drive (`profiles/mercury_sterndrive.prf`)
 
@@ -53,7 +59,11 @@ Frames are byte-for-byte those of the old hardcoded iCAN
 | `18000017` | TSC1 (PGN 0) to engine #1, SA 0x17 | `C1`, bytes 1–2 requested speed LE 0.125 rpm/bit from `tables/mercury_rpm.csv` (700–4200 rpm), `E1`, `FF…`. |
 
 Table defects kept on purpose (fix in the CSV, not in code): 71 % equals
-50 %; 23–27 % is non-monotonic. Trim (`0CFF08D0`) is not in the profile.
+50 %; 23–27 % is non-monotonic.
+
+Trim `0CFF08D0`: `F1` up / `F4` down every 100 ms, 1.2 s per command (the
+old iCAN's disabled trim code). Defined but **off**; add `trim` to
+`capabilities` to enable.
 
 ### USV-722 (`profiles/usv722_glendinning.prf`)
 
@@ -70,7 +80,10 @@ Decoded feedback: `CAN_RUDDER_ACTUAL_PCT`, `CAN_RUDDER_ECHO_PCT`,
 `CAN_STEER_MOTOR_PCT` (11-bit `0x210`), `CAN_HELM_HAS_STEERING`
 (`18FF08D0` high nibble), `CAN_HELM_GEAR`, `CAN_HELM_THROTTLE_PCT`,
 `CAN_ENGINE_GEAR`, `CAN_ENGINE_THROTTLE_PCT` (processor 226), `CAN_FUEL_PCT`.
-Trim and the key switch are deliberately not sent.
+Trim `18FF08D0` (`F1` up / `F4` down / `F0` idle; up 1.0 s, down 0.5 s)
+is defined but **off**: the helm sends this ID continuously (the guard
+would block it), the trim pump wiring is unconfirmed, and the byte's high
+nibble is the helm-in-command flag. The key switch is never sent.
 
 ## Feedback (iCANRec, `src/iCANRec/CANRec.cpp`)
 

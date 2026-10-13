@@ -16,14 +16,14 @@
 // sending (posted as CAN_CONFLICT). Switch off the helm's steering
 // before PC steering, as in the runbook's send test.
 //
+// Trim (18FF08D0) is defined below but off; see the notes there.
 // Not included on purpose:
-//   trim (18FF08D0)   momentary switch, no position feedback
-//   key   (18FF0F10)  never send START from the PC (runbook)
+//   key (18FF0F10)  never send START from the PC (runbook)
 //------------------------------------------------------------------
 
 profile        = usv722_glendinning
 can_interface  = slcan0                       // [V] 250 kbit/s, k800-can.service
-capabilities   = steer, thrust
+capabilities   = steer, thrust     // add trim to enable PC trim (read the trim notes first)
 
 rudder_limit_pct     = 100
 thrust_limit_pct     = 100
@@ -58,6 +58,24 @@ tx_field = msg=gear, src=gear, byte=0, bits=8, map=enum, values=fwd:7E|neutral:7
 // and reverse. Byte 0 FF. Helm sends about every 70 ms.
 tx_msg   = name=throttle, cap=thrust, id=0CF003D0, dlc=8, period_ms=70, fill=FF, guard=true
 tx_field = msg=throttle, src=thrust_abs_pct, byte=1, bits=8, map=linear, scale=2.5
+
+//--- Trim switch: 18FF08D0 (PGN 65288) -------------------------- [V]
+// Byte 0: F1 = trim up held, F4 = trim down held, F0 = idle.
+// The F0 idle frame is sent once when a pulse ends.
+// Before enabling, per the runbook:
+//  - Trim is momentary with no position feedback. Up runs on into full
+//    tilt; down runs to the bottom stop (skeg touches ground), so the
+//    down pulse is shorter.                                         [P]
+//  - The helm sends 18FF08D0 all the time, so the guard blocks PC trim
+//    while the helm is on. Nothing on the bus reacted to the trim switch
+//    in the 9 Oct capture: confirm how the trim pump is switched.
+//  - The high nibble of byte 0 is the helm-in-command flag (F = helm
+//    steering, 0 = PC steering). F1/F4/F0 claim "helm steering"; check
+//    with Glendinning whether 01/04/00 should be used while the PC steers.
+trim_up_secs   = 1.0                          // [P]
+trim_down_secs = 0.5                          // [P] shorter: skeg ground risk
+tx_msg   = name=trim, cap=trim, id=18FF08D0, dlc=8, period_ms=130, fill=FF, guard=true
+tx_field = msg=trim, src=trim, byte=0, bits=8, map=enum, values=up:F1|down:F4|idle:F0
 
 //--- Feedback ------------------------------------------------------
 // Steering actuator, 11-bit ID 210                                 [V]

@@ -10,6 +10,7 @@
 /*      - rudder/thrust limits and optional rate limits     */
 /*      - shift interlock: neutral pause when reversing,    */
 /*        throttle held at 0 just after engaging a gear     */
+/*      - trim: each command is one short timed pulse       */
 /************************************************************/
 
 #ifndef DRIVE_CORE_HEADER
@@ -55,6 +56,15 @@ class DriveCore {
 
   Gear currentGear() const { return m_gear; }
 
+  // Trim: +1 = one up pulse, -1 = one down pulse, 0 = stop now.
+  // A pulse lasts trim_up_secs / trim_down_secs from the profile (at
+  // most 5 s) and then stops by itself. A new command restarts the
+  // pulse; it never extends it beyond one pulse length. Trim stops on
+  // lost link, owner change and resetToNeutral().
+  void trimCommand(int direction, double now);
+  void stopTrim()             { m_trim = TRIM_IDLE; }
+  Trim currentTrim() const    { return m_trim; }
+
  private:
   double limitRate(double current, double target, double rate, double dt) const;
 
@@ -81,6 +91,11 @@ class DriveCore {
   double m_thrust_rate;
   double m_lost_rudder;
   double m_lost_thrust;
+  double m_trim_up_secs;
+  double m_trim_down_secs;
+
+  Trim   m_trim;
+  double m_trim_end;
 };
 
 }  // namespace canprofile

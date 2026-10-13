@@ -428,6 +428,114 @@ static void testDriveCore()
 }
 
 //------------------------------------------------------------------
+// Trim: frames per boat, timed pulses, stops and validation
+
+static void testTrim()
+{
+  // Mercury: same bytes the old (disabled) iCAN trim code sent
+  Profile m;
+  CHECK(m.load(g_profile_dir + "/mercury_sterndrive.prf"), "mercury loads with trim message");
+  const TxMsg* mt = msgNamed(m, "trim");
+  CHECK(mt != 0, "mercury defines a trim message");
+  CHECK(!m.hasCapability("trim"), "mercury trim is off by default");
+  if(mt) {
+    DriveCommand cmd;
+    cmd.trim = TRIM_UP;
+    CHECK(m.encode(*mt, cmd).str() == "0CFF08D0#F1FFFFFFFFFFFFFF", "mercury trim up = old F1 frame");
+    cmd.trim = TRIM_DOWN;
+    CHECK(m.encode(*mt, cmd).str() == "0CFF08D0#F4FFFFFFFFFFFFFF", "mercury trim down = old F4 frame");
+    CHECK(!m.hasTrimIdle(*mt), "mercury has no idle frame (old code sent none)");
+  }
+
+  // USV-722: trim switch byte from the workbook
+  Profile u;
+  CHECK(u.load(g_profile_dir + "/usv722_glendinning.prf"), "usv722 loads with trim message");
+  const TxMsg* ut = msgNamed(u, "trim");
+  CHECK(ut != 0 && !u.hasCapability("trim"), "usv722 defines trim, off by default");
+  if(ut) {
+    DriveCommand cmd;
+    cmd.trim = TRIM_UP;
+    CHECK(u.encode(*ut, cmd).str() == "18FF08D0#F1FFFFFFFFFFFFFF", "usv722 trim up F1");
+    cmd.trim = TRIM_DOWN;
+    CHECK(u.encode(*ut, cmd).str() == "18FF08D0#F4FFFFFFFFFFFFFF", "usv722 trim down F4");
+    cmd.trim = TRIM_IDLE;
+    CHECK(u.encode(*ut, cmd).str() == "18FF08D0#F0FFFFFFFFFFFFFF", "usv722 trim idle F0");
+    CHECK(u.hasTrimIdle(*ut), "usv722 has an idle frame");
+  }
+
+  // Pulse timing (usv722: up 1.0 s, down 0.5 s)
+  DriveCore core;
+  core.configure(u);
+  core.setOwner(OWNER_MANUAL);
+  double t = 100;
+  core.trimCommand(1, t);
+  DriveCommand cmd = core.update(t);
+  CHECK(cmd.trim == TRIM_UP, "trim up starts at once");
+  cmd = core.update(t + 0.95);
+  CHECK(cmd.trim == TRIM_UP, "trim up still running at 0.95 s");
+  cmd = core.update(t + 1.0);
+  CHECK(cmd.trim == TRIM_IDLE, "trim up stops by itself at 1.0 s");
+
+  t = 200;
+  core.trimCommand(-1, t);
+  cmd = core.update(t + 0.45);
+  CHECK(cmd.trim == TRIM_DOWN, "trim down running at 0.45 s");
+  cmd = core.update(t + 0.5);
+  CHECK(cmd.trim == TRIM_IDLE, "trim down stops at 0.5 s (shorter pulse)");
+
+  // A repeated command restarts the pulse; it does not add up
+  t = 300;
+  core.trimCommand(1, t);
+  core.update(t + 0.5);
+  core.trimCommand(1, t + 0.5);
+  cmd = core.update(t + 1.45);
+  CHECK(cmd.trim == TRIM_UP, "second press restarts the pulse");
+  cmd = core.update(t + 1.5);
+  CHECK(cmd.trim == TRIM_IDLE, "restarted pulse is still only 1.0 s long");
+
+  // Stop, reversal, lost link, owner change, reset
+  core.trimCommand(1, 400);
+  core.trimCommand(0, 400.2);
+  CHECK(core.update(400.2).trim == TRIM_IDLE, "TRIM=0 stops at once");
+  core.trimCommand(1, 401);
+  core.trimCommand(-1, 401.2);
+  CHECK(core.update(401.3).trim == TRIM_DOWN, "down replaces up at once");
+  core.trimCommand(1, 402);
+  core.setLinkOk(false);
+  CHECK(core.update(402.1).trim == TRIM_IDLE, "lost link stops trim");
+  core.setLinkOk(true);
+  core.trimCommand(1, 403);
+  core.setOwner(OWNER_AUTONOMY);
+  CHECK(core.update(403.1).trim == TRIM_IDLE, "owner change stops trim");
+  core.trimCommand(-1, 404);
+  core.resetToNeutral(404.1);
+  CHECK(core.update(404.1).trim == TRIM_IDLE, "reset stops trim");
+
+  // Validation
+  string base = "profile = t\ncan_interface = vcan0\ncapabilities = trim\n"
+                "tx_msg = name=trim, cap=trim, id=18FF08D0, dlc=8, period_ms=100\n";
+  string field = "tx_field = msg=trim, src=trim, byte=0, bits=8, map=enum, values=up:F1|down:F4\n";
+  Profile ok;
+  ok.loadFromString(base + field, g_profile_dir);
+  CHECK(ok.valid(), "trim-only profile is valid");
+  printErrors(ok);
+
+  Profile p1;
+  p1.loadFromString(base + field + "trim_up_secs = 6\n", g_profile_dir);
+  CHECK(!p1.valid(), "trim pulse longer than 5 s is rejected");
+  Profile p2;
+  p2.loadFromString(base + "tx_field = msg=trim, src=trim, byte=0, bits=8, map=enum, values=up:F1\n",
+                    g_profile_dir);
+  CHECK(!p2.valid(), "trim enum without down is rejected");
+  Profile p3;
+  p3.loadFromString("profile = t\ncan_interface = vcan0\ncapabilities = steer\n"
+                    "tx_msg = name=steer, cap=steer, id=18FF11D0, dlc=8, period_ms=100\n"
+                    "tx_field = msg=steer, src=trim, byte=0, bits=8, map=enum, values=up:F1|down:F4\n",
+                    g_profile_dir);
+  CHECK(!p3.valid(), "trim field in a steer message is rejected");
+}
+
+//------------------------------------------------------------------
 
 int main(int argc, char* argv[])
 {
@@ -439,6 +547,7 @@ int main(int argc, char* argv[])
   testUsv722Feedback();
   testValidation();
   testDriveCore();
+  testTrim();
 
   cout << g_checks << " checks, " << g_failures << " failed" << endl;
   return g_failures ? 1 : 0;

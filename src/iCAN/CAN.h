@@ -44,6 +44,8 @@ class CAN : public AppCastingMOOSApp
    bool msgEnabled(const canprofile::TxMsg& msg) const;
    std::string msgState(size_t ix, double now) const;
    void handleDemand(const CMOOSMsg& msg, bool is_rudder);
+   void handleTrim(const CMOOSMsg& msg);
+   void sendTrimIdle(double now);
    void postFeedback(const canprofile::RxValue& v, double now);
    void checkRudderFeedback(const canprofile::DriveCommand& cmd, double now);
    void postStatus(const canprofile::DriveCommand& cmd, double now);
@@ -53,6 +55,7 @@ class CAN : public AppCastingMOOSApp
    std::string m_can_interface;
    std::set<std::string> m_manual_sources;
    std::set<std::string> m_autonomy_sources;
+   std::set<std::string> m_trim_sources;
    double      m_link_stale_secs;
 
  private: // State variables
@@ -80,6 +83,7 @@ class CAN : public AppCastingMOOSApp
 
    unsigned int m_rejected;
    std::string  m_last_rejected;
+   std::string  m_trim_note;
 
    std::map<std::string, double>      m_fb_dval;
    std::map<std::string, std::string> m_fb_sval;
