@@ -15,6 +15,19 @@ Autonomy system.
 
 All the backend is based in the MOOS-IvP structure that you can lookup in MIT documentation (https://oceanai.mit.edu/moos-ivp/pmwiki/pmwiki.php?n=Main.HomePage).
 
+## Developer documentation
+
+| Doc | Contents |
+|:--- |:-------- |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System diagram, layers, what is built, conventions |
+| [docs/CODE_FLOW.md](docs/CODE_FLOW.md) | End-to-end flows: nav, UI → helm → PID → CAN, contacts/COLAV, helm modes |
+| [docs/APPS.md](docs/APPS.md) | Per-app config, subscriptions, publications |
+| [docs/MISSIONS.md](docs/MISSIONS.md) | Mission files, real vs sim process matrix, ports |
+| [docs/UI_PROTOCOL.md](docs/UI_PROTOCOL.md) | iWebSocket JSON telemetry and command keys |
+| [docs/CAN_INTERFACE.md](docs/CAN_INTERFACE.md) | J1939 frames sent by iCAN and decoded by iCANRec |
+| [docs/KNOWN_ISSUES.md](docs/KNOWN_ISSUES.md) | Bugs and risks found during code review |
+| [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | Branching, dependencies, build, running the sim |
+
 # Directory Structure
 
 The directory structure for the moos-ivp-extend is described below:
