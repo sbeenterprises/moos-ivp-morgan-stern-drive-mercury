@@ -39,7 +39,7 @@ ProcessConfig = ANTLER
   Run = pContactSpawn	      @ NewConsole = false
   Run = pContactMgrV20 @ NewConsole = false
   Run = iRadarTargets @ NewConsole = false
-
+  Run = grafana_bridge  @ NewConsole = false
 }
 
 // iRadarTargets Config Block
@@ -380,3 +380,32 @@ ProcessConfig = pNodeReporter
   platform_length = 100
 }
 
+// grafana_bridge: MOOS -> InfluxDB (SA-1 Dashboard)
+ProcessConfig = grafana_bridge
+{
+  AppTick   = 10
+  CommsTick = 20
+ 
+  influx_url    = localhost:8086   // no scheme: // starts a MOOS comment
+  influx_tls    = false
+  influx_token  = e5fe113991d2c3d97be9de264a8ebbc9537eccb73d9d540e491ed3604b560656
+  influx_org    = usv
+  influx_bucket = telemetry
+  events_bucket = events
+  vessel_id     = usv-722
+ 
+  mission_name   = alpha
+  max_rate_hz    = 5
+  engine_rate_hz = 2
+  ignore_vars    = NAV_YAW         // iDivisorNMEA posts rudder angle as NAV_YAW
+  radar_cpa_alert_m = 500
+  tcpa_alert_s   = 300
+  contact_ttl_s  = 10
+  signalk_http   = localhost:3000
+ 
+  readiness_profile  = vessel
+  readiness_period_s = 5
+  optional_apps = pMarineViewer,pContactSpawn
+  enc_fitted = false          // no ENC yet: row reads N/A
+  console_checklist = false   // UI keeps its checklist local
+}
