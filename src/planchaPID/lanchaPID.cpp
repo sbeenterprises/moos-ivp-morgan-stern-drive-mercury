@@ -575,9 +575,14 @@ bool lanchaPID::Iterate()
   // TRAILING is the follow-a-contact mode (BHV_Trail). Without it here the helm
   // computes a pursuit solution that never reaches the actuators, because
   // engaging Follow deliberately clears WAYPOINT to stop the mission fighting it.
-  if ((waypoint == "true" && moos_manual_overide == "false") ||
-      (trailing == "true" && moos_manual_overide == "false") ||
-      stationing == "true" || region == "true") {
+  // Never while SS UI has manual control (MOOS_MANUAL_OVERRIDE=true): the
+  // operator's rudder/throttle must not be overwritten. iCAN also ignores
+  // planchaPID while in manual, so this is belt and braces.
+  bool manual_control = (moos_manual_overide == "true");
+  if (!manual_control &&
+      ((waypoint == "true" && moos_manual_overide == "false") ||
+       (trailing == "true" && moos_manual_overide == "false") ||
+       stationing == "true" || region == "true")) {
     Notify("DESIRED_THRUST", desired_thrust);
     Notify("DESIRED_RUDDER", desired_rudder);
   }

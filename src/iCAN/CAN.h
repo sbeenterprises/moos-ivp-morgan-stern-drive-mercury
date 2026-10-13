@@ -3,18 +3,20 @@
 /*    ORGN: MIT, Cambridge MA                               */
 /*    FILE: CAN.h                                          */
 /*    DATE: December 29th, 1963                             */
+/*          October 2026: CAN frames now come from a per-   */
+/*          boat profile (profiles/NAME.prf, lib_canprofile)   */
 /************************************************************/
 
 #ifndef CAN_HEADER
 #define CAN_HEADER
 
+#include <map>
+#include <set>
+#include <string>
+#include <vector>
 #include "MOOS/libMOOS/Thirdparty/AppCasting/AppCastingMOOSApp.h"
-#include <linux/can.h>
-#include <linux/can/raw.h>
-#include <sys/socket.h>
-#include <sys/ioctl.h>
-#include <net/if.h>
-#include <unistd.h>
+#include "CanProfile.h"
+#include "DriveCore.h"
 
 class CAN : public AppCastingMOOSApp
 {
@@ -22,36 +24,75 @@ class CAN : public AppCastingMOOSApp
    CAN();
    ~CAN();
 
- protected: // Standard MOOSApp functions to overload  
+ protected: // Standard MOOSApp functions to overload
    bool OnNewMail(MOOSMSG_LIST &NewMail);
    bool Iterate();
    bool OnConnectToServer();
    bool OnStartUp();
 
- protected: // Standard AppCastingMOOSApp function to overload 
+ protected: // Standard AppCastingMOOSApp function to overload
    bool buildReport();
 
  protected:
    void registerVariables();
    bool initCAN();
-   void sendRudderCommand(double rudder_value);
-   std::string getRudderCANFrame(double rudder_value);
-   void sendThrustCommand(double thrust_value);
-   std::string getThrustCANFrame(double thrust_value);
-   std::string getGearCommand(double thrust_value);
-  void handleTrimCommand(double trim_value);
-  void executeTrimSequence(const std::string& can_command);
+   void closeCAN();
+   void readFrames(double now);
+   void sendDue(const canprofile::DriveCommand& cmd, double now);
+   void sendNeutralOnce(double now);
+   bool sendFrame(const canprofile::Frame& frame);
+   bool msgEnabled(const canprofile::TxMsg& msg) const;
+   std::string msgState(size_t ix, double now) const;
+   void handleDemand(const CMOOSMsg& msg, bool is_rudder);
+   void postFeedback(const canprofile::RxValue& v, double now);
+   void checkRudderFeedback(const canprofile::DriveCommand& cmd, double now);
+   void postStatus(const canprofile::DriveCommand& cmd, double now);
 
  private: // Configuration variables
+   std::string m_profile_file;
+   std::string m_can_interface;
+   std::set<std::string> m_manual_sources;
+   std::set<std::string> m_autonomy_sources;
+   double      m_link_stale_secs;
 
  private: // State variables
-  double m_desired_rudder;
-  double m_desired_thrust;     // desired thrust (%)
-  double m_current_trim;
-  std::string m_can_send;  // Controls whether CAN frames should be sent
-  int m_can_socket;
-  struct sockaddr_can m_can_addr;
-  struct ifreq m_ifr;
+   canprofile::Profile   m_profile;
+   canprofile::DriveCore m_core;
+   bool        m_profile_ok;
+
+   int         m_can_socket;
+   double      m_last_init_attempt;
+   double      m_start_time;
+   std::string m_can_error;
+
+   bool        m_can_send;
+   bool        m_ui_link_ok;
+   double      m_ui_link_time;
+
+   std::vector<double> m_last_sent;      // per tx message
+   std::vector<double> m_foreign_seen;   // per tx message: last time another node sent its ID
+   std::vector<unsigned int> m_sent_count;
+   unsigned int m_tx_errors;
+   unsigned int m_rx_frames;
+
+   double      m_last_iterate;
+   double      m_tick;
+
+   unsigned int m_rejected;
+   std::string  m_last_rejected;
+
+   std::map<std::string, double>      m_fb_dval;
+   std::map<std::string, std::string> m_fb_sval;
+   std::map<std::string, double>      m_fb_time;
+   std::map<std::string, double>      m_fb_posted;
+
+   double      m_mismatch_since;
+   bool        m_mismatch;
+
+   canprofile::DriveCommand m_last_cmd;
+   double      m_last_status_post;
+   std::string m_last_status;
+   std::string m_last_conflict;
 };
 
-#endif 
+#endif

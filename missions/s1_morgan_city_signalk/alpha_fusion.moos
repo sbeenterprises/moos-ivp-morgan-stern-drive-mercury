@@ -142,8 +142,13 @@ ProcessConfig = pXYpublisher
 // iCAN config block
 ProcessConfig = iCAN
 {
-   AppTick   = 20
-   CommsTick = 20
+   AppTick   = 50
+   CommsTick = 50
+
+   // The boat's CAN IDs, scaling, limits and lost-link values live in
+   // this profile; nothing is hardcoded in iCAN. For USV-722 use
+   //   profile_file = ../../profiles/usv722_glendinning.prf
+   profile_file = ../../profiles/mercury_sterndrive.prf
 }
 
 // iDivisorNMEA config block
@@ -170,6 +175,10 @@ ProcessConfig = iWebSocket
 {
    AppTick   = 20
    CommsTick = 20
+
+   // No message or ping reply from SS UI for this long = link lost.
+   // In manual control iCAN then sets rudder 0 and throttle 0.
+   link_timeout = 3
 }
 
 // pLogger config block

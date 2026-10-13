@@ -113,6 +113,19 @@ WebSocket::WebSocket()
   m_last_connection_check = 0.0;
   m_heartbeat_interval = 30.0; // Send heartbeat every 30 seconds (less than frontend's 60s timeout)
   m_last_heartbeat_time = 0.0;
+  m_last_link_rx = -1e9;
+  m_link_timeout = 3.0;
+  m_link_ok_posted = false;
+  m_last_link_post = 0.0;
+
+  const char* can_vars[] = {"CAN_STATUS", "CAN_CONTROL_OWNER", "CAN_LOST_LINK",
+                            "CAN_CONFLICT", "CAN_TX_RUDDER_PCT", "CAN_TX_THRUST_PCT",
+                            "CAN_TX_GEAR", "CAN_RUDDER_MISMATCH", "CAN_PROFILE",
+                            "CAN_RUDDER_ACTUAL_PCT", "CAN_HELM_HAS_STEERING",
+                            "CAN_ENGINE_GEAR", "CAN_ENGINE_THROTTLE_PCT", "CAN_FUEL_PCT"};
+  for (size_t i = 0; i < sizeof(can_vars) / sizeof(can_vars[0]); i++)
+    m_can_vars.insert(can_vars[i]);
+
   initializeMessageHandlers();
 }
 
@@ -122,6 +135,7 @@ void WebSocket::AddWebSocket(ix::WebSocket* ws)
   if (ws != nullptr) {
     m_webSockets.push_back(ws);
     m_lastMessageTime[ws] = MOOSTime(); // Initialize with current time
+    m_last_link_rx = MOOSTime();
     
     // Initialize heartbeat time when first client connects
     if (m_webSockets.size() == 1) {
@@ -157,6 +171,7 @@ void WebSocket::UpdateConnectionTime(ix::WebSocket* ws)
 {
   if (ws != nullptr) {
     m_lastMessageTime[ws] = MOOSTime();
+    m_last_link_rx = MOOSTime();
   }
 }
 
@@ -298,6 +313,12 @@ bool WebSocket::OnNewMail(MOOSMSG_LIST &NewMail)
       base_coords = msg.GetString();
     else if(key == "CAN_SEND")
       can_send = (msg.GetString() == "true");
+    else if(m_can_vars.count(key)) {
+      if(msg.IsDouble())
+        m_can_num[key] = msg.GetDouble();
+      else
+        m_can_str[key] = msg.GetString();
+    }
     else if(key == "REGION")
       region_active = (msg.GetString() == "true");
     else if(key == "SERVICE_MODE")
@@ -432,6 +453,20 @@ bool WebSocket::Iterate()
     m_last_heartbeat_time = current_time;
   }
   
+  // Link to SS UI: at least one client connected and something heard from
+  // it within link_timeout. iCAN uses this for the lost-link failsafe in
+  // manual control; it is posted on change and once a second so iCAN can
+  // also tell when iWebSocket itself has stopped.
+  bool link_ok = HasConnectedClients() &&
+                 (current_time - m_last_link_rx <= m_link_timeout);
+  if (link_ok != m_link_ok_posted || current_time - m_last_link_post >= 1.0) {
+    if (link_ok != m_link_ok_posted)
+      reportEvent(std::string("SS UI link ") + (link_ok ? "up" : "LOST"));
+    Notify("UI_LINK_OK", link_ok ? "true" : "false");
+    m_link_ok_posted = link_ok;
+    m_last_link_post = current_time;
+  }
+
   // Aqui você pode incluir outras operações se necessário
 
   //Analysis the variables coming from Freeboard
@@ -522,6 +557,12 @@ bool WebSocket::Iterate()
   root["TRAFFIC_TARGETS"] = traffic_targets;
   root["COLAV_DIST"] = colav_dist;
 
+  // iCAN: what is really being sent, who owns the drive, feedback
+  for (std::map<std::string, double>::iterator v = m_can_num.begin(); v != m_can_num.end(); v++)
+    root[v->first] = v->second;
+  for (std::map<std::string, std::string>::iterator v = m_can_str.begin(); v != m_can_str.end(); v++)
+    root[v->first] = v->second;
+
   // Add contact info as nested object
   Json::Value contact;
   contact["NAME"] = contact_name;
@@ -583,6 +624,10 @@ bool WebSocket::OnStartUp()
     }
     else if(param == "colav_max_util_cpa_dist" && isNumber(value)) {
       colav_max_cpa = atof(value.c_str());
+      handled = true;
+    }
+    else if(param == "link_timeout" && isNumber(value) && atof(value.c_str()) > 0) {
+      m_link_timeout = atof(value.c_str());
       handled = true;
     }
     else if(param == "foo") {
@@ -663,6 +708,8 @@ void WebSocket::registerVariables()
   Register("TRAFFIC_SPAWNED", 0); //pTrafficSim ack for a placed target
   Register("TRAFFIC_TARGETS", 0); //Runtime-spawned contacts currently placed
   Register("COLAV_BHV_SPAWN", 0); //An avdcol_ instance was just spawned
+  for (std::set<std::string>::iterator v = m_can_vars.begin(); v != m_can_vars.end(); v++)
+    Register(*v, 0);              //iCAN status and drive feedback for SS UI
 
 }
 
@@ -1032,10 +1079,13 @@ void WebSocket::handleTrim(const std::string& value)
 
 void WebSocket::handleControleManual(const std::string& value)
 {
+  // MOOS_MANUAL_OVERRIDE (two Rs) is what pHelmIvP, planchaPID and iCAN
+  // read. It used to be posted misspelled, so manual control never reached
+  // them and planchaPID kept overwriting the operator's rudder.
   if (value == "true") {
-    Notify("MOOS_MANUAL_OVERIDE", "true");
+    Notify("MOOS_MANUAL_OVERRIDE", "true");
   } else if (value == "false") {
-    Notify("MOOS_MANUAL_OVERIDE", "false");
+    Notify("MOOS_MANUAL_OVERRIDE", "false");
     Notify("DESIRED_RUDDER", 0.0);
     Notify("DESIRED_THRUST", 0.0);
   }
@@ -1060,14 +1110,20 @@ void WebSocket::handleDesiredSpeed(const std::string& value)
 
 void WebSocket::handleDesiredRudder(const std::string& value)
 {
-  double value_rudder = std::stod(value);
-  Notify("DESIRED_RUDDER", value_rudder);
+  if (!isNumber(value)) {
+    reportRunWarning("DESIRED_RUDDER ignored, not a number: " + value);
+    return;
+  }
+  Notify("DESIRED_RUDDER", atof(value.c_str()));
 }
 
 void WebSocket::handleDesiredThrust(const std::string& value)
 {
-  double value_thrust = std::stod(value);
-  Notify("DESIRED_THRUST", value_thrust);
+  if (!isNumber(value)) {
+    reportRunWarning("DESIRED_THRUST ignored, not a number: " + value);
+    return;
+  }
+  Notify("DESIRED_THRUST", atof(value.c_str()));
 }
 
 void WebSocket::handleDesiredGear(const std::string& value)

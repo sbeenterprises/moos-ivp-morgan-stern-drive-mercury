@@ -17,6 +17,8 @@
 #include <vector>
 #include <deque>
 #include <mutex>
+#include <atomic>
+#include <set>
 #include "MOOS/libMOOSGeodesy/MOOSGeodesy.h"
 
 
@@ -85,6 +87,19 @@ class WebSocket : public AppCastingMOOSApp
   double m_connection_timeout; // Timeout in seconds for stale connections
   double m_last_connection_check; // Last time we checked for stale connections
   
+  // Link health for the lost-link failsafe in iCAN. Any message, ping
+  // or pong from a client counts; browsers answer the server's 1 Hz
+  // WebSocket ping automatically, so SS UI needs no change for this.
+  std::atomic<double> m_last_link_rx;   // written from the websocket thread
+  double m_link_timeout;                // seconds of silence = link lost
+  bool   m_link_ok_posted;
+  double m_last_link_post;
+
+  // iCAN status passed through to SS UI (CAN_* variables)
+  std::set<std::string> m_can_vars;
+  std::map<std::string, std::string> m_can_str;
+  std::map<std::string, double> m_can_num;
+
   // Heartbeat to keep connection alive
   double m_heartbeat_interval; // Interval in seconds to send heartbeat messages
   double m_last_heartbeat_time; // Last time we sent a heartbeat

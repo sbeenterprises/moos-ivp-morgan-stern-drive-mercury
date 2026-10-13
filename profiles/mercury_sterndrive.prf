@@ -1,0 +1,49 @@
+//------------------------------------------------------------------
+// Drive profile: Mercury stern-drive boat (the boat this repo was
+// written for). Frames are identical to the hardcoded tables in
+// src/iCAN/CAN.cpp before October 2026; tests/canprofile_test.cpp
+// checks every rudder and throttle step against that old code.
+//
+// Status marks:  [V] verified (in use on the boat)   [P] placeholder
+//------------------------------------------------------------------
+
+profile        = mercury_sterndrive
+can_interface  = slcan0                       // [V]
+capabilities   = steer, thrust
+
+// Limits and interlock. Shift pauses are 0 so gear changes exactly as
+// before (gear follows the sign of thrust). Raise them once confirmed
+// with the drive maker; e.g. shift_neutral_secs = 1.0.
+rudder_limit_pct     = 100
+thrust_limit_pct     = 100
+thrust_deadband_pct  = 0
+shift_neutral_secs   = 0                      // [P]
+shift_settle_secs    = 0                      // [P]
+
+// Lost link to SS UI while in manual: rudder 0, throttle 0 (neutral)
+lost_link_rudder_pct = 0
+lost_link_thrust_pct = 0
+
+// Do not transmit an ID that another device is already sending
+guard_secs = 1.0
+
+//--- Steering: 18F30A1A, DLC 7 ------------------------------------
+// Bytes 0-1: signed 16-bit big-endian position from the table.
+// Bytes 5-6: FF E5 when turning to port, 1A FD at centre/starboard.
+tx_msg   = name=steer, cap=steer, id=18F30A1A, dlc=7, period_ms=50, fill=FF
+tx_field = msg=steer, src=rudder_pct, byte=0, bits=16, order=be, signed=true, map=table, table=tables/mercury_steer.csv
+tx_field = msg=steer, src=rudder_side, byte=5, bits=16, order=be, map=enum, values=port:FFE5|center:1AFD|stbd:1AFD
+
+//--- Gear: J1939 ETC2 18F005D0 ------------------------------------
+tx_msg   = name=gear, cap=thrust, id=18F005D0, dlc=8, period_ms=50, fill=FF
+tx_field = msg=gear, src=gear, byte=0, bits=8, map=enum, values=fwd:7E|neutral:7D|rev:7C
+
+//--- Engine speed: J1939 TSC1 18000017 ----------------------------
+// Byte 0 C1 = speed control override, bytes 1-2 requested speed
+// (0.125 rpm/bit, 700-4200 rpm from the table), byte 3 E1.
+tx_msg   = name=tsc1, cap=thrust, id=18000017, dlc=8, period_ms=50, fill=FF
+tx_const = msg=tsc1, byte=0, value=C1
+tx_field = msg=tsc1, src=thrust_abs_pct, byte=1, bits=16, order=le, map=table, table=tables/mercury_rpm.csv
+tx_const = msg=tsc1, byte=3, value=E1
+
+// Engine telemetry on this boat is decoded by iCANRec (ENGINE_*).

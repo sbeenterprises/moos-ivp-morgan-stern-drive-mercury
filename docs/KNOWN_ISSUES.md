@@ -6,17 +6,17 @@ Items marked *(unverified)* are inferred from code, not observed on the boat.
 
 ## Critical — safety / control
 
-1. **Manual-override command is a no-op.** iWebSocket posts `MOOS_MANUAL_OVERIDE`
+1. **[Fixed Oct 2026: iWebSocket posts `MOOS_MANUAL_OVERRIDE`; iCAN accepts only the owner's demands]** **Manual-override command is a no-op.** iWebSocket posts `MOOS_MANUAL_OVERIDE`
    (one R) for `CONTROLE_MANUAL` / `AUTONOMOUS_CONTROL`
    (`src/iWebSocket/WebSocket.cpp:1036,1038,1046`). The helm and planchaPID only act
    on `MOOS_MANUAL_OVERRIDE` (`src/planchaPID/lanchaPID.cpp:488`; L711 registers the
    typo but never handles it). If any mode flag is still `true`, planchaPID keeps
    publishing rudder/thrust and fights manual commands.
-2. **No command timeout / deadman.** iCAN re-sends the last `DESIRED_RUDDER`/`DESIRED_THRUST`
+2. **[Fixed Oct 2026 for manual control: lost SS UI link -> rudder 0, throttle 0; `CAN_SEND=false` sends neutral first. Autonomy still has no deadman if planchaPID dies]** **No command timeout / deadman.** iCAN re-sends the last `DESIRED_RUDDER`/`DESIRED_THRUST`
    forever (`src/iCAN/CAN.cpp:99-109`); planchaPID just stops publishing when its gate
    closes. If planchaPID or the helm dies, the last throttle/steering persists.
    `CAN_SEND=false` stops transmission without first sending neutral.
-3. **STATIONING and REGION bypass the override check** in planchaPID's publish gate
+3. **[Fixed Oct 2026]** **STATIONING and REGION bypass the override check** in planchaPID's publish gate
    (`lanchaPID.cpp:578-580`), and the UI's station-keep/region commands do not set
    `MOOS_MANUAL_OVERRIDE=false` — so the PID may drive actuators from stale
    `DESIRED_HEADING/SPEED` while the helm is parked *(unverified)*.

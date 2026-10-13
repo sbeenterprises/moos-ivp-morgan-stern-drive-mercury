@@ -12,6 +12,7 @@ SET(SRC
 ADD_EXECUTABLE(iCAN ${SRC})
 
 TARGET_LINK_LIBRARIES(iCAN
+   canprofile
    ${MOOS_LIBRARIES}
    apputil
    mbutil

@@ -1,0 +1,78 @@
+//------------------------------------------------------------------
+// Drive profile: USV-722
+//   Yamaha F115B outboard (cable controlled, no engine data on CAN)
+//   Glendinning helm at address 208 (0xD0), control processor at
+//   226 (0xE2) driving the throttle and shift cables, steering
+//   actuator reporting on 11-bit ID 0x210.
+//
+// Source: USV-722-CAN-ID-Mapping.xlsx and USV-722-CAN-Bus-Runbook.md
+// (captures of 9 Oct 2026).
+//
+// Status marks:  [V] verified on usv-722   [P] placeholder
+//
+// The PC sends the helm's own messages, so it can only drive a
+// signal while the helm is NOT sending it. guard=true makes iCAN
+// listen first and refuse to transmit any ID the helm is still
+// sending (posted as CAN_CONFLICT). Switch off the helm's steering
+// before PC steering, as in the runbook's send test.
+//
+// Not included on purpose:
+//   trim (18FF08D0)   momentary switch, no position feedback
+//   key   (18FF0F10)  never send START from the PC (runbook)
+//------------------------------------------------------------------
+
+profile        = usv722_glendinning
+can_interface  = slcan0                       // [V] 250 kbit/s, k800-can.service
+capabilities   = steer, thrust
+
+rudder_limit_pct     = 100
+thrust_limit_pct     = 100
+thrust_deadband_pct  = 0
+shift_neutral_secs   = 1.0                    // [P] processor also sequences shifts
+shift_settle_secs    = 0.5                    // [P]
+
+// Lost link to SS UI while in manual: rudder 0, throttle 0 (neutral)
+lost_link_rudder_pct = 0
+lost_link_thrust_pct = 0
+
+guard_secs = 1.0
+
+// Alarm when the actual rudder differs from the command
+rudder_feedback   = CAN_RUDDER_ACTUAL_PCT
+rudder_alarm_pct  = 5                         // [P] 9 Oct test settled within 3%
+rudder_alarm_secs = 3
+
+//--- Steering command: 18FF11D0 (PGN 65297) -------------------- [V]
+// Bytes 0-1 low byte first: 0 = full port, 511 = centre,
+// 1012 = full starboard. Bytes 2-7 FF. Helm sends every 130 ms.
+tx_msg   = name=steer, cap=steer, id=18FF11D0, dlc=8, period_ms=130, fill=FF, guard=true
+tx_field = msg=steer, src=rudder_pct, byte=0, bits=16, order=le, map=points, points=-100:0|0:511|100:1012
+
+//--- Gear lever: J1939 ETC2 18F005D0 --------------------------- [V]
+// Byte 0: 7E forward, 7D neutral, 7C reverse.
+tx_msg   = name=gear, cap=thrust, id=18F005D0, dlc=8, period_ms=130, fill=FF, guard=true
+tx_field = msg=gear, src=gear, byte=0, bits=8, map=enum, values=fwd:7E|neutral:7D|rev:7C
+
+//--- Throttle lever: J1939 EEC2 0CF003D0 ----------------------- [V]
+// Byte 1 = thrust % / 0.4 (00 = 0 %, FA = 100 %), same in forward
+// and reverse. Byte 0 FF. Helm sends about every 70 ms.
+tx_msg   = name=throttle, cap=thrust, id=0CF003D0, dlc=8, period_ms=70, fill=FF, guard=true
+tx_field = msg=throttle, src=thrust_abs_pct, byte=1, bits=8, map=linear, scale=2.5
+
+//--- Feedback ------------------------------------------------------
+// Steering actuator, 11-bit ID 210                                 [V]
+rx_field = name=CAN_RUDDER_ACTUAL_PCT, id=210, ext=false, parts=B3:0-7|B6:2-3, map=points, points=0:-100|511:0|1012:100
+rx_field = name=CAN_RUDDER_ECHO_PCT, id=210, ext=false, parts=B2:0-7|B6:0-1, map=points, points=0:-100|511:0|1012:100
+rx_field = name=CAN_STEER_MOTOR_PCT, id=210, ext=false, parts=B4
+
+// Helm in command of steering: high nibble of 18FF08D0 byte 0      [V]
+rx_field = name=CAN_HELM_HAS_STEERING, id=18FF08D0, parts=B0:4-7, map=enum, values=F:true|0:false
+
+// Helm lever and what the processor tells the engine               [V]
+rx_field = name=CAN_HELM_GEAR, id=18F005D0, parts=B0, map=enum, values=7E:fwd|7D:neutral|7C:rev
+rx_field = name=CAN_HELM_THROTTLE_PCT, id=0CF003D0, parts=B1, map=linear, scale=0.4
+rx_field = name=CAN_ENGINE_GEAR, id=00F005E2, parts=B0, map=enum, values=7E:fwd|7D:neutral|7C:rev
+rx_field = name=CAN_ENGINE_THROTTLE_PCT, id=00F003E2, parts=B1, map=linear, scale=0.4
+
+// Fuel tank 0, NMEA 2000 PGN 127505                                [V]
+rx_field = name=CAN_FUEL_PCT, id=19F21170, parts=B1:0-7|B2:0-7, map=linear, scale=0.004

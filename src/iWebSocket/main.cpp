@@ -24,8 +24,10 @@ int port = 8000;
 std::string host("0.0.0.0"); // If you need this server to be accessible on a different machine, use "0.0.0.0"
 ix::WebSocketServer server(port, host);
 
-// Configure server heartbeat (ping interval in seconds)
-const int PING_INTERVAL_SECONDS = 30;
+// Configure server heartbeat (ping interval in seconds). Browsers answer
+// pings automatically; each pong refreshes the SS UI link time used by the
+// lost-link failsafe (UI_LINK_OK), so keep this well below link_timeout.
+const int PING_INTERVAL_SECONDS = 1;
 
 
 int main(int argc, char *argv[])

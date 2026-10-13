@@ -20,11 +20,14 @@ void showSynopsis()
 {
   blk("SYNOPSIS:                                                       ");
   blk("------------------------------------                            ");
-  blk("  The iCAN application is used for               ");
-  blk("                                                                ");
-  blk("                                                                ");
-  blk("                                                                ");
-  blk("                                                                ");
+  blk("  iCAN sends rudder, gear and throttle commands on CAN. The CAN   ");
+  blk("  IDs, byte layout and scaling come from a per-boat profile file  ");
+  blk("  (profiles/<boat>.prf); none are built into the program.        ");
+  blk("  Only the current control owner may command the drive: SS UI    ");
+  blk("  (iWebSocket) in manual, planchaPID in autonomy. Manual settings ");
+  blk("  are held until changed; if the UI link is lost in manual, the   ");
+  blk("  rudder and throttle go to the profile's lost-link values (0).   ");
+  blk("  An invalid profile leaves iCAN running but never transmitting.  ");
 }
 
 //----------------------------------------------------------------
@@ -69,11 +72,16 @@ void showExampleConfigAndExit()
   blu("iCAN Example MOOS Configuration                   ");
   blu("=============================================================== ");
   blk("                                                                ");
-  blk("ProcessConfig = iCAN                              ");
+  blk("ProcessConfig = iCAN                                            ");
   blk("{                                                               ");
-  blk("  AppTick   = 4                                                 ");
-  blk("  CommsTick = 4                                                 ");
+  blk("  AppTick   = 50              // frames are scheduled per message ");
+  blk("  CommsTick = 50                                                ");
   blk("                                                                ");
+  blk("  profile_file = ../../profiles/mercury_sterndrive.prf  (required)");
+  blk("  can_interface = slcan0      // default: from the profile        ");
+  blk("  manual_sources   = iWebSocket                                   ");
+  blk("  autonomy_sources = planchaPID, pHelmIvP, iWebSocket             ");
+  blk("  link_stale_secs  = 3        // UI_LINK_OK older than this = lost");
   blk("}                                                               ");
   blk("                                                                ");
   exit(0);
@@ -94,12 +102,25 @@ void showInterfaceAndExit()
   blk("                                                                ");
   blk("SUBSCRIPTIONS:                                                  ");
   blk("------------------------------------                            ");
-  blk("  NODE_MESSAGE = src_node=alpha,dest_node=bravo,var_name=FOO,   ");
-  blk("                 string_val=BAR                                 ");
+  blk("  DESIRED_RUDDER       = % of steering travel, + = starboard     ");
+  blk("  DESIRED_THRUST       = %, + ahead / - astern (sign sets gear)  ");
+  blk("  MOOS_MANUAL_OVERRIDE = true (SS UI owns the drive) / false     ");
+  blk("  UI_LINK_OK           = true/false, posted by iWebSocket        ");
+  blk("  CAN_SEND             = true/false, transmit enable             ");
   blk("                                                                ");
   blk("PUBLICATIONS:                                                   ");
   blk("------------------------------------                            ");
-  blk("  Publications are determined by the node message content.      ");
+  blk("  CAN_STATUS           = INHIBITED | NO_BUS | STANDBY | ACTIVE   ");
+  blk("  CAN_CONTROL_OWNER    = MANUAL | AUTONOMY                       ");
+  blk("  CAN_LOST_LINK        = true/false                              ");
+  blk("  CAN_CONFLICT         = none | names of messages not sent       ");
+  blk("                         because another node sends the same ID ");
+  blk("  CAN_TX_RUDDER_PCT, CAN_TX_THRUST_PCT, CAN_TX_GEAR              ");
+  blk("                       = what is actually being sent             ");
+  blk("  CAN_RUDDER_MISMATCH  = true when rudder feedback disagrees     ");
+  blk("  CAN_PROFILE, CAN_PROFILE_HASH                                  ");
+  blk("  plus every rx_field the profile defines (e.g.                  ");
+  blk("  CAN_RUDDER_ACTUAL_PCT on USV-722)                              ");
   blk("                                                                ");
   exit(0);
 }

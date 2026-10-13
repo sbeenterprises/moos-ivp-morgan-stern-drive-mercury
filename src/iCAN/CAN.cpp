@@ -3,28 +3,54 @@
 /*    ORGN: MIT, Cambridge MA                               */
 /*    FILE: CAN.cpp                                        */
 /*    DATE: December 29th, 1963                             */
+/*          October 2026: rewritten around lib_canprofile.  */
+/*          No CAN IDs or payloads live in this file; they  */
+/*          come from the boat's profile (profiles/NAME.prf).  */
 /************************************************************/
 
-#include <iterator>
+#include <cerrno>
+#include <cmath>
 #include <cstring>
-#include <thread>
-#include <chrono>
+#include <fcntl.h>
+#include <linux/can.h>
+#include <linux/can/raw.h>
+#include <net/if.h>
+#include <sys/ioctl.h>
+#include <sys/socket.h>
+#include <unistd.h>
 #include "MBUtils.h"
 #include "ACTable.h"
 #include "CAN.h"
 
 using namespace std;
+using namespace canprofile;
 
 //---------------------------------------------------------
 // Constructor()
 
 CAN::CAN()
 {
-  m_desired_rudder = 0.0;
-  m_desired_thrust = 0.0;
-  m_current_trim = 0.0;
-  m_can_send = "false";  // Disable CAN sending by default
-  m_can_socket = -1;
+  m_link_stale_secs   = 3.0;
+  m_manual_sources.insert("iWebSocket");
+  m_autonomy_sources.insert("planchaPID");
+  m_autonomy_sources.insert("pHelmIvP");     // end-of-mission zeros (alpha.bhv endflags)
+  m_autonomy_sources.insert("iWebSocket");   // AUTONOMOUS_STOP / TRAIL_FOLLOW=off zeros
+
+  m_profile_ok        = false;
+  m_can_socket        = -1;
+  m_last_init_attempt = -1e9;
+  m_start_time        = 0;
+  m_can_send          = false;   // nothing is sent until CAN_SEND=true
+  m_ui_link_ok        = false;
+  m_ui_link_time      = -1e9;
+  m_tx_errors         = 0;
+  m_rx_frames         = 0;
+  m_last_iterate      = 0;
+  m_tick              = 0.05;
+  m_rejected          = 0;
+  m_mismatch_since    = -1;
+  m_mismatch          = false;
+  m_last_status_post  = 0;
 }
 
 //---------------------------------------------------------
@@ -32,9 +58,7 @@ CAN::CAN()
 
 CAN::~CAN()
 {
-  if(m_can_socket != -1) {
-    close(m_can_socket);
-  }
+  closeCAN();
 }
 
 //---------------------------------------------------------
@@ -49,38 +73,61 @@ bool CAN::OnNewMail(MOOSMSG_LIST &NewMail)
     CMOOSMsg &msg = *p;
     string key    = msg.GetKey();
 
-#if 0 // Keep these around just for template
-    string comm  = msg.GetCommunity();
-    double dval  = msg.GetDouble();
-    string sval  = msg.GetString(); 
-    string msrc  = msg.GetSource();
-    double mtime = msg.GetTime();
-    bool   mdbl  = msg.IsDouble();
-    bool   mstr  = msg.IsString();
-#endif
+    if(key == "DESIRED_RUDDER")
+      handleDemand(msg, true);
+    else if(key == "DESIRED_THRUST")
+      handleDemand(msg, false);
+    else if(key == "MOOS_MANUAL_OVERRIDE") {
+      bool manual = (tolower(stripBlankEnds(msg.GetString())) == "true");
+      m_core.setOwner(manual ? OWNER_MANUAL : OWNER_AUTONOMY);
+    }
+    else if(key == "UI_LINK_OK") {
+      string v = msg.IsString() ? tolower(stripBlankEnds(msg.GetString())) : "";
+      m_ui_link_ok   = msg.IsString() ? (v == "true") : (msg.GetDouble() != 0);
+      m_ui_link_time = MOOSTime();
+    }
+    else if(key == "CAN_SEND") {
+      string v = msg.IsString() ? tolower(stripBlankEnds(msg.GetString())) : "";
+      bool enable = msg.IsString() ? (v == "true") : (msg.GetDouble() != 0);
+      double now = MOOSTime();
+      if(enable && !m_can_send)
+        m_core.resetToNeutral(now);   // never resume an old command
+      else if(!enable && m_can_send)
+        sendNeutralOnce(now);         // leave the drive in neutral, then go quiet
+      m_can_send = enable;
+    }
+    else if(key != "APPCAST_REQ") // handled by AppCastingMOOSApp
+      reportRunWarning("Unhandled Mail: " + key);
+  }
 
-     if(key == "FOO") 
-       cout << "great!";
-     else if(key == "DESIRED_THRUST") {
-       m_desired_thrust = msg.GetDouble();
-     }
-     else if(key == "DESIRED_RUDDER") {
-       m_desired_rudder = msg.GetDouble();
-       sendRudderCommand(m_desired_rudder);
-     }
-     else if(key == "TRIM") {
-       double trim_value = msg.GetDouble();
-       //handleTrimCommand(trim_value); // --- TRIM DISABLED ---
-     }
-     else if(key == "CAN_SEND") {
-       // Support both string ("true"/"false") and boolean formats
-       m_can_send = msg.GetString();
-     }
-     else if(key != "APPCAST_REQ") // handled by AppCastingMOOSApp
-       reportRunWarning("Unhandled Mail: " + key);
-   }
-	
-   return(true);
+  return(true);
+}
+
+//---------------------------------------------------------
+// Procedure: handleDemand()
+//   Accept a rudder/thrust demand only from a process that belongs
+//   to the current owner. In MANUAL that is SS UI (iWebSocket) only,
+//   so planchaPID or a mission end-flag can no longer overwrite the
+//   operator's setting.
+
+void CAN::handleDemand(const CMOOSMsg& msg, bool is_rudder)
+{
+  string src = msg.GetSource();
+  const set<string>& allowed = (m_core.owner() == OWNER_MANUAL) ?
+    m_manual_sources : m_autonomy_sources;
+
+  if(allowed.count(src) == 0) {
+    m_rejected++;
+    m_last_rejected = msg.GetKey() + " from " + src + " (owner " +
+      ownerName(m_core.owner()) + ")";
+    return;
+  }
+
+  double val = msg.IsDouble() ? msg.GetDouble() : atof(msg.GetString().c_str());
+  if(is_rudder)
+    m_core.setRudder(val);
+  else
+    m_core.setThrust(val);
 }
 
 //---------------------------------------------------------
@@ -88,8 +135,8 @@ bool CAN::OnNewMail(MOOSMSG_LIST &NewMail)
 
 bool CAN::OnConnectToServer()
 {
-   registerVariables();
-   return(true);
+  registerVariables();
+  return(true);
 }
 
 //---------------------------------------------------------
@@ -99,10 +146,30 @@ bool CAN::OnConnectToServer()
 bool CAN::Iterate()
 {
   AppCastingMOOSApp::Iterate();
+  double now = MOOSTime();
+  if(m_last_iterate > 0 && now > m_last_iterate)
+    m_tick = 0.9 * m_tick + 0.1 * (now - m_last_iterate);
+  m_last_iterate = now;
 
-  sendRudderCommand(m_desired_rudder);
+  // Keep trying to open the bus (slcan0 may come up after iCAN)
+  if(m_profile_ok && m_can_socket == -1 && now - m_last_init_attempt > 5.0) {
+    m_last_init_attempt = now;
+    if(initCAN())
+      m_start_time = now;   // listen guard_secs before the first frame
+  }
 
-  sendThrustCommand(m_desired_thrust);
+  readFrames(now);
+
+  bool link_ok = m_ui_link_ok && (now - m_ui_link_time <= m_link_stale_secs);
+  m_core.setLinkOk(link_ok);
+  DriveCommand cmd = m_core.update(now);
+
+  if(m_profile_ok && m_can_socket != -1 && m_can_send)
+    sendDue(cmd, now);
+
+  checkRudderFeedback(cmd, now);
+  postStatus(cmd, now);
+  m_last_cmd = cmd;
 
   AppCastingMOOSApp::PostReport();
   return(true);
@@ -129,18 +196,55 @@ bool CAN::OnStartUp()
     string value = line;
 
     bool handled = false;
+    if(param == "profile_file") {
+      m_profile_file = value;
+      handled = true;
+    }
+    else if(param == "can_interface") {
+      m_can_interface = value;
+      handled = true;
+    }
+    else if(param == "manual_sources" || param == "autonomy_sources") {
+      set<string>& dest = (param == "manual_sources") ? m_manual_sources : m_autonomy_sources;
+      dest.clear();
+      vector<string> names = parseString(value, ',');
+      for(unsigned int i=0; i<names.size(); i++)
+        if(stripBlankEnds(names[i]) != "")
+          dest.insert(stripBlankEnds(names[i]));
+      handled = true;
+    }
+    else if(param == "link_stale_secs" && isNumber(value)) {
+      m_link_stale_secs = atof(value.c_str());
+      handled = (m_link_stale_secs > 0);
+    }
 
     if(!handled)
       reportUnhandledConfigWarning(orig);
+  }
 
+  // Load and validate the boat profile. Any error leaves iCAN running
+  // but inhibited: it never transmits, and the errors are on the appcast.
+  if(m_profile_file == "")
+    reportConfigWarning("profile_file is not set; iCAN will not transmit");
+  else if(!m_profile.load(m_profile_file)) {
+    reportConfigWarning("Profile " + m_profile_file + " is invalid; iCAN will not transmit");
+    for(size_t i=0; i<m_profile.errors().size(); i++)
+      reportConfigWarning("  " + m_profile.errors()[i]);
   }
-  
-  if(!initCAN()) {
-    reportConfigWarning("Failed to initialize CAN interface");
-    return(false);
+  else {
+    m_profile_ok = true;
+    m_core.configure(m_profile);
+    if(m_can_interface == "")
+      m_can_interface = m_profile.canInterface();
   }
-  
-  registerVariables();	
+
+  // Sized even for an invalid profile, so the appcast can list its messages
+  size_t n = m_profile.txMessages().size();
+  m_last_sent.assign(n, -1e9);
+  m_foreign_seen.assign(n, -1e9);
+  m_sent_count.assign(n, 0);
+
+  registerVariables();
   return(true);
 }
 
@@ -152,68 +256,9 @@ void CAN::registerVariables()
   AppCastingMOOSApp::RegisterVariables();
   Register("DESIRED_RUDDER", 0);
   Register("DESIRED_THRUST", 0);
-  Register("TRIM", 0);
+  Register("MOOS_MANUAL_OVERRIDE", 0);
+  Register("UI_LINK_OK", 0);
   Register("CAN_SEND", 0);
-}
-
-
-//------------------------------------------------------------
-// Procedure: buildReport()
-
-bool CAN::buildReport() 
-{
-  m_msgs << "============================================" << endl;
-  m_msgs << "File: iCAN - CAN Bus Interface             " << endl;
-  m_msgs << "============================================" << endl;
-
-  // CAN Interface Status
-  string can_status = (m_can_socket != -1) ? "CONNECTED" : "DISCONNECTED";
-  m_msgs << "CAN Interface (slcan0): " << can_status << endl;
-  m_msgs << "CAN Socket ID: " << m_can_socket << endl;
-  m_msgs << endl;
-
-  // Current Values
-  m_msgs << "Current Rudder Command: " << m_desired_rudder << "%" << endl;
-  m_msgs << "Desired Thrust: " << m_desired_thrust << "%" << endl;
-  m_msgs << "Current TRIM Value: " << m_current_trim << endl;
-  m_msgs << endl;
-
-  // CAN Frame Information
-  string current_rudder_frame = getRudderCANFrame(m_desired_rudder);
-  m_msgs << "Current Rudder CAN Frame: " << current_rudder_frame << endl;
-  
-  string direction = "CENTER";
-  if(m_desired_rudder < 0) direction = "LEFT";
-  else if(m_desired_rudder > 0) direction = "RIGHT";
-  
-  m_msgs << "Rudder Direction: " << direction << endl;
-  m_msgs << "Rudder Percentage: " << abs((int)m_desired_rudder) << "%" << endl;
-  m_msgs << endl;
-
-  // Thrust Information
-  string gear_command = getGearCommand(m_desired_thrust);
-  string thrust_state = (m_desired_thrust > 0) ? "FORWARD" : "NEUTRAL";
-  m_msgs << "Current Gear Command: " << gear_command << endl;
-  m_msgs << "Thrust State: " << thrust_state << endl;
-
-  if(m_desired_thrust > 0) {
-    string current_thrust_frame = getThrustCANFrame(m_desired_thrust);
-    m_msgs << "Current Thrust CAN Frame: " << current_thrust_frame << endl;
-  }
-  m_msgs << "Thrust Percentage: " << ((int)m_desired_thrust) << "%" << endl;
-  m_msgs << endl;
-
-  // Statistics Table
-  ACTable actab(2);
-  actab << "Parameter | Value";
-  actab.addHeaderLines();
-  actab << "CAN ID" << "0x18F30A1A";
-  actab << "Data Length" << "8 bytes";
-  actab << "Update Rate" << "100ms (10Hz)";
-  actab << "Interface" << "slcan0";
-  m_msgs << actab.getFormattedString();
-
-  return(true);
 }
 
 //---------------------------------------------------------
@@ -221,410 +266,353 @@ bool CAN::buildReport()
 
 bool CAN::initCAN()
 {
-  m_can_socket = socket(PF_CAN, SOCK_RAW, CAN_RAW);
-  if(m_can_socket < 0) {
-    return false;
+  closeCAN();
+  m_can_error = "";
+
+  int s = socket(PF_CAN, SOCK_RAW, CAN_RAW);
+  if(s < 0) {
+    m_can_error = string("socket(PF_CAN): ") + strerror(errno);
+    return(false);
   }
 
-  strcpy(m_ifr.ifr_name, "slcan0");
-  ioctl(m_can_socket, SIOCGIFINDEX, &m_ifr);
+  struct ifreq ifr;
+  memset(&ifr, 0, sizeof(ifr));
+  strncpy(ifr.ifr_name, m_can_interface.c_str(), IFNAMSIZ - 1);
+  if(ioctl(s, SIOCGIFINDEX, &ifr) < 0) {
+    m_can_error = "interface " + m_can_interface + " not found: " + strerror(errno);
+    close(s);
+    return(false);
+  }
 
-  m_can_addr.can_family = AF_CAN;
-  m_can_addr.can_ifindex = m_ifr.ifr_ifindex;
+  struct sockaddr_can addr;
+  memset(&addr, 0, sizeof(addr));
+  addr.can_family  = AF_CAN;
+  addr.can_ifindex = ifr.ifr_ifindex;
+  if(bind(s, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+    m_can_error = string("bind: ") + strerror(errno);
+    close(s);
+    return(false);
+  }
 
-  if(bind(m_can_socket, (struct sockaddr *)&m_can_addr, sizeof(m_can_addr)) < 0) {
+  // Non-blocking reads; our own transmissions are not echoed back to
+  // this socket (CAN_RAW_RECV_OWN_MSGS is off by default), so any
+  // frame we receive on one of our IDs came from another node.
+  fcntl(s, F_SETFL, fcntl(s, F_GETFL, 0) | O_NONBLOCK);
+  m_can_socket = s;
+  return(true);
+}
+
+void CAN::closeCAN()
+{
+  if(m_can_socket != -1)
     close(m_can_socket);
-    m_can_socket = -1;
-    return false;
-  }
-
-  return true;
+  m_can_socket = -1;
 }
 
 //---------------------------------------------------------
-// Procedure: getRudderCANFrame()
+// Procedure: readFrames()
+//   Drain the socket: note other senders on our IDs and decode
+//   the profile's feedback fields.
 
-string CAN::getRudderCANFrame(double rudder_value)
+void CAN::readFrames(double now)
 {
-  if(rudder_value == 0) {
-    return "18F30A1A#0000FFFFFF1AFD";
-  }
-  
-  if(rudder_value < 0) {
-    int percent = (int)(-rudder_value);
-    if(percent > 100) percent = 100;
-    
-    string left_frames[] = {
-      "18F30A1A#FF9DFFFFFFFFE5", "18F30A1A#FF3AFFFFFFFFE5", "18F30A1A#FED7FFFFFFFFE5", "18F30A1A#FE74FFFFFFFFE5", "18F30A1A#FE11FFFFFFFFE5",
-      "18F30A1A#FDAEFFFFFFFFE5", "18F30A1A#FD4BFFFFFFFFE5", "18F30A1A#FCE8FFFFFFFFE5", "18F30A1A#FC85FFFFFFFFE5", "18F30A1A#FC22FFFFFFFFE5",
-      "18F30A1A#FBBFFFFFFFFFE5", "18F30A1A#FB5CFFFFFFFFE5", "18F30A1A#FAF9FFFFFFFFE5", "18F30A1A#FA96FFFFFFFFE5", "18F30A1A#FA33FFFFFFFFE5",
-      "18F30A1A#F9D0FFFFFFFFE5", "18F30A1A#F96DFFFFFFFFE5", "18F30A1A#F90AFFFFFFFFE5", "18F30A1A#F8A7FFFFFFFFE5", "18F30A1A#F844FFFFFFFFE5",
-      "18F30A1A#F7E1FFFFFFFFE5", "18F30A1A#F77EFFFFFFFFE5", "18F30A1A#F71BFFFFFFFFE5", "18F30A1A#F6B8FFFFFFFFE5", "18F30A1A#F655FFFFFFFFE5",
-      "18F30A1A#F5F2FFFFFFFFE5", "18F30A1A#F58FFFFFFFFFE5", "18F30A1A#F52CFFFFFFFFE5", "18F30A1A#F4C9FFFFFFFFE5", "18F30A1A#F466FFFFFFFFE5",
-      "18F30A1A#F403FFFFFFFFE5", "18F30A1A#F3A0FFFFFFFFE5", "18F30A1A#F33DFFFFFFFFE5", "18F30A1A#F2DAFFFFFFFFE5", "18F30A1A#F277FFFFFFFFE5",
-      "18F30A1A#F214FFFFFFFFE5", "18F30A1A#F1B1FFFFFFFFE5", "18F30A1A#F14EFFFFFFFFE5", "18F30A1A#F0EBFFFFFFFFE5", "18F30A1A#F088FFFFFFFFE5",
-      "18F30A1A#F025FFFFFFFFE5", "18F30A1A#EFC2FFFFFFFFE5", "18F30A1A#EF5FFFFFFFFFE5", "18F30A1A#EEFCFFFFFFFFE5", "18F30A1A#EE99FFFFFFFFE5",
-      "18F30A1A#EE36FFFFFFFFE5", "18F30A1A#EDD3FFFFFFFFE5", "18F30A1A#ED70FFFFFFFFE5", "18F30A1A#ED0DFFFFFFFFE5", "18F30A1A#ECAAFFFFFFFFE5",
-      "18F30A1A#EC47FFFFFFFFE5", "18F30A1A#EBE4FFFFFFFFE5", "18F30A1A#EB81FFFFFFFFE5", "18F30A1A#EB1EFFFFFFFFE5", "18F30A1A#EABBFFFFFFFFE5",
-      "18F30A1A#EA58FFFFFFFFE5", "18F30A1A#E9F5FFFFFFFFE5", "18F30A1A#E992FFFFFFFFE5", "18F30A1A#E92FFFFFFFFFE5", "18F30A1A#E8CCFFFFFFFFE5",
-      "18F30A1A#E869FFFFFFFFE5", "18F30A1A#E806FFFFFFFFE5", "18F30A1A#E7A3FFFFFFFFE5", "18F30A1A#E740FFFFFFFFE5", "18F30A1A#E6DDFFFFFFFFE5",
-      "18F30A1A#E67AFFFFFFFFE5", "18F30A1A#E617FFFFFFFFE5", "18F30A1A#E5B4FFFFFFFFE5", "18F30A1A#E551FFFFFFFFE5", "18F30A1A#E4EEFFFFFFFFE5",
-      "18F30A1A#E48BFFFFFFFFE5", "18F30A1A#E428FFFFFFFFE5", "18F30A1A#E3C5FFFFFFFFE5", "18F30A1A#E362FFFFFFFFE5", "18F30A1A#E2FFFFFFFFFFE5",
-      "18F30A1A#E29CFFFFFFFFE5", "18F30A1A#E239FFFFFFFFE5", "18F30A1A#E1D6FFFFFFFFE5", "18F30A1A#E173FFFFFFFFE5", "18F30A1A#E110FFFFFFFFE5",
-      "18F30A1A#E0ADFFFFFFFFE5", "18F30A1A#E04AFFFFFFFFE5", "18F30A1A#DFE7FFFFFFFFE5", "18F30A1A#DF84FFFFFFFFE5", "18F30A1A#DF21FFFFFFFFE5",
-      "18F30A1A#DEBEFFFFFFFFE5", "18F30A1A#DE5BFFFFFFFFE5", "18F30A1A#DDF6FFFFFFFFE5", "18F30A1A#DD93FFFFFFFFE5", "18F30A1A#DD30FFFFFFFFE5",
-      "18F30A1A#DCCDFFFFFFFFE5", "18F30A1A#DC6AFFFFFFFFE5", "18F30A1A#DC07FFFFFFFFE5", "18F30A1A#DBA4FFFFFFFFE5", "18F30A1A#DB41FFFFFFFFE5",
-      "18F30A1A#DADEFFFFFFFFE5", "18F30A1A#DA7BFFFFFFFFE5", "18F30A1A#DA18FFFFFFFFE5", "18F30A1A#D9B5FFFFFFFFE5", "18F30A1A#D952FFFFFFFFE5"
-    };
-    
-    if(percent >= 1 && percent <= 100) {
-      return left_frames[percent-1];
-    }
-  } else {
-    int percent = (int)rudder_value;
-    if(percent > 100) percent = 100;
-    
-    string right_frames[] = {
-      "18F30A1A#01B9FFFFFF1AFD", "18F30A1A#021AFFFFFF1AFD", "18F30A1A#027AFFFFFF1AFD", "18F30A1A#02DAFFFFFF1AFD", "18F30A1A#033BFFFFFF1AFD",
-      "18F30A1A#039BFFFFFF1AFD", "18F30A1A#03FCFFFFFF1AFD", "18F30A1A#045CFFFFFF1AFD", "18F30A1A#04BCFFFFFF1AFD", "18F30A1A#051DFFFFFF1AFD",
-      "18F30A1A#057DFFFFFF1AFD", "18F30A1A#05DDFFFFFF1AFD", "18F30A1A#063EFFFFFF1AFD", "18F30A1A#069EFFFFFF1AFD", "18F30A1A#06FEFFFFFF1AFD",
-      "18F30A1A#075FFFFFFF1AFD", "18F30A1A#07BFFFFFFF1AFD", "18F30A1A#081FFFFFFF1AFD", "18F30A1A#0880FFFFFF1AFD", "18F30A1A#08E0FFFFFF1AFD",
-      "18F30A1A#0941FFFFFF1AFD", "18F30A1A#09A1FFFFFF1AFD", "18F30A1A#0A01FFFFFF1AFD", "18F30A1A#0A62FFFFFF1AFD", "18F30A1A#0AC2FFFFFF1AFD",
-      "18F30A1A#0B22FFFFFF1AFD", "18F30A1A#0B83FFFFFF1AFD", "18F30A1A#0BE3FFFFFF1AFD", "18F30A1A#0C43FFFFFF1AFD", "18F30A1A#0CA4FFFFFF1AFD",
-      "18F30A1A#0D04FFFFFF1AFD", "18F30A1A#0D64FFFFFF1AFD", "18F30A1A#0DC5FFFFFF1AFD", "18F30A1A#0E25FFFFFF1AFD", "18F30A1A#0E86FFFFFF1AFD",
-      "18F30A1A#0EE6FFFFFF1AFD", "18F30A1A#0F46FFFFFF1AFD", "18F30A1A#0FA7FFFFFF1AFD", "18F30A1A#1007FFFFFF1AFD", "18F30A1A#1067FFFFFF1AFD",
-      "18F30A1A#10C8FFFFFF1AFD", "18F30A1A#1128FFFFFF1AFD", "18F30A1A#1189FFFFFF1AFD", "18F30A1A#11E9FFFFFF1AFD", "18F30A1A#1249FFFFFF1AFD",
-      "18F30A1A#12AAFFFFFF1AFD", "18F30A1A#130AFFFFFF1AFD", "18F30A1A#136AFFFFFF1AFD", "18F30A1A#13CBFFFFFF1AFD", "18F30A1A#142BFFFFFF1AFD",
-      "18F30A1A#148BFFFFFF1AFD", "18F30A1A#14ECFFFFFF1AFD", "18F30A1A#154CFFFFFF1AFD", "18F30A1A#15ACFFFFFF1AFD", "18F30A1A#160DFFFFFF1AFD",
-      "18F30A1A#166DFFFFFF1AFD", "18F30A1A#16CEFFFFFF1AFD", "18F30A1A#172EFFFFFF1AFD", "18F30A1A#178EFFFFFF1AFD", "18F30A1A#17EFFFFFFF1AFD",
-      "18F30A1A#184FFFFFFF1AFD", "18F30A1A#18AFFFFFFF1AFD", "18F30A1A#1910FFFFFF1AFD", "18F30A1A#1970FFFFFF1AFD", "18F30A1A#19D1FFFFFF1AFD",
-      "18F30A1A#1A31FFFFFF1AFD", "18F30A1A#1A91FFFFFF1AFD", "18F30A1A#1AF2FFFFFF1AFD", "18F30A1A#1B52FFFFFF1AFD", "18F30A1A#1BB2FFFFFF1AFD",
-      "18F30A1A#1C13FFFFFF1AFD", "18F30A1A#1C73FFFFFF1AFD", "18F30A1A#1CD4FFFFFF1AFD", "18F30A1A#1D34FFFFFF1AFD", "18F30A1A#1D94FFFFFF1AFD",
-      "18F30A1A#1DF5FFFFFF1AFD", "18F30A1A#1E55FFFFFF1AFD", "18F30A1A#1EB5FFFFFF1AFD", "18F30A1A#1F16FFFFFF1AFD", "18F30A1A#1F76FFFFFF1AFD",
-      "18F30A1A#1FD7FFFFFF1AFD", "18F30A1A#2037FFFFFF1AFD", "18F30A1A#2097FFFFFF1AFD", "18F30A1A#20F8FFFFFF1AFD", "18F30A1A#2158FFFFFF1AFD",
-      "18F30A1A#21B8FFFFFF1AFD", "18F30A1A#2218FFFFFF1AFD", "18F30A1A#2279FFFFFF1AFD", "18F30A1A#22D9FFFFFF1AFD", "18F30A1A#2339FFFFFF1AFD",
-      "18F30A1A#239AFFFFFF1AFD", "18F30A1A#23FAFFFFFF1AFD", "18F30A1A#245AFFFFFF1AFD", "18F30A1A#24BBFFFFFF1AFD", "18F30A1A#251BFFFFFF1AFD",
-      "18F30A1A#257CFFFFFF1AFD", "18F30A1A#25DCFFFFFF1AFD", "18F30A1A#263CFFFFFF1AFD", "18F30A1A#269DFFFFFF1AFD", "18F30A1A#26FDFFFFFF1AFD"
-    };
-    
-    if(percent >= 1 && percent <= 100) {
-      return right_frames[percent-1];
-    }
-  }
-  
-  return "18F30A1A#0000FFFFFF1AFD";
-}
-
-//---------------------------------------------------------
-// Procedure: sendRudderCommand()
-
-void CAN::sendRudderCommand(double rudder_value)
-{
-  if(m_can_socket == -1) {
+  if(m_can_socket == -1)
     return;
-  }
 
-  string frame_str = getRudderCANFrame(rudder_value);
-  
-  struct can_frame frame;
-  frame.can_id = 0x18F30A1A | CAN_EFF_FLAG;
-  frame.can_dlc = 8;
-
-  // calculate DLC from payload size in string
-  const char* hex = frame_str.c_str() + 9; // depois do '#'
-  size_t nhex = strlen(hex);
-  size_t nbytes = nhex / 2;
-  if (nbytes > 8) nbytes = 8; // can_frame suporta até 8
-  frame.can_dlc = static_cast<__u8>(nbytes);
-
-  
-  sscanf(frame_str.substr(9).c_str(), "%02hhx%02hhx%02hhx%02hhx%02hhx%02hhx%02hhx%02hhx",
-         &frame.data[0], &frame.data[1], &frame.data[2], &frame.data[3],
-         &frame.data[4], &frame.data[5], &frame.data[6], &frame.data[7]);
-
-  
-  // zero and parse
-  memset(frame.data, 0, sizeof(frame.data));
-  for (size_t i = 0; i < nbytes; ++i) {
-    unsigned int byte_val = 0;
-    sscanf(hex + 2*i, "%02x", &byte_val);
-    frame.data[i] = static_cast<__u8>(byte_val);
-  }
-
-  if (m_can_send == "true") {
-    int bytes_sent = write(m_can_socket, &frame, sizeof(struct can_frame));
-    
-    if(bytes_sent < 0) {
-      reportRunWarning("Failed to send CAN frame");
-    }
-  }
-  else {
-    reportRunWarning("CAN_SEND is false, not sending CAN frame");
-  }
-}
-
-//---------------------------------------------------------
-// Procedure: sendThrustCommand()
-
-void CAN::sendThrustCommand(double thrust_value)
-{
-  if(m_can_socket == -1) {
-    return;
-  }
-
-  // Send gear command first
-  string gear_frame_str = getGearCommand(thrust_value);
-  struct can_frame gear_frame;
-  gear_frame.can_id = 0x18F005D0 | CAN_EFF_FLAG;
-  gear_frame.can_dlc = 8;
-
-  sscanf(gear_frame_str.substr(9).c_str(), "%02hhx%02hhx%02hhx%02hhx%02hhx%02hhx%02hhx%02hhx",
-         &gear_frame.data[0], &gear_frame.data[1], &gear_frame.data[2], &gear_frame.data[3],
-         &gear_frame.data[4], &gear_frame.data[5], &gear_frame.data[6], &gear_frame.data[7]);
-
-  if (m_can_send == "true") {
-    int gear_bytes_sent = write(m_can_socket, &gear_frame, sizeof(struct can_frame));
-    
-    if(gear_bytes_sent < 0) {
-      reportRunWarning("Failed to send gear CAN frame");
-    }
-  }
-  else {
-    reportRunWarning("CAN_SEND is false, not sending gear CAN frame");
-  }
-
-  // Always send thrust command (even if 0)
-  string thrust_frame_str = getThrustCANFrame(thrust_value);
-  struct can_frame thrust_frame;
-  thrust_frame.can_id = 0x18000017 | CAN_EFF_FLAG;
-  thrust_frame.can_dlc = 8;
-
-  sscanf(thrust_frame_str.substr(9).c_str(), "%02hhx%02hhx%02hhx%02hhx%02hhx%02hhx%02hhx%02hhx",
-         &thrust_frame.data[0], &thrust_frame.data[1], &thrust_frame.data[2], &thrust_frame.data[3],
-         &thrust_frame.data[4], &thrust_frame.data[5], &thrust_frame.data[6], &thrust_frame.data[7]);
-
-  if (m_can_send == "true") {
-    int thrust_bytes_sent = write(m_can_socket, &thrust_frame, sizeof(struct can_frame));
-    
-    if(thrust_bytes_sent < 0) {
-      reportRunWarning("Failed to send thrust CAN frame");
-    }
-  }
-  else {
-    reportRunWarning("CAN_SEND is false, not sending thrust CAN frame");
-  }
-}
-
-//---------------------------------------------------------
-// Procedure: getGearCommand()
-
-std::string CAN::getGearCommand(double thrust_value)
-{
-  if(thrust_value > 0) {
-    return "18F005D0#7EFFFFFFFFFFFFFF"; // Forward gear
-  } else if (thrust_value == 0) {
-    return "18F005D0#7DFFFFFFFFFFFFFF"; // Neutral gear
-  } else {
-    return "18F005D0#7CFFFFFFFFFFFFFF"; // Reverse Gear
-  }
-}
-
-//---------------------------------------------------------
-// Procedure: getThrustCANFrame()
-
-std::string CAN::getThrustCANFrame(double thrust_value)
-{
-  //Removed here when thrust bellow zero
-  //if(thrust_value <= 0) {
-  //  return "18000017#C1E015E1FFFFFFFF"; // 0%
-  //}
-
-  // Convert thrust value to percentage (0-100)
-  // Use absolute value to handle negative thrust (reverse)
-  int percentage = static_cast<int>(std::abs(thrust_value));
-  if(percentage > 100) percentage = 100;
-
-  // Thrust command mapping based on percentage
-  std::string thrust_commands[] = {
-    "18000017#C1E015E1FFFFFFFF", // 0%
-    "18000017#C1C016E1FFFFFFFF", // 1%
-    "18000017#C11018E1FFFFFFFF", // 2%
-    "18000017#C1F018E1FFFFFFFF", // 3%
-    "18000017#C1401AE1FFFFFFFF", // 4%
-    "18000017#C1201BE1FFFFFFFF", // 5%
-    "18000017#C1701CE1FFFFFFFF", // 6%
-    "18000017#C1501DE1FFFFFFFF", // 7%
-    "18000017#C1A01EE1FFFFFFFF", // 8%
-    "18000017#C1801FE1FFFFFFFF", // 9%
-    "18000017#C1D020E1FFFFFFFF", // 10%
-    "18000017#C1B021E1FFFFFFFF", // 11%
-    "18000017#C10023E1FFFFFFFF", // 12%
-    "18000017#C1E023E1FFFFFFFF", // 13%
-    "18000017#C13025E1FFFFFFFF", // 14%
-    "18000017#C11026E1FFFFFFFF", // 15%
-    "18000017#C16027E1FFFFFFFF", // 16%
-    "18000017#C14028E1FFFFFFFF", // 17%
-    "18000017#C19029E1FFFFFFFF", // 18%
-    "18000017#C1702AE1FFFFFFFF", // 19%
-    "18000017#C1702AE1FFFFFFFF", // 20%
-    "18000017#C1C02BE1FFFFFFFF", // 21%
-    "18000017#C1F02DE1FFFFFFFF", // 22%
-    "18000017#C15032E1FFFFFFFF", // 23%
-    "18000017#C10031E1FFFFFFFF", // 24%
-    "18000017#C10031E1FFFFFFFF", // 25%
-    "18000017#C15032E1FFFFFFFF", // 26%
-    "18000017#C15032E1FFFFFFFF", // 27%
-    "18000017#C16035E1FFFFFFFF", // 28%
-    "18000017#C16035E1FFFFFFFF", // 29%
-    "18000017#C1B036E1FFFFFFFF", // 30%
-    "18000017#C1E038E1FFFFFFFF", // 31%
-    "18000017#C1E038E1FFFFFFFF", // 32%
-    "18000017#C1C039E1FFFFFFFF", // 33%
-    "18000017#C1C039E1FFFFFFFF", // 34%
-    "18000017#C1F03BE1FFFFFFFF", // 35%
-    "18000017#C1F03BE1FFFFFFFF", // 36%
-    "18000017#C1403DE1FFFFFFFF", // 37%
-    "18000017#C1203EE1FFFFFFFF", // 38%
-    "18000017#C15040E1FFFFFFFF", // 39%
-    "18000017#C15040E1FFFFFFFF", // 40%
-    "18000017#C1A041E1FFFFFFFF", // 41%
-    "18000017#C18042E1FFFFFFFF", // 42%
-    "18000017#C1D043E1FFFFFFFF", // 43%
-    "18000017#C1B044E1FFFFFFFF", // 44%
-    "18000017#C10046E1FFFFFFFF", // 45%
-    "18000017#C1E046E1FFFFFFFF", // 46%
-    "18000017#C13048E1FFFFFFFF", // 47%
-    "18000017#C11049E1FFFFFFFF", // 48%
-    "18000017#C1604AE1FFFFFFFF", // 49%
-    "18000017#C1404BE1FFFFFFFF", // 50%
-    "18000017#C1904CE1FFFFFFFF", // 51%
-    "18000017#C1C04EE1FFFFFFFF", // 52%
-    "18000017#C1C04EE1FFFFFFFF", // 53%
-    "18000017#C1C04EE1FFFFFFFF", // 54%
-    "18000017#C1C04EE1FFFFFFFF", // 55% (missing in original, using 54%)
-    "18000017#C1D051E1FFFFFFFF", // 56%
-    "18000017#C12053E1FFFFFFFF", // 57%
-    "18000017#C10054E1FFFFFFFF", // 58%
-    "18000017#C15055E1FFFFFFFF", // 59%
-    "18000017#C13056E1FFFFFFFF", // 60%
-    "18000017#C16058E1FFFFFFFF", // 61%
-    "18000017#C16058E1FFFFFFFF", // 62%
-    "18000017#C1B059E1FFFFFFFF", // 63%
-    "18000017#C1C05CE1FFFFFFFF", // 64%
-    "18000017#C1C05CE1FFFFFFFF", // 65%
-    "18000017#C1C05CE1FFFFFFFF", // 66%
-    "18000017#C1C05CE1FFFFFFFF", // 67%
-    "18000017#C1105EE1FFFFFFFF", // 68%
-    "18000017#C1F05EE1FFFFFFFF", // 69%
-    "18000017#C12061E1FFFFFFFF", // 70%
-    "18000017#C1404BE1FFFFFFFF", // 71%
-    "18000017#C15063E1FFFFFFFF", // 72%
-    "18000017#C15063E1FFFFFFFF", // 73%
-    "18000017#C18065E1FFFFFFFF", // 74%
-    "18000017#C18065E1FFFFFFFF", // 75%
-    "18000017#C1B067E1FFFFFFFF", // 76%
-    "18000017#C1B067E1FFFFFFFF", // 77%
-    "18000017#C10069E1FFFFFFFF", // 78%
-    "18000017#C1E069E1FFFFFFFF", // 79%
-    "18000017#C1106CE1FFFFFFFF", // 80%
-    "18000017#C1906FE1FFFFFFFF", // 81%
-    "18000017#C1906FE1FFFFFFFF", // 82%
-    "18000017#C1906FE1FFFFFFFF", // 83%
-    "18000017#C1906FE1FFFFFFFF", // 84%
-    "18000017#C1C071E1FFFFFFFF", // 85%
-    "18000017#C1C071E1FFFFFFFF", // 86%
-    "18000017#C1F073E1FFFFFFFF", // 87%
-    "18000017#C1F073E1FFFFFFFF", // 88%
-    "18000017#C1D074E1FFFFFFFF", // 89%
-    "18000017#C12076E1FFFFFFFF", // 90%
-    "18000017#C15078E1FFFFFFFF", // 91%
-    "18000017#C15078E1FFFFFFFF", // 92%
-    "18000017#C13079E1FFFFFFFF", // 93%
-    "18000017#C13079E1FFFFFFFF", // 94%
-    "18000017#C1607BE1FFFFFFFF", // 95%
-    "18000017#C1607BE1FFFFFFFF", // 96%
-    "18000017#C14083E1FFFFFFFF", // 97%
-    "18000017#C14083E1FFFFFFFF", // 98%
-    "18000017#C14083E1FFFFFFFF", // 99%
-    "18000017#C14083E1FFFFFFFF"  // 100%
-  };
-
-  return thrust_commands[percentage];
-}
-
-//---------------------------------------------------------
-// Procedure: handleTrimCommand()
-
-void CAN::handleTrimCommand(double trim_value)
-{
-  if(trim_value == 1.0) {
-    m_current_trim = 1.0;
-    // Execute trim sequence for TRIM=1 in background thread
-    std::thread trim_thread(&CAN::executeTrimSequence, this, "0CFF08D0#F1FFFFFFFFFFFFFF");
-    trim_thread.detach();
-  }
-  else if(trim_value == -1.0) {
-    m_current_trim = -1.0;
-    // Execute trim sequence for TRIM=-1 in background thread
-    std::thread trim_thread(&CAN::executeTrimSequence, this, "0CFF08D0#F4FFFFFFFFFFFFFF");
-    trim_thread.detach();
-  }
-}
-
-//---------------------------------------------------------
-// Procedure: executeTrimSequence()
-
-void CAN::executeTrimSequence(const std::string& can_command)
-{
-  if(m_can_socket == -1) {
-    reportRunWarning("CAN socket not initialized for trim sequence");
-    return;
-  }
-
-  // Send the CAN command 12 times with 100ms intervals
-  for(int i = 0; i < 12; i++) {
-    // Parse CAN frame from command string
-    struct can_frame frame;
-    
-    // Extract CAN ID and data from string format "ID#DATA"
-    size_t hash_pos = can_command.find('#');
-    if(hash_pos == std::string::npos) {
-      reportRunWarning("Invalid CAN command format for trim sequence");
+  for(int n=0; n<500; n++) {
+    struct can_frame fr;
+    ssize_t got = read(m_can_socket, &fr, sizeof(fr));
+    if(got < 0) {
+      if(errno != EAGAIN && errno != EWOULDBLOCK) {
+        m_can_error = string("read: ") + strerror(errno);
+        closeCAN();   // reopened by Iterate
+      }
       return;
     }
-    
-    std::string id_str = can_command.substr(0, hash_pos);
-    std::string data_str = can_command.substr(hash_pos + 1);
-    
-    // Convert hex string to CAN ID
-    frame.can_id = std::stoul(id_str, nullptr, 16) | CAN_EFF_FLAG;
-    frame.can_dlc = data_str.length() / 2;
-    
-    // Convert hex data string to bytes
-    for(size_t j = 0; j < frame.can_dlc && j < 8; j++) {
-      std::string byte_str = data_str.substr(j * 2, 2);
-      frame.data[j] = static_cast<__u8>(std::stoul(byte_str, nullptr, 16));
-    }
-    
-    if (m_can_send == "true") {
-      // Send the frame
-      int bytes_sent = write(m_can_socket, &frame, sizeof(struct can_frame));
-      if(bytes_sent < 0) {
-        reportRunWarning("Failed to send trim CAN frame " + std::to_string(i + 1));
-      }
-    }
-    else {
-      reportRunWarning("CAN_SEND is false, not sending trim CAN frame");
-    }
-    
-    // Wait 100ms before next command (except for last iteration)
-    if(i < 11) {
-      std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    }
+    if(got < (ssize_t)sizeof(fr) || (fr.can_id & (CAN_ERR_FLAG | CAN_RTR_FLAG)))
+      continue;
+
+    m_rx_frames++;
+    bool ext = (fr.can_id & CAN_EFF_FLAG) != 0;
+    uint32_t id = ext ? (fr.can_id & CAN_EFF_MASK) : (fr.can_id & CAN_SFF_MASK);
+
+    const vector<TxMsg>& tx = m_profile.txMessages();
+    for(size_t i=0; i<tx.size(); i++)
+      if(tx[i].id == id && tx[i].ext == ext)
+        m_foreign_seen[i] = now;
+
+    vector<RxValue> vals = m_profile.decode(id, ext, fr.data, fr.can_dlc);
+    for(size_t i=0; i<vals.size(); i++)
+      postFeedback(vals[i], now);
   }
-  
-  // Set TRIM back to 0 after sequence is complete
-  m_current_trim = 0.0;
-  Notify("TRIM", 0.0);
 }
 
+//---------------------------------------------------------
+// Procedure: postFeedback()
+//   Post on change, and at least once a second.
+
+void CAN::postFeedback(const RxValue& v, double now)
+{
+  m_fb_time[v.name] = now;
+  bool changed;
+  if(v.is_string) {
+    changed = (m_fb_sval[v.name] != v.sval);
+    m_fb_sval[v.name] = v.sval;
+  }
+  else {
+    changed = (m_fb_dval.count(v.name) == 0 || m_fb_dval[v.name] != v.dval);
+    m_fb_dval[v.name] = v.dval;
+  }
+  if(changed || now - m_fb_posted[v.name] >= 1.0) {
+    if(v.is_string)
+      Notify(v.name, v.sval);
+    else
+      Notify(v.name, v.dval);
+    m_fb_posted[v.name] = now;
+  }
+}
+
+//---------------------------------------------------------
+// Procedure: msgEnabled()
+
+bool CAN::msgEnabled(const TxMsg& msg) const
+{
+  return m_profile.hasCapability(msg.cap);
+}
+
+//---------------------------------------------------------
+// Procedure: msgState()
+//   What is happening with one tx message right now
+
+string CAN::msgState(size_t ix, double now) const
+{
+  const TxMsg& msg = m_profile.txMessages()[ix];
+  if(!msgEnabled(msg))
+    return "off (capability not enabled)";
+  if(!m_profile_ok)
+    return "inhibited";
+  if(m_can_socket == -1)
+    return "no bus";
+  double guard = m_profile.setting("guard_secs");
+  if(msg.guard && now - m_foreign_seen[ix] < guard)
+    return "BLOCKED: another node sends this ID";
+  if(msg.guard && now - m_start_time < guard)
+    return "listening";
+  if(!m_can_send)
+    return "standby (CAN_SEND=false)";
+  return "sending";
+}
+
+//---------------------------------------------------------
+// Procedure: sendDue()
+
+void CAN::sendDue(const DriveCommand& cmd, double now)
+{
+  const vector<TxMsg>& tx = m_profile.txMessages();
+  double guard = m_profile.setting("guard_secs");
+  for(size_t i=0; i<tx.size(); i++) {
+    const TxMsg& msg = tx[i];
+    if(!msgEnabled(msg))
+      continue;
+    if(msg.guard && (now - m_foreign_seen[i] < guard || now - m_start_time < guard))
+      continue;
+    // Send when the period has elapsed, allowing half a tick of slack
+    if(now - m_last_sent[i] + 0.5 * m_tick < msg.period_ms / 1000.0)
+      continue;
+    if(sendFrame(m_profile.encode(msg, cmd))) {
+      m_last_sent[i] = now;
+      m_sent_count[i]++;
+    }
+  }
+}
+
+//---------------------------------------------------------
+// Procedure: sendNeutralOnce()
+//   Called when CAN_SEND goes false: one frame of every enabled
+//   message with rudder 0, throttle 0 and neutral gear.
+
+void CAN::sendNeutralOnce(double now)
+{
+  if(!m_profile_ok || m_can_socket == -1)
+    return;
+  DriveCommand neutral;
+  const vector<TxMsg>& tx = m_profile.txMessages();
+  double guard = m_profile.setting("guard_secs");
+  for(size_t i=0; i<tx.size(); i++) {
+    if(!msgEnabled(tx[i]))
+      continue;
+    if(tx[i].guard && now - m_foreign_seen[i] < guard)
+      continue;
+    sendFrame(m_profile.encode(tx[i], neutral));
+  }
+  m_core.resetToNeutral(now);
+}
+
+bool CAN::sendFrame(const Frame& f)
+{
+  struct can_frame fr;
+  memset(&fr, 0, sizeof(fr));
+  fr.can_id  = f.ext ? (f.id | CAN_EFF_FLAG) : f.id;
+  fr.can_dlc = f.dlc;
+  memcpy(fr.data, f.data, 8);
+  if(write(m_can_socket, &fr, sizeof(fr)) != (ssize_t)sizeof(fr)) {
+    m_tx_errors++;
+    m_can_error = string("write: ") + strerror(errno);
+    return(false);
+  }
+  return(true);
+}
+
+//---------------------------------------------------------
+// Procedure: checkRudderFeedback()
+//   Alarm when the actuator's reported position stays away from the
+//   commanded rudder (for example the rudder drifting back to centre).
+
+void CAN::checkRudderFeedback(const DriveCommand& cmd, double now)
+{
+  string fb = m_profile.stringSetting("rudder_feedback");
+  double tol = m_profile.setting("rudder_alarm_pct");
+  if(fb == "" || tol <= 0)
+    return;
+
+  bool steering = false;
+  const vector<TxMsg>& tx = m_profile.txMessages();
+  for(size_t i=0; i<tx.size(); i++)
+    if(tx[i].cap == "steer" && msgState(i, now) == "sending")
+      steering = true;
+
+  bool fresh = m_fb_time.count(fb) && (now - m_fb_time[fb] < 1.0);
+  bool off = steering && fresh && fabs(m_fb_dval[fb] - cmd.rudder_pct) > tol;
+
+  if(!off)
+    m_mismatch_since = -1;
+  else if(m_mismatch_since < 0)
+    m_mismatch_since = now;
+
+  bool mismatch = off && (now - m_mismatch_since >= m_profile.setting("rudder_alarm_secs"));
+  if(mismatch != m_mismatch) {
+    m_mismatch = mismatch;
+    Notify("CAN_RUDDER_MISMATCH", mismatch ? "true" : "false");
+    if(mismatch)
+      reportEvent("Rudder feedback " + doubleToString(m_fb_dval[fb], 1) +
+                  "% differs from command " + doubleToString(cmd.rudder_pct, 1) + "%");
+  }
+}
+
+//---------------------------------------------------------
+// Procedure: postStatus()
+//   On change, and once a second.
+
+void CAN::postStatus(const DriveCommand& cmd, double now)
+{
+  string status;
+  if(!m_profile_ok)
+    status = "INHIBITED";
+  else if(m_can_socket == -1)
+    status = "NO_BUS";
+  else if(!m_can_send)
+    status = "STANDBY";
+  else
+    status = "ACTIVE";
+
+  string conflict;
+  const vector<TxMsg>& tx = m_profile.txMessages();
+  for(size_t i=0; i<tx.size(); i++)
+    if(msgState(i, now).find("BLOCKED") == 0)
+      conflict += (conflict == "" ? "" : ",") + tx[i].name;
+
+  bool changed = (status != m_last_status) || (conflict != m_last_conflict) ||
+    (cmd.rudder_pct != m_last_cmd.rudder_pct) || (cmd.thrust_pct != m_last_cmd.thrust_pct) ||
+    (cmd.gear != m_last_cmd.gear);
+  if(!changed && now - m_last_status_post < 1.0)
+    return;
+
+  if(conflict != m_last_conflict && conflict != "")
+    reportRunWarning("Not sending " + conflict + ": another node is transmitting the same ID");
+
+  Notify("CAN_STATUS", status);
+  Notify("CAN_CONTROL_OWNER", ownerName(m_core.owner()));
+  Notify("CAN_LOST_LINK", m_core.lostLink() ? "true" : "false");
+  Notify("CAN_CONFLICT", conflict == "" ? "none" : conflict);
+  Notify("CAN_TX_RUDDER_PCT", cmd.rudder_pct);
+  Notify("CAN_TX_THRUST_PCT", cmd.thrust_pct);
+  Notify("CAN_TX_GEAR", gearName(cmd.gear));
+  if(m_last_status_post == 0 || status != m_last_status) {
+    Notify("CAN_PROFILE", m_profile_ok ? m_profile.name() : "none");
+    Notify("CAN_PROFILE_HASH", m_profile.hashHex());
+  }
+
+  m_last_status = status;
+  m_last_conflict = conflict;
+  m_last_status_post = now;
+}
+
+//------------------------------------------------------------
+// Procedure: buildReport()
+
+bool CAN::buildReport()
+{
+  double now = MOOSTime();
+
+  m_msgs << "============================================" << endl;
+  m_msgs << "iCAN - drive commands from a boat profile   " << endl;
+  m_msgs << "============================================" << endl;
+  m_msgs << "Profile:      " << (m_profile_file == "" ? "(not set)" : m_profile_file) << endl;
+  m_msgs << "Boat:         " << (m_profile_ok ? m_profile.name() : "INVALID - not transmitting")
+         << "   hash " << m_profile.hashHex() << endl;
+  m_msgs << "Capabilities: " << m_profile.capabilitiesString() << endl;
+  m_msgs << "Interface:    " << m_can_interface
+         << (m_can_socket != -1 ? "  (open)" : "  (closed)")
+         << (m_can_error == "" ? "" : "  " + m_can_error) << endl;
+  m_msgs << "CAN_SEND:     " << (m_can_send ? "true" : "false") << endl;
+  m_msgs << endl;
+
+  if(!m_profile_ok) {
+    for(size_t i=0; i<m_profile.errors().size(); i++)
+      m_msgs << "  ERROR " << m_profile.errors()[i] << endl;
+    m_msgs << endl;
+  }
+
+  m_msgs << "Owner:        " << ownerName(m_core.owner())
+         << (m_core.lostLink() ? "   LOST LINK -> rudder/throttle set to lost-link values" : "")
+         << endl;
+  m_msgs << "UI link:      " << (m_ui_link_ok ? "ok" : "down")
+         << "  (last UI_LINK_OK " << doubleToString(now - m_ui_link_time, 1) << " s ago)" << endl;
+  m_msgs << "Setpoints:    rudder " << doubleToString(m_core.rudderSetpoint(), 1)
+         << "%  thrust " << doubleToString(m_core.thrustSetpoint(), 1) << "%" << endl;
+  m_msgs << "Sending:      rudder " << doubleToString(m_last_cmd.rudder_pct, 1)
+         << "%  thrust " << doubleToString(m_last_cmd.thrust_pct, 1)
+         << "%  gear " << gearName(m_last_cmd.gear) << endl;
+  if(m_rejected)
+    m_msgs << "Rejected:     " << m_rejected << "  last: " << m_last_rejected << endl;
+  m_msgs << "Frames:       rx " << m_rx_frames << "  tx errors " << m_tx_errors << endl;
+  m_msgs << endl;
+
+  ACTable actab(5);
+  actab << "Message | CAN ID | Period | Sent | State";
+  actab.addHeaderLines();
+  const vector<TxMsg>& tx = m_profile.txMessages();
+  for(size_t i=0; i<tx.size(); i++) {
+    char id[16];
+    snprintf(id, sizeof(id), tx[i].ext ? "%08X" : "%03X", tx[i].id);
+    actab << tx[i].name << id << (intToString(tx[i].period_ms) + " ms")
+          << intToString((int)m_sent_count[i]) << msgState(i, now);
+  }
+  m_msgs << actab.getFormattedString() << endl;
+
+  if(!m_fb_time.empty()) {
+    m_msgs << endl;
+    ACTable fbtab(3);
+    fbtab << "Feedback | Value | Age";
+    fbtab.addHeaderLines();
+    map<string, double>::iterator p;
+    for(p=m_fb_time.begin(); p!=m_fb_time.end(); p++) {
+      string val = m_fb_sval.count(p->first) ? m_fb_sval[p->first]
+                                             : doubleToString(m_fb_dval[p->first], 1);
+      fbtab << p->first << val << (doubleToString(now - p->second, 1) + " s");
+    }
+    m_msgs << fbtab.getFormattedString();
+  }
+
+  return(true);
+}

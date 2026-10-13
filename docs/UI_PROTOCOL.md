@@ -39,6 +39,10 @@ Notes:
 ### Heartbeat
 Plain text (not JSON) `HEARTBEAT=<MOOSTime>` every 30 s — clients must tolerate it.
 
+The server sends a WebSocket ping every second; browsers answer it automatically and that keeps `UI_LINK_OK=true`. If nothing is heard from any client for `link_timeout` (3 s), the link is lost and, in manual control, iCAN sets rudder and throttle to 0.
+
+Telemetry also carries iCAN state: `CAN_STATUS`, `CAN_CONTROL_OWNER`, `CAN_LOST_LINK`, `CAN_CONFLICT`, `CAN_TX_RUDDER_PCT`, `CAN_TX_THRUST_PCT`, `CAN_TX_GEAR`, `CAN_RUDDER_MISMATCH`, `CAN_PROFILE`, and on USV-722 `CAN_RUDDER_ACTUAL_PCT`, `CAN_HELM_HAS_STEERING`, `CAN_ENGINE_GEAR`, `CAN_ENGINE_THROTTLE_PCT`, `CAN_FUEL_PCT` (present once first posted).
+
 ## UI → boat
 
 Text frames `KEY=value`, split at the first `=`. Sub-fields use `#`, point
@@ -58,7 +62,7 @@ lists use `:`, coordinates are `lat,lon`. Unknown keys are ignored.
 | `REGION` | `true\|false[#REGION_UPDATES=core_poly=pts={lat,lon:...}]` | `REGION`, `REGION_UPDATES` |
 | `REGION_UPDATES` | `...pts={lat,lon:...}...` | `REGION_UPDATES` (x,y) |
 | `TRAIL_FOLLOW` | `mmsi=..#range=..#angle=..` / `off` | `WAYPOINT=false`, `STATIONING=false`, `MOOS_MANUAL_OVERRIDE=false`, `TRAIL_UPDATES=contact=AIS<mmsi>...`, `TRAILING=true` / off: `TRAILING=false`, rudder/thrust 0 |
-| `CONTROLE_MANUAL` | `true\|false` | `MOOS_MANUAL_OVERIDE` (**typo, no consumer**), on false also rudder/thrust 0; plus `DEPLOY=1.0` (double) from `main.cpp` |
+| `CONTROLE_MANUAL` | `true\|false` | `MOOS_MANUAL_OVERRIDE` (SS UI becomes the drive owner; manual rudder/thrust latch until changed), on false also rudder/thrust 0; plus `DEPLOY=1.0` (double) from `main.cpp` |
 | `AUTONOMOUS_CONTROL` | any | `MOOS_MANUAL_OVERIDE=true` (typo) |
 | `DESIRED_HEADING` / `DESIRED_RUDDER` / `DESIRED_THRUST` | number | same name |
 | `DESIRED_GEAR` | `1\|0\|-1` | `DESIRED_GEAR=A\|N\|R` (not consumed by iCAN) |
