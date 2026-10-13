@@ -11,6 +11,8 @@
 /*      - shift interlock: neutral pause when reversing,    */
 /*        throttle held at 0 just after engaging a gear     */
 /*      - trim: each command is one short timed pulse       */
+/*      - manual gear: in manual control the gear can come  */
+/*        from a gear command and thrust is only throttle   */
 /************************************************************/
 
 #ifndef DRIVE_CORE_HEADER
@@ -38,6 +40,18 @@ class DriveCore {
 
   void setRudder(double pct)  { m_rudder_sp = pct; }
   void setThrust(double pct)  { m_thrust_sp = pct; }
+
+  // Manual gear selection. When enabled (setManualGearFromCommand) and the
+  // owner is MANUAL, the gear is whatever setGear() last asked for and the
+  // thrust setpoint is throttle only (its sign is ignored); forward or
+  // reverse with 0 thrust gives idle in gear. Choosing a different gear
+  // resets the thrust setpoint to 0, so the operator re-applies throttle
+  // after every shift. In AUTONOMY the gear always follows the thrust sign.
+  void setManualGearFromCommand(bool on) { m_manual_gear_cmd = on; }
+  bool manualGearFromCommand() const     { return m_manual_gear_cmd; }
+  void setGear(Gear gear);
+  Gear gearSetpoint() const   { return m_gear_sp; }
+  bool gearFromCommand() const { return m_manual_gear_cmd && m_owner == OWNER_MANUAL; }
   double rudderSetpoint() const { return m_rudder_sp; }
   double thrustSetpoint() const { return m_thrust_sp; }
 
@@ -96,6 +110,9 @@ class DriveCore {
 
   Trim   m_trim;
   double m_trim_end;
+
+  bool   m_manual_gear_cmd;
+  Gear   m_gear_sp;
 };
 
 }  // namespace canprofile

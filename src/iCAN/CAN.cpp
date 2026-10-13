@@ -36,6 +36,7 @@ CAN::CAN()
   m_autonomy_sources.insert("pHelmIvP");     // end-of-mission zeros (alpha.bhv endflags)
   m_autonomy_sources.insert("iWebSocket");   // AUTONOMOUS_STOP / TRAIL_FOLLOW=off zeros
   m_trim_sources.insert("iWebSocket");       // trim is an operator function only
+  m_core.setManualGearFromCommand(true);     // manual: gear from DESIRED_GEAR
 
   m_profile_ok        = false;
   m_can_socket        = -1;
@@ -80,6 +81,8 @@ bool CAN::OnNewMail(MOOSMSG_LIST &NewMail)
       handleDemand(msg, false);
     else if(key == "TRIM")
       handleTrim(msg);
+    else if(key == "DESIRED_GEAR")
+      handleGear(msg);
     else if(key == "MOOS_MANUAL_OVERRIDE") {
       bool manual = (tolower(stripBlankEnds(msg.GetString())) == "true");
       m_core.setOwner(manual ? OWNER_MANUAL : OWNER_AUTONOMY);
@@ -131,6 +134,39 @@ void CAN::handleDemand(const CMOOSMsg& msg, bool is_rudder)
     m_core.setRudder(val);
   else
     m_core.setThrust(val);
+}
+
+//---------------------------------------------------------
+// Procedure: handleGear()
+//   DESIRED_GEAR from SS UI in manual control. iWebSocket posts A / N / R
+//   (forward / neutral / reverse); F, FWD, FORWARD, 1, REV, REVERSE, -1,
+//   NEUTRAL and 0 are accepted too. Only used while the owner is MANUAL
+//   and manual_gear = command; otherwise the gear follows the thrust sign.
+
+void CAN::handleGear(const CMOOSMsg& msg)
+{
+  if(m_core.owner() != OWNER_MANUAL || !m_core.manualGearFromCommand())
+    return;
+  if(m_manual_sources.count(msg.GetSource()) == 0) {
+    m_rejected++;
+    m_last_rejected = "DESIRED_GEAR from " + msg.GetSource();
+    return;
+  }
+
+  string v;
+  if(msg.IsDouble())
+    v = (msg.GetDouble() > 0.5) ? "1" : ((msg.GetDouble() < -0.5) ? "-1" : "0");
+  else
+    v = toupper(stripBlankEnds(msg.GetString()));
+
+  if(v == "A" || v == "F" || v == "FWD" || v == "FORWARD" || v == "1")
+    m_core.setGear(GEAR_FWD);
+  else if(v == "R" || v == "REV" || v == "REVERSE" || v == "-1")
+    m_core.setGear(GEAR_REV);
+  else if(v == "N" || v == "NEUTRAL" || v == "0")
+    m_core.setGear(GEAR_NEUTRAL);
+  else
+    reportRunWarning("DESIRED_GEAR ignored, unknown value: " + msg.GetString());
 }
 
 //---------------------------------------------------------
@@ -267,6 +303,13 @@ bool CAN::OnStartUp()
           dest.insert(stripBlankEnds(names[i]));
       handled = true;
     }
+    else if(param == "manual_gear") {
+      string v = tolower(value);
+      if(v == "command" || v == "thrust_sign") {
+        m_core.setManualGearFromCommand(v == "command");
+        handled = true;
+      }
+    }
     else if(param == "link_stale_secs" && isNumber(value)) {
       m_link_stale_secs = atof(value.c_str());
       handled = (m_link_stale_secs > 0);
@@ -314,6 +357,7 @@ void CAN::registerVariables()
   Register("UI_LINK_OK", 0);
   Register("CAN_SEND", 0);
   Register("TRIM", 0);
+  Register("DESIRED_GEAR", 0);
 }
 
 //---------------------------------------------------------
@@ -663,7 +707,12 @@ bool CAN::buildReport()
   m_msgs << "UI link:      " << (m_ui_link_ok ? "ok" : "down")
          << "  (last UI_LINK_OK " << doubleToString(now - m_ui_link_time, 1) << " s ago)" << endl;
   m_msgs << "Setpoints:    rudder " << doubleToString(m_core.rudderSetpoint(), 1)
-         << "%  thrust " << doubleToString(m_core.thrustSetpoint(), 1) << "%" << endl;
+         << "%  thrust " << doubleToString(m_core.thrustSetpoint(), 1) << "%";
+  if(m_core.gearFromCommand())
+    m_msgs << "  gear " << gearName(m_core.gearSetpoint()) << " (DESIRED_GEAR)";
+  else
+    m_msgs << "  gear from thrust sign";
+  m_msgs << endl;
   m_msgs << "Sending:      rudder " << doubleToString(m_last_cmd.rudder_pct, 1)
          << "%  thrust " << doubleToString(m_last_cmd.thrust_pct, 1)
          << "%  gear " << gearName(m_last_cmd.gear)

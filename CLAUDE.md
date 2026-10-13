@@ -20,7 +20,7 @@ C++11, CMake, Ubuntu 22.04. Full docs in [docs/](docs/ARCHITECTURE.md).
 - Real-boat `NAV_SPEED` is **knots**; sim is m/s. `NODE_REPORT` SPD should be m/s (radar/fusion currently send knots).
 - `DESIRED_RUDDER` is ±% of steering travel in iCAN, though planchaPID calls it degrees.
 - CAN IDs/payloads live in `profiles/<boat>.prf` (lib_canprofile), never in iCAN. Mercury boat: `mercury_sterndrive.prf`; USV-722: `usv722_glendinning.prf`. Run `tests/run_tests.sh` after touching either (needs only g++).
-- Manual control (SS UI): only iWebSocket may set rudder/thrust; values latch; lost UI link -> 0.
+- Manual control (SS UI): only iWebSocket may set rudder/thrust; values latch; lost UI link -> 0. Gear comes from DESIRED_GEAR (A/N/R), thrust is throttle only; autonomy uses the thrust sign.
 - Origin (Morgan City) is hardcoded in iWebSocket/iSignalK/aissim as well as in `.moos` files. `USE_UTM=ON` must match the moos-ivp core.
 - Helm modes are flat flags: `WAYPOINT`, `STATIONING`, `REGION`, `TRAILING`. planchaPID only publishes when one is true (see gate in `lanchaPID.cpp`).
 - `CONTROLE_MANUAL` now posts `MOOS_MANUAL_OVERRIDE`; `AUTONOMOUS_CONTROL` still posts the old `MOOS_MANUAL_OVERIDE` typo (no consumer) — see docs/KNOWN_ISSUES.md before touching control code.

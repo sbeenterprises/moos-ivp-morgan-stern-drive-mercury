@@ -32,6 +32,12 @@ Behaviour common to every boat (`src/lib_canprofile/DriveCore.cpp`):
   older than `link_stale_secs`) sets rudder and throttle to the profile's
   `lost_link_*` values (0), and they stay there after the link returns until
   the operator sends a new command.
+- **Manual gear.** In manual control the gear comes from SS UI's gear
+  buttons (`DESIRED_GEAR` = A/N/R) and `DESIRED_THRUST` is throttle only
+  (sign ignored). Forward or reverse with 0 thrust = in gear at idle;
+  thrust in neutral does nothing. Choosing a different gear resets thrust
+  to 0. Autonomy still takes the gear from the sign of thrust. iCAN option
+  `manual_gear = command` (default) or `thrust_sign` (old behaviour).
 - **Shift interlock.** Reversing passes through neutral for
   `shift_neutral_secs`; throttle stays at 0 for `shift_settle_secs` after a
   gear engages. Both are 0 on the Mercury boat (unchanged behaviour).

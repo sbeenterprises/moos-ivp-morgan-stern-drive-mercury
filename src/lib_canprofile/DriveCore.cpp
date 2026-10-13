@@ -51,6 +51,8 @@ DriveCore::DriveCore()
   m_trim_down_secs = 1.0;
   m_trim         = TRIM_IDLE;
   m_trim_end     = 0;
+  m_manual_gear_cmd = false;
+  m_gear_sp      = GEAR_NEUTRAL;
 }
 
 void DriveCore::configure(const Profile& p)
@@ -75,7 +77,15 @@ void DriveCore::setOwner(Owner owner)
   m_owner = owner;
   m_rudder_sp = 0;
   m_thrust_sp = 0;
+  m_gear_sp = GEAR_NEUTRAL;
   m_trim = TRIM_IDLE;
+}
+
+void DriveCore::setGear(Gear gear)
+{
+  if(gear != m_gear_sp)
+    m_thrust_sp = 0;      // never carry throttle across a gear change
+  m_gear_sp = gear;
 }
 
 void DriveCore::trimCommand(int direction, double now)
@@ -99,6 +109,7 @@ void DriveCore::resetToNeutral(double now)
   m_rudder_out = 0;
   m_thrust_req = 0;
   m_trim = TRIM_IDLE;
+  m_gear_sp = GEAR_NEUTRAL;
   if(m_gear != GEAR_NEUTRAL) {
     m_gear = GEAR_NEUTRAL;
     m_gear_time = now;
@@ -127,6 +138,9 @@ DriveCommand DriveCore::update(double now)
     m_rudder_sp = m_lost_rudder;
     m_thrust_sp = m_lost_thrust;
     m_trim = TRIM_IDLE;
+    if(m_lost_thrust > 0)      m_gear_sp = GEAR_FWD;
+    else if(m_lost_thrust < 0) m_gear_sp = GEAR_REV;
+    else                       m_gear_sp = GEAR_NEUTRAL;
   }
   if(m_trim != TRIM_IDLE && now >= m_trim_end)
     m_trim = TRIM_IDLE;   // pulse over
@@ -137,9 +151,12 @@ DriveCommand DriveCore::update(double now)
   m_rudder_out = limitRate(m_rudder_out, rudder_target, m_rudder_rate, dt);
   m_thrust_req = limitRate(m_thrust_req, thrust_target, m_thrust_rate, dt);
 
-  // Gear wanted by the thrust request
+  // Gear wanted: the operator's gear command in manual (if enabled),
+  // otherwise the sign of the thrust request
   Gear wanted = GEAR_NEUTRAL;
-  if(m_thrust_req > m_deadband)
+  if(gearFromCommand())
+    wanted = m_gear_sp;
+  else if(m_thrust_req > m_deadband)
     wanted = GEAR_FWD;
   else if(m_thrust_req < -m_deadband)
     wanted = GEAR_REV;

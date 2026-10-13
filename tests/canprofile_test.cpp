@@ -536,6 +536,108 @@ static void testTrim()
 }
 
 //------------------------------------------------------------------
+// Manual gear: gear from DESIRED_GEAR, thrust is throttle only
+
+static void testManualGear()
+{
+  Profile u;
+  u.load(g_profile_dir + "/usv722_glendinning.prf");   // neutral 1.0 s, settle 0.5 s
+  DriveCore core;
+  core.configure(u);
+  core.setManualGearFromCommand(true);
+  core.setOwner(OWNER_MANUAL);
+  CHECK(core.gearFromCommand(), "manual + command mode uses the gear command");
+
+  double t = 10;
+  DriveCommand cmd;
+
+  // Thrust in neutral does nothing
+  core.setThrust(30);
+  cmd = core.update(t += 0.05);
+  CHECK(cmd.gear == GEAR_NEUTRAL && cmd.thrust_pct == 0, "thrust in neutral: no gear, no throttle");
+
+  // Forward with 0 thrust: in gear at idle
+  core.setGear(GEAR_FWD);
+  CHECK(core.thrustSetpoint() == 0, "selecting a gear resets thrust to 0");
+  cmd = core.update(t += 0.05);
+  CHECK(cmd.gear == GEAR_FWD && cmd.thrust_pct == 0, "forward engaged at idle (0 thrust)");
+  for(int i=0; i<100; i++)
+    cmd = core.update(t += 0.05);
+  CHECK(cmd.gear == GEAR_FWD && cmd.thrust_pct == 0, "stays in forward at idle");
+
+  // Throttle in forward; a negative value is treated as throttle only
+  core.setThrust(30);
+  cmd = core.update(t += 0.05);
+  CHECK(cmd.gear == GEAR_FWD && cmd.thrust_pct == 30, "forward 30%");
+  core.setThrust(-20);
+  cmd = core.update(t += 0.05);
+  CHECK(cmd.gear == GEAR_FWD && cmd.thrust_pct == 20, "sign ignored in manual gear mode");
+
+  // Forward -> reverse: throttle reset, neutral pause, then reverse at idle
+  core.setGear(GEAR_REV);
+  cmd = core.update(t += 0.05);
+  CHECK(cmd.gear == GEAR_NEUTRAL && cmd.thrust_pct == 0, "shift goes through neutral");
+  double t0 = t;
+  while(t < t0 + 1.0)
+    cmd = core.update(t += 0.05);
+  cmd = core.update(t += 0.05);
+  CHECK(cmd.gear == GEAR_REV && cmd.thrust_pct == 0, "reverse engaged at idle after the pause");
+  for(int i=0; i<20; i++)
+    cmd = core.update(t += 0.05);
+  CHECK(cmd.thrust_pct == 0, "old throttle is not re-applied after the shift");
+  core.setThrust(25);
+  cmd = core.update(t += 0.05);
+  CHECK(cmd.gear == GEAR_REV && cmd.thrust_pct == -25, "reverse 25% once throttle is applied again");
+
+  // Same gear again does not reset throttle
+  core.setGear(GEAR_REV);
+  CHECK(core.thrustSetpoint() == 25, "re-selecting the same gear keeps throttle");
+
+  // Neutral cuts throttle
+  core.setGear(GEAR_NEUTRAL);
+  cmd = core.update(t += 0.05);
+  CHECK(cmd.gear == GEAR_NEUTRAL && cmd.thrust_pct == 0, "neutral button: neutral, 0 throttle");
+
+  // Lost link: neutral, 0, and stays there until a new gear command
+  core.setGear(GEAR_FWD);
+  core.setThrust(40);
+  for(int i=0; i<30; i++)
+    cmd = core.update(t += 0.05);
+  CHECK(cmd.gear == GEAR_FWD && cmd.thrust_pct == 40, "forward 40% before link loss");
+  core.setLinkOk(false);
+  cmd = core.update(t += 0.05);
+  CHECK(cmd.gear == GEAR_NEUTRAL && cmd.thrust_pct == 0, "lost link: neutral, 0");
+  core.setLinkOk(true);
+  for(int i=0; i<40; i++)
+    cmd = core.update(t += 0.05);
+  CHECK(cmd.gear == GEAR_NEUTRAL && core.gearSetpoint() == GEAR_NEUTRAL,
+        "stays in neutral after the link returns");
+
+  // Autonomy ignores the gear command and uses the thrust sign
+  core.setOwner(OWNER_AUTONOMY);
+  CHECK(!core.gearFromCommand(), "autonomy does not use the gear command");
+  core.setGear(GEAR_REV);
+  core.setThrust(40);
+  for(int i=0; i<40; i++)
+    cmd = core.update(t += 0.05);
+  CHECK(cmd.gear == GEAR_FWD && cmd.thrust_pct == 40, "autonomy: +40 thrust -> forward");
+
+  // Mercury: forward at idle sends 7E and the 700 rpm TSC1 frame
+  Profile m;
+  m.load(g_profile_dir + "/mercury_sterndrive.prf");
+  DriveCore mc;
+  mc.configure(m);
+  mc.setManualGearFromCommand(true);
+  mc.setOwner(OWNER_MANUAL);
+  mc.setGear(GEAR_FWD);
+  cmd = mc.update(1.0);
+  const TxMsg* gear = msgNamed(m, "gear");
+  const TxMsg* tsc1 = msgNamed(m, "tsc1");
+  CHECK(gear && m.encode(*gear, cmd).str() == "18F005D0#7EFFFFFFFFFFFFFF", "mercury forward gear frame");
+  CHECK(tsc1 && m.encode(*tsc1, cmd).str() == "18000017#C1E015E1FFFFFFFF", "mercury idle 700 rpm in gear");
+}
+
+//------------------------------------------------------------------
 
 int main(int argc, char* argv[])
 {
@@ -548,6 +650,7 @@ int main(int argc, char* argv[])
   testValidation();
   testDriveCore();
   testTrim();
+  testManualGear();
 
   cout << g_checks << " checks, " << g_failures << " failed" << endl;
   return g_failures ? 1 : 0;

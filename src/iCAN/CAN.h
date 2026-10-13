@@ -45,6 +45,7 @@ class CAN : public AppCastingMOOSApp
    std::string msgState(size_t ix, double now) const;
    void handleDemand(const CMOOSMsg& msg, bool is_rudder);
    void handleTrim(const CMOOSMsg& msg);
+   void handleGear(const CMOOSMsg& msg);
    void sendTrimIdle(double now);
    void postFeedback(const canprofile::RxValue& v, double now);
    void checkRudderFeedback(const canprofile::DriveCommand& cmd, double now);

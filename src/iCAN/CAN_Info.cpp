@@ -82,6 +82,7 @@ void showExampleConfigAndExit()
   blk("  manual_sources   = iWebSocket                                   ");
   blk("  autonomy_sources = planchaPID, pHelmIvP, iWebSocket             ");
   blk("  trim_sources     = iWebSocket                                   ");
+  blk("  manual_gear      = command   // or thrust_sign                  ");
   blk("  link_stale_secs  = 3        // UI_LINK_OK older than this = lost");
   blk("}                                                               ");
   blk("                                                                ");
@@ -109,6 +110,8 @@ void showInterfaceAndExit()
   blk("  UI_LINK_OK           = true/false, posted by iWebSocket        ");
   blk("  CAN_SEND             = true/false, transmit enable             ");
   blk("  TRIM                 = 1 up pulse, -1 down pulse, 0 stop       ");
+  blk("  DESIRED_GEAR         = A/N/R (fwd/neutral/rev), manual only;    ");
+  blk("                         DESIRED_THRUST is then throttle only    ");
   blk("                                                                ");
   blk("PUBLICATIONS:                                                   ");
   blk("------------------------------------                            ");
