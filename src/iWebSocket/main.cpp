@@ -15,22 +15,56 @@
 #include <ixwebsocket/IXWebSocket.h>
 #include <ixwebsocket/IXUserAgent.h>
 #include <iostream>
+#include "MOOS/libMOOS/Utils/ProcessConfigReader.h"
 
 using namespace std;
 
 // We'll use the isNumber function from MBUtils instead of defining our own
 
-int port = 8000;
 std::string host("0.0.0.0"); // If you need this server to be accessible on a different machine, use "0.0.0.0"
-ix::WebSocketServer server(port, host);
 
-// Configure server heartbeat (ping interval in seconds)
-const int PING_INTERVAL_SECONDS = 30;
+// Server ping to every client. The browser answers each ping with a pong on
+// its own, even with the UI's tab in the background and its timers
+// throttled, so every 5 s the comms-loss watchdog hears from a live link.
+const int PING_INTERVAL_SECONDS = 5;
 
 
 int main(int argc, char *argv[])
 {
-    
+  string mission_file;
+  string run_command = argv[0];
+
+  for(int i=1; i<argc; i++) {
+    string argi = argv[i];
+    if((argi=="-v") || (argi=="--version") || (argi=="-version"))
+      showReleaseInfoAndExit();
+    else if((argi=="-e") || (argi=="--example") || (argi=="-example"))
+      showExampleConfigAndExit();
+    else if((argi == "-h") || (argi == "--help") || (argi=="-help"))
+      showHelpAndExit();
+    else if((argi == "-i") || (argi == "--interface"))
+      showInterfaceAndExit();
+    else if(strEnds(argi, ".moos") || strEnds(argi, ".moos++"))
+      mission_file = argv[i];
+    else if(strBegins(argi, "--alias="))
+      run_command = argi.substr(8);
+    else if(i==2)
+      run_command = argi;
+  }
+  
+  if(mission_file == "")
+    showHelpAndExit();
+
+  // The port has to be known before the MOOS app reads its configuration:
+  // the server is listening before Run() starts, and Run() does not return.
+  int port = 8000;
+  CProcessConfigReader config;
+  config.SetFile(mission_file);
+  int config_port = 0;
+  if(config.GetConfigurationParam(run_command, "port", config_port) && (config_port > 0))
+    port = config_port;
+  ix::WebSocketServer server(port, host);
+
     //Instance of MOOS-IvP object  
 
     WebSocket WebSocket;
@@ -134,7 +168,7 @@ int main(int argc, char *argv[])
   auto res = server.listen();
   if (!res.first)
   {
-      // Error handling
+      std::cerr << "iWebSocket: cannot listen on port " << port << ": " << res.second << std::endl;
       return 1;
   }
 
@@ -148,29 +182,7 @@ int main(int argc, char *argv[])
   // Block until server.stop() is called.
   //server.wait();
   // Or you can use server.stop() to stop the server in another thread.  
-  string mission_file;
-  string run_command = argv[0];
-
-  for(int i=1; i<argc; i++) {
-    string argi = argv[i];
-    if((argi=="-v") || (argi=="--version") || (argi=="-version"))
-      showReleaseInfoAndExit();
-    else if((argi=="-e") || (argi=="--example") || (argi=="-example"))
-      showExampleConfigAndExit();
-    else if((argi == "-h") || (argi == "--help") || (argi=="-help"))
-      showHelpAndExit();
-    else if((argi == "-i") || (argi == "--interface"))
-      showInterfaceAndExit();
-    else if(strEnds(argi, ".moos") || strEnds(argi, ".moos++"))
-      mission_file = argv[i];
-    else if(strBegins(argi, "--alias="))
-      run_command = argi.substr(8);
-    else if(i==2)
-      run_command = argi;
-  }
-  
-  if(mission_file == "")
-    showHelpAndExit();
+  WebSocket.SetServer(&server, port);
 
   cout << termColor("green");
   cout << "iWebSocket launching as " << run_command << endl;

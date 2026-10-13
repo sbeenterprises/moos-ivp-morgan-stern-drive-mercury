@@ -158,6 +158,32 @@ ProcessConfig = iWebSocket
 {
    AppTick   = 20
    CommsTick = 20
+
+   // Websocket port the UI connects to (Settings > MOOS-IvP in the UI)
+   port = 8000
+
+   // Comms-loss failsafe. The UI runs ashore; if nothing at all is heard from
+   // it - no command, heartbeat or ping reply - for comms_loss_timeout seconds,
+   // the boat returns to the base and holds there (comms_return / comms_hold
+   // in alpha.bhv). It does so whenever the helm is in DRIVE, NothingToDo
+   // included, or the boat is underway (a mission, station keep or follow
+   // running, thrust commanded, or moving faster than
+   // comms_loss_underway_speed - adrift counts). With the helm in PARK and the
+   // boat idle it stays put, unless comms_loss_always = true. The return
+   // carries on after the link comes back, until the operator's next command
+   // from the UI.
+   comms_loss_return         = true
+   comms_loss_timeout        = 30     // s
+   comms_loss_speed          = 5      // knots, the units of the UI's speed slider
+   comms_loss_always         = false  // true: also with the helm in PARK and the boat idle
+   comms_loss_underway_speed = 1.0    // knots, NAV_SPEED from the GPS
+
+   // Default base. Defining a base on the chart (right click > Define base)
+   // moves it, and base_file keeps that one across restarts - delete the file
+   // to go back to these.
+   base_lat  = 29.72282
+   base_lon  = -91.21539
+   base_file = base_position.txt
 }
 
 //------------------------------------------------

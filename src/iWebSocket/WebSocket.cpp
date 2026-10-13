@@ -25,6 +25,9 @@ using namespace std;
 #include <iostream>
 #include <iomanip>
 #include <stdexcept>
+#include <fstream>
+#include <cmath>
+#include <cstdio>
 
 //Variáveis para utilizar com o WebSocket
 double nav_lat = 0;
@@ -95,12 +98,56 @@ std::string colav_dist;         // the set as last applied, echoed to the UI
 // and the set is pushed again on the next tick.
 bool colav_respawn_seen = false;
 
+// Limit AIS contacts: the range around the boat inside which the collision
+// avoidance engages a contact. Anything beyond it is held off through
+// pContactMgrV20's disable variable, which reaches the spawned avdcol_
+// instance as BHV_ABLE_FILTER and parks it (IvPBehavior returns the "disabled"
+// activity state, so it builds no objective function). Reversible: a contact
+// that comes back inside the ring is re-enabled.
+//
+// This does not stop the contact manager alerting, so a behaviour can still be
+// spawned for a held contact after the fact - hence the periodic re-post.
+double       ais_radius = 0;           // metres; 0 = off, every contact engaged
+std::string  ais_limit_report;         // echoed to the UI
+std::string  ais_disable_var = "XYZ_DISABLE_TARGET";
+std::string  ais_enable_var  = "XYZ_REENABLE_TARGET";
+double       ais_last_apply  = 0;
+double       ais_last_repost = 0;
+
+struct AisContact {
+  double x, y, utc;
+};
+std::map<std::string, AisContact> ais_contacts;  // every contact heard from
+std::set<std::string> ais_held;                  // the ones currently held off
+
+double nav_x = 0, nav_y = 0;
+bool   nav_xy_known = false;
+
 // NODE_REPORT contact variables
 std::string contact_name = "";
 double contact_lat = 0;
 double contact_lon = 0;
 double contact_spd = 0;
 double contact_hdg = 0;
+
+//---------------------------------------------------------
+// Procedure: parseLatLon()
+//   "29.722820,-91.215390" - the format of BASE_COORDS, from the UI and in
+//   base_file. False for anything that is not two numbers in range.
+
+static bool parseLatLon(const std::string& str, double& lat, double& lon)
+{
+  size_t comma = str.find(',');
+  if(comma == std::string::npos)
+    return(false);
+  std::string slat = stripBlankEnds(str.substr(0, comma));
+  std::string slon = stripBlankEnds(str.substr(comma + 1));
+  if(!isNumber(slat) || !isNumber(slon))
+    return(false);
+  lat = atof(slat.c_str());
+  lon = atof(slon.c_str());
+  return((lat >= -90) && (lat <= 90) && (lon >= -180) && (lon <= 180));
+}
 
 
 //---------------------------------------------------------
@@ -113,91 +160,165 @@ WebSocket::WebSocket()
   m_last_connection_check = 0.0;
   m_heartbeat_interval = 30.0; // Send heartbeat every 30 seconds (less than frontend's 60s timeout)
   m_last_heartbeat_time = 0.0;
+  m_server = nullptr;
+  m_port = 8000;
+
+  m_comms_loss_return        = true;
+  m_comms_loss_timeout       = 30.0;
+  m_comms_loss_speed         = 5.0;
+  m_comms_loss_always        = false;
+  m_underway_speed           = 1.0;
+  m_base_lat   = 29.72282;
+  m_base_lon   = -91.21539;
+  m_lat_origin = 29.71970895316288;
+  m_lon_origin = -91.14705165281887;
+
+  m_last_ui_rx.store(0.0);
+  m_last_ui_rx_real.store(0.0);
+  m_ui_seen.store(false);
+  m_comms_lost          = false;
+  m_comms_loss_handled  = false;
+  m_comms_lost_at       = 0;
+  m_last_loss_duration  = 0;
+  m_deferred_manual_at  = 0;
+  m_comms_loss_count    = 0;
+  m_return_active       = false;
+  m_hold_active         = false;
+  m_return_by_failsafe  = false;
+  m_return_idle_since   = 0;
+  m_base_x = 0;
+  m_base_y = 0;
+  m_base_announced = false;
+
   initializeMessageHandlers();
 }
 
-// Implement the new methods for multiple clients
+// Implement the new methods for multiple clients.
+//
+// Add/Remove/UpdateConnectionTime run on the websocket threads, one per
+// client, while Iterate() reads the same containers on the MOOS thread. So
+// every access goes through m_clients_mutex, and the appcast events these
+// produce are queued for Iterate() rather than reported from here - the
+// appcast is not thread-safe either.
 void WebSocket::AddWebSocket(ix::WebSocket* ws)
 {
   if (ws != nullptr) {
+    std::lock_guard<std::mutex> lock(m_clients_mutex);
     m_webSockets.push_back(ws);
     m_lastMessageTime[ws] = MOOSTime(); // Initialize with current time
-    
+
     // Initialize heartbeat time when first client connects
-    if (m_webSockets.size() == 1) {
+    if (m_webSockets.size() == 1)
       m_last_heartbeat_time = MOOSTime();
-      reportEvent("First client connected - heartbeat timer initialized");
-    }
-    
-    reportEvent("New WebSocket client connected. Total clients: " + std::to_string(m_webSockets.size()));
+
+    m_client_events.push_back("New WebSocket client connected. Total clients: " + std::to_string(m_webSockets.size()));
   }
+  // An open connection is a frame from the UI as much as a message is
+  NoteUiFrame();
 }
 
 void WebSocket::RemoveWebSocket(ix::WebSocket* ws)
 {
+  std::lock_guard<std::mutex> lock(m_clients_mutex);
+  m_lastMessageTime.erase(ws); // Remove timestamp tracking
   auto it = std::find(m_webSockets.begin(), m_webSockets.end(), ws);
   if (it != m_webSockets.end()) {
     m_webSockets.erase(it);
-    m_lastMessageTime.erase(ws); // Remove timestamp tracking
-    reportEvent("WebSocket client disconnected. Total clients: " + std::to_string(m_webSockets.size()));
+    m_client_events.push_back("WebSocket client disconnected. Total clients: " + std::to_string(m_webSockets.size()));
   }
 }
 
 bool WebSocket::HasConnectedClients() const
 {
+  std::lock_guard<std::mutex> lock(m_clients_mutex);
   return !m_webSockets.empty();
 }
 
 size_t WebSocket::GetConnectedClientCount() const
 {
+  std::lock_guard<std::mutex> lock(m_clients_mutex);
   return m_webSockets.size();
 }
 
 void WebSocket::UpdateConnectionTime(ix::WebSocket* ws)
 {
   if (ws != nullptr) {
+    std::lock_guard<std::mutex> lock(m_clients_mutex);
     m_lastMessageTime[ws] = MOOSTime();
+
+    // A client dropped as stale is still connected - it had only gone quiet.
+    // Once it is heard from again it goes back on the broadcast list, rather
+    // than staying connected without telemetry until the UI's own stale check
+    // gives up on the socket and reconnects.
+    if (std::find(m_webSockets.begin(), m_webSockets.end(), ws) == m_webSockets.end()) {
+      m_webSockets.push_back(ws);
+      m_client_events.push_back("Stale WebSocket client heard from again. Total clients: " + std::to_string(m_webSockets.size()));
+    }
   }
+  NoteUiFrame();
+}
+
+void WebSocket::NoteUiFrame()
+{
+  m_last_ui_rx.store(MOOSTime());
+  m_last_ui_rx_real.store(MOOSLocalTime(false));
+  m_ui_seen.store(true);
 }
 
 void WebSocket::CheckStaleConnections()
 {
   double current_time = MOOSTime();
-  std::vector<ix::WebSocket*> stale_connections;
-  
-  // Find stale connections
-  for (auto& pair : m_lastMessageTime) {
-    double time_since_last_msg = current_time - pair.second;
-    if (time_since_last_msg > m_connection_timeout) {
-      stale_connections.push_back(pair.first);
-      reportRunWarning("Detected stale connection (" + 
-                      std::to_string(time_since_last_msg) + 
-                      "s since last message). Timeout: " + 
-                      std::to_string(m_connection_timeout) + "s");
+  std::vector<std::string> warnings;
+  {
+    std::lock_guard<std::mutex> lock(m_clients_mutex);
+    for (auto it = m_webSockets.begin(); it != m_webSockets.end(); ) {
+      double time_since_last_msg = current_time - m_lastMessageTime[*it];
+      if (time_since_last_msg > m_connection_timeout) {
+        warnings.push_back("Detected stale connection (" +
+                           std::to_string(time_since_last_msg) +
+                           "s since last message). Timeout: " +
+                           std::to_string(m_connection_timeout) + "s");
+        // Off the broadcast list, but the timestamp stays: a client that is
+        // heard from again is put back by UpdateConnectionTime().
+        it = m_webSockets.erase(it);
+      }
+      else
+        ++it;
     }
   }
-  
-  // Remove stale connections
-  for (auto* ws : stale_connections) {
-    RemoveWebSocket(ws);
-  }
+
+  for (const std::string& w : warnings)
+    reportRunWarning(w);
+}
+
+void WebSocket::SetServer(ix::WebSocketServer* server, int port)
+{
+  m_server = server;
+  m_port = port;
 }
 
 void WebSocket::SendMessage(const std::string& message, bool binary)
 {
-  if (m_webSockets.empty())
+  std::set<ix::WebSocket*> live;
+  {
+    std::lock_guard<std::mutex> lock(m_clients_mutex);
+    live.insert(m_webSockets.begin(), m_webSockets.end());
+  }
+
+  if (live.empty() || (m_server == nullptr))
   {
     reportRunWarning("Attempted to send message but no WebSocket clients connected");
     return;
   }
 
-  // Broadcast message to all connected clients
-  for (auto* ws : m_webSockets)
+  // Broadcast to the connected clients that are not stale. The server's list
+  // holds shared pointers, which keep each connection alive while it is
+  // written to. A failed send can run the close callback on this thread
+  // (RemoveWebSocket), which is why no lock is held here.
+  for (const auto& client : m_server->getClients())
   {
-    if (ws != nullptr)
-    {
-      ws->send(message, binary);
-    }
+    if (live.count(client.get()) > 0)
+      client->send(message, binary);
   }
 }
 
@@ -248,6 +369,12 @@ bool WebSocket::OnNewMail(MOOSMSG_LIST &NewMail)
 
     if(key == "NAV_HEADING")
       nav_heading = msg.GetDouble();
+    else if(key == "NAV_X") {
+      nav_x = msg.GetDouble();
+      nav_xy_known = true;
+    }
+    else if(key == "NAV_Y")
+      nav_y = msg.GetDouble();
     else if(key == "DESIRED_HEADING")
       desired_heading = msg.GetDouble();
     else if(key == "DESIRED_SPEED")
@@ -294,8 +421,23 @@ bool WebSocket::OnNewMail(MOOSMSG_LIST &NewMail)
       engine_battery_voltage = msg.GetDouble();
     else if(key == "VIEW_POINT")
       view_point = msg.GetString();
-    else if(key == "BASE_COORDS")
-      base_coords = msg.GetString();
+    else if(key == "BASE_COORDS") {
+      // Also settable from the MOOSDB (uPokeDB, another app), not only from
+      // the UI. Our own posts come back here too and are skipped: a late echo
+      // of the previous base would otherwise undo one just set from the UI.
+      double lat = 0, lon = 0;
+      if((msg.GetSource() != GetAppName()) && (msg.GetString() != base_coords) &&
+         parseLatLon(msg.GetString(), lat, lon))
+        setBase(lat, lon, "moosdb");
+    }
+    else if(key == "RETURN")
+      m_return_active = (tolower(msg.GetString()) == "true");
+    else if(key == "RETURN_HOLD")
+      m_hold_active = (tolower(msg.GetString()) == "true");
+    else if(key == "STATIONING")
+      m_stationing = tolower(msg.GetString());
+    else if(key == "NAV_SPEED")
+      nav_speed = msg.GetDouble();
     else if(key == "CAN_SEND")
       can_send = (msg.GetString() == "true");
     else if(key == "REGION")
@@ -320,6 +462,17 @@ bool WebSocket::OnNewMail(MOOSMSG_LIST &NewMail)
       traffic_targets = msg.GetString();
     else if(key == "COLAV_BHV_SPAWN")
       colav_respawn_seen = true;
+    else if(key == "AIS_RADIUS") {
+      // Also settable straight from the MOOSDB (uPokeDB, a script, another
+      // app), not only from the panel. Our own echo comes back here too,
+      // which the comparison makes a no-op.
+      double v = msg.IsDouble() ? msg.GetDouble()
+                                : atof(msg.GetString().c_str());
+      if(v != ais_radius) {
+        ais_radius = v;
+        applyAisLimit(true);
+      }
+    }
     else if(key == "NODE_REPORT") {
       // Parse NODE_REPORT to extract NAME, X, Y, SPD, HDG
       std::string node_report = msg.GetString();
@@ -370,6 +523,16 @@ bool WebSocket::OnNewMail(MOOSMSG_LIST &NewMail)
       geodesy.LocalGrid2LatLong(x, y, lat, lon);
 #endif
 
+      // Keep every contact, not just the last one: the AIS limit ranks them
+      // against each other, so it needs the whole picture.
+      if(name != "") {
+        AisContact cn;
+        cn.x = x;
+        cn.y = y;
+        cn.utc = MOOSTime();
+        ais_contacts[name] = cn;
+      }
+
       // Store the values
       contact_name = name;
       contact_lat = lat;
@@ -390,6 +553,8 @@ bool WebSocket::OnNewMail(MOOSMSG_LIST &NewMail)
 bool WebSocket::OnConnectToServer()
 {
    registerVariables();
+   // Post the base again on the next tick, also after a reconnection
+   m_base_announced = false;
    return(true);
 }
 
@@ -419,7 +584,22 @@ bool WebSocket::Iterate()
   AppCastingMOOSApp::Iterate();
   
   double current_time = MOOSTime();
-  
+
+  // Events queued by the websocket threads (connects, disconnects)
+  std::vector<std::string> client_events;
+  {
+    std::lock_guard<std::mutex> lock(m_clients_mutex);
+    client_events.swap(m_client_events);
+  }
+  for (const std::string& event : client_events)
+    reportEvent(event);
+
+  // Tell the helm where the base is. Once at startup - the MOOSDB hands the
+  // value to pHelmIvP whenever it registers, so the order the apps come up in
+  // does not matter - and again on every change of base.
+  if (!m_base_announced)
+    m_base_announced = postBaseToHelm();
+
   // Check for stale connections every 10 seconds
   if (current_time - m_last_connection_check > 10.0) {
     CheckStaleConnections();
@@ -475,6 +655,19 @@ bool WebSocket::Iterate()
     applyColavDist();
   }
 
+  applyAisLimit(false);
+
+  // After the inbox: a command that arrived with the link coming back has
+  // already been dispatched by the time the loss is judged.
+  checkCommsLoss();
+
+  // Manual commands held back after ending a return (see postManual)
+  if(!m_deferred_manual.empty() && (current_time >= m_deferred_manual_at)) {
+    for(const auto& kv : m_deferred_manual)
+      Notify(kv.first, kv.second);
+    m_deferred_manual.clear();
+  }
+
   // If you have pending messages to send
   //Send messages to the websocket in FreeboardSK
   //SendMessage("NAV_LAT=50.0"); // Exemplo de envio de mensagem
@@ -521,6 +714,8 @@ bool WebSocket::Iterate()
   root["TRAFFIC_SPAWNED"] = traffic_spawned;
   root["TRAFFIC_TARGETS"] = traffic_targets;
   root["COLAV_DIST"] = colav_dist;
+  root["AIS_RADIUS"] = ais_limit_report;
+  root["COMMS_LOSS"] = commsLossJson();
 
   // Add contact info as nested object
   Json::Value contact;
@@ -585,6 +780,44 @@ bool WebSocket::OnStartUp()
       colav_max_cpa = atof(value.c_str());
       handled = true;
     }
+    // Must match pContactMgrV20's disable_var / enable_var. That is where the
+    // AIS cap does its work - the contact manager turns a post here into
+    // BHV_ABLE_FILTER, which parks the avdcol_ instance for that contact.
+    else if(param == "ais_disable_var" && value != "") {
+      ais_disable_var = value;
+      handled = true;
+    }
+    else if(param == "ais_enable_var" && value != "") {
+      ais_enable_var = value;
+      handled = true;
+    }
+    // Read by main() before the server starts listening; only accepted here
+    // so it is not flagged as an unknown parameter.
+    else if(param == "port" && isNumber(value))
+      handled = true;
+    // Comms-loss failsafe. See checkCommsLoss().
+    else if(param == "comms_loss_return")
+      handled = setBooleanOnString(m_comms_loss_return, value);
+    else if(param == "comms_loss_timeout")
+      handled = setPosDoubleOnString(m_comms_loss_timeout, value);
+    else if(param == "comms_loss_speed")
+      handled = setPosDoubleOnString(m_comms_loss_speed, value);
+    else if(param == "comms_loss_always")
+      handled = setBooleanOnString(m_comms_loss_always, value);
+    else if(param == "comms_loss_underway_speed")
+      handled = setNonNegDoubleOnString(m_underway_speed, value);
+    else if(param == "base_lat" && isNumber(value)) {
+      m_base_lat = atof(value.c_str());
+      handled = true;
+    }
+    else if(param == "base_lon" && isNumber(value)) {
+      m_base_lon = atof(value.c_str());
+      handled = true;
+    }
+    else if(param == "base_file" && value != "") {
+      m_base_file = value;
+      handled = true;
+    }
     else if(param == "foo") {
       handled = true;
     }
@@ -608,8 +841,29 @@ bool WebSocket::OnStartUp()
        << ",max_util_cpa_dist=" << colav_max_cpa;
   colav_dist = echo.str();
 
+  // The UI sends a heartbeat every 5 s and the server pings every 5 s, so
+  // anything much shorter than this would declare a loss on a healthy link.
+  if(m_comms_loss_timeout < 10) {
+    reportConfigWarning("comms_loss_timeout below 10 s, using 10 s");
+    m_comms_loss_timeout = 10;
+  }
+
+  // The base is converted to the helm's local grid around the mission origin,
+  // the same one pHelmIvP and pNodeReporter use.
+  double origin = 0;
+  if(m_MissionReader.GetValue("LatOrigin", origin))
+    m_lat_origin = origin;
+  if(m_MissionReader.GetValue("LongOrigin", origin))
+    m_lon_origin = origin;
+
+  // The configured base, unless one set from the UI was saved to base_file
+  if(!setBase(m_base_lat, m_base_lon, "config"))
+    reportConfigWarning("base_lat/base_lon rejected, no base until one is set from the UI");
+  if(m_base_file != "")
+    loadBaseFile();
+
   // Registra variáveis no MOOS, se necessário
-  registerVariables();	
+  registerVariables();
   return(true);
 }
 
@@ -663,6 +917,13 @@ void WebSocket::registerVariables()
   Register("TRAFFIC_SPAWNED", 0); //pTrafficSim ack for a placed target
   Register("TRAFFIC_TARGETS", 0); //Runtime-spawned contacts currently placed
   Register("COLAV_BHV_SPAWN", 0); //An avdcol_ instance was just spawned
+  Register("NAV_X", 0); //Ownship local grid position, for ranging contacts
+  Register("NAV_Y", 0);
+  Register("AIS_RADIUS", 0); //Range inside which the avoidance engages contacts
+  Register("RETURN", 0);      //Return to base behaviour running
+  Register("RETURN_HOLD", 0); //...arrived, holding at the base
+  Register("STATIONING", 0);  //Station keep active, for the underway test
+  Register("NAV_SPEED", 0);   //...and the boat's speed
 
 }
 
@@ -676,7 +937,7 @@ bool WebSocket::buildReport()
   m_msgs << "============================================" << endl;
   m_msgs << "Servidor WebSocket configurado para:" << endl;
   m_msgs << "  Endereço: 0.0.0.0" << endl;
-  m_msgs << "  Porta:    8000" << endl;
+  m_msgs << "  Porta:    " << m_port << endl;
   m_msgs << "  Estado:   Running" << endl;
   m_msgs << endl;
 
@@ -685,25 +946,62 @@ bool WebSocket::buildReport()
   actab << "Parâmetro | Valor";
   actab.addHeaderLines();
   actab << "Address" << "0.0.0.0";
-  actab << "Port"    << "8000";
+  actab << "Port"    << std::to_string(m_port);
   actab << "Status"  << "Running";
   actab << "Connected Clients" << std::to_string(GetConnectedClientCount());
   actab << "Mensagem Recebida"  << msg_recebida;
   actab << "Connection Timeout" << std::to_string(m_connection_timeout) + "s";
   
   // Show connection health
-  if (!m_webSockets.empty()) {
-    m_msgs << endl << "Connection Health:" << endl;
-    double current_time = MOOSTime();
-    for (size_t i = 0; i < m_webSockets.size(); i++) {
-      auto* ws = m_webSockets[i];
-      double time_since_last_msg = current_time - m_lastMessageTime[ws];
-      m_msgs << "  Client " << (i+1) << ": Last message " 
-             << std::fixed << std::setprecision(1) << time_since_last_msg << "s ago" << endl;
+  {
+    std::lock_guard<std::mutex> lock(m_clients_mutex);
+    if (!m_webSockets.empty()) {
+      m_msgs << endl << "Connection Health:" << endl;
+      double current_time = MOOSTime();
+      for (size_t i = 0; i < m_webSockets.size(); i++) {
+        auto* ws = m_webSockets[i];
+        double time_since_last_msg = current_time - m_lastMessageTime[ws];
+        m_msgs << "  Client " << (i+1) << ": Last message " 
+               << std::fixed << std::setprecision(1) << time_since_last_msg << "s ago" << endl;
+      }
     }
   }
 
   m_msgs << actab.getFormattedString();
+
+  // Comms-loss failsafe
+  double now = MOOSTime();
+  std::string link = "waiting for the first UI";
+  if (m_ui_seen.load()) {
+    link = m_comms_lost ? "LOST" : "ok";
+    link += ", last frame " + doubleToString(now - m_last_ui_rx.load(), 1) + " s ago";
+  }
+  std::string ret = m_return_active ? "returning" : (m_hold_active ? "holding at base" : "idle");
+  if (m_return_reason != "")
+    ret += " (" + m_return_reason + ")";
+
+  m_msgs << endl << endl << "Comms-loss failsafe" << endl;
+  ACTable fstab(2);
+  fstab << "Item | Value";
+  fstab.addHeaderLines();
+  fstab << "Return on loss" << std::string(m_comms_loss_return ? "on" : "off") +
+            (m_comms_loss_always ? ", always" : ", helm in DRIVE or underway");
+  fstab << "Timeout" << doubleToString(m_comms_loss_timeout, 1) + " s";
+  fstab << "Return speed" << doubleToString(m_comms_loss_speed, 2);
+  fstab << "UI link" << link;
+  fstab << "Losses" << std::to_string(m_comms_loss_count) +
+            ((m_comms_loss_count > 0) ? ", last action: " + m_comms_loss_action : "");
+  fstab << "Helm, underway" << (ivphelm_state == "" ? std::string("?") : ivphelm_state) +
+            (isUnderway() ? ", underway" : ", not underway");
+  std::string stay = stayReason();
+  fstab << "On a loss now" << (stay == "" ? std::string("return to base") : "stay (" + stay + ")");
+  fstab << "Return" << ret;
+  fstab << "Base" << (base_coords == "" ? std::string("none") :
+            base_coords + " (" + m_base_source + ")");
+  fstab << "Base, local" << "x=" + doubleToString(m_base_x, 1) + ", y=" + doubleToString(m_base_y, 1);
+  if (m_base_file != "")
+    fstab << "Base file" << m_base_file;
+  m_msgs << fstab.getFormattedString();
 
   return true;
 }
@@ -749,6 +1047,7 @@ void WebSocket::initializeMessageHandlers()
   m_messageHandlers["PUT_TARGET"] = &WebSocket::handlePutTarget;
   m_messageHandlers["CLEAR_TARGETS"] = &WebSocket::handleClearTargets;
   m_messageHandlers["COLAV_DIST"] = &WebSocket::handleColavDist;
+  m_messageHandlers["AIS_RADIUS"] = &WebSocket::handleAisRadius;
 }
 
 //---------------------------------------------------------
@@ -761,6 +1060,8 @@ void WebSocket::initializeMessageHandlers()
 
 void WebSocket::handleTrailFollow(const std::string& value)
 {
+  cancelReturn("TRAIL_FOLLOW");
+
   if (value == "off" || value == "false") {
     Notify("TRAILING", "false");
     // Same safety pair AUTONOMOUS_STOP uses: leave the boat with no residual
@@ -1016,6 +1317,128 @@ void WebSocket::applyColavDist()
 }
 
 //---------------------------------------------------------
+// Procedure: handleAisRadius()
+//   AIS_RADIUS=500  - engage contacts within 500 m, hold the rest off
+//   AIS_RADIUS=0    - off, every contact is engaged
+//
+//   A range is what makes a single manoeuvre watchable: with a dozen contacts
+//   in the picture the helm is solving all of them at once and no one
+//   encounter can be read off the chart. The UI draws the same ring around the
+//   boat, so what is in play is visible rather than inferred.
+
+void WebSocket::handleAisRadius(const std::string& value)
+{
+  double radius = 0;
+  try {
+    radius = std::stod(value);
+  }
+  catch (const std::exception& e) {
+    std::cerr << "[AIS_RADIUS] not a number: " << value << std::endl;
+    return;
+  }
+  if (radius < 0)
+    radius = 0;
+  if (radius > 20000)
+    radius = 20000;
+
+  ais_radius = radius;
+  Notify("AIS_RADIUS", ais_radius);
+  std::cout << "[AIS_RADIUS] " << ais_radius << std::endl;
+
+  // Apply at once rather than waiting for the next tick, and force the posts
+  // even where nothing changed - lifting the limit has to release every
+  // contact it was holding.
+  applyAisLimit(true);
+}
+
+//---------------------------------------------------------
+// Procedure: applyAisLimit()
+//   Hold off every contact beyond the ring, release the ones inside it.
+//
+//   force: re-post the whole picture even where nothing changed. Used when the
+//   radius itself moves; otherwise only transitions are posted.
+//
+//   Runs at 1 Hz. Ranging on every tick would be wasted work - contacts move
+//   metres per second - and the re-post below is deliberately periodic anyway:
+//   a contact held off now may not have spawned its behaviour yet, and the one
+//   that spawns later comes up enabled.
+
+void WebSocket::applyAisLimit(bool force)
+{
+  double now = MOOSTime();
+  if (!force && ((now - ais_last_apply) < 1.0))
+    return;
+  ais_last_apply = now;
+
+  // Every few seconds the whole held set is posted again, not just the
+  // contacts that changed side: a contact held off before its behaviour was
+  // spawned would otherwise come up enabled and quietly rejoin the picture.
+  bool repost = (now - ais_last_repost) >= 3.0;
+  if (repost)
+    ais_last_repost = now;
+
+  // Contacts that have stopped reporting are no longer anyone's problem.
+  // Released on the way out: if the same name comes back it starts even.
+  for (auto it = ais_contacts.begin(); it != ais_contacts.end(); ) {
+    if ((now - it->second.utc) > 60.0) {
+      if (ais_held.erase(it->first) > 0)
+        Notify(ais_enable_var, it->first);
+      it = ais_contacts.erase(it);
+    }
+    else
+      ++it;
+  }
+
+  std::ostringstream rep;
+  rep << std::fixed << std::setprecision(0) << "radius=" << ais_radius
+      << ",tracked=" << ais_contacts.size();
+
+  if (ais_radius <= 0) {
+    for (const std::string& cn : ais_held)
+      Notify(ais_enable_var, cn);
+    ais_held.clear();
+    rep << ",engaged=" << ais_contacts.size() << ",held=0";
+    ais_limit_report = rep.str();
+    return;
+  }
+
+  // Without an ownship position there is nothing to range against, so leave
+  // the picture alone rather than hold contacts off at random.
+  if (!nav_xy_known) {
+    rep << ",engaged=0,held=0,why=no_ownship_position";
+    ais_limit_report = rep.str();
+    return;
+  }
+
+  unsigned int engaged = 0;
+  double nearest_held = -1;
+  for (const auto& kv : ais_contacts) {
+    const std::string& cn = kv.first;
+    double range = std::hypot(kv.second.x - nav_x, kv.second.y - nav_y);
+
+    if (range <= ais_radius) {
+      engaged++;
+      if (ais_held.erase(cn) > 0)
+        Notify(ais_enable_var, cn);
+    }
+    else {
+      if (force || repost || (ais_held.count(cn) == 0))
+        Notify(ais_disable_var, cn);
+      ais_held.insert(cn);
+      if ((nearest_held < 0) || (range < nearest_held))
+        nearest_held = range;
+    }
+  }
+
+  rep << ",engaged=" << engaged << ",held=" << ais_held.size();
+  // How far out the nearest held contact is, so the panel can say what the
+  // radius would have to reach to take the next one in.
+  if (nearest_held >= 0)
+    rep << ",next=" << nearest_held;
+  ais_limit_report = rep.str();
+}
+
+//---------------------------------------------------------
 // Procedure: handleClearTargets()
 //   CLEAR_TARGETS=all | CLEAR_TARGETS=name=AIS366999901
 
@@ -1033,6 +1456,7 @@ void WebSocket::handleTrim(const std::string& value)
 void WebSocket::handleControleManual(const std::string& value)
 {
   if (value == "true") {
+    cancelReturn("CONTROLE_MANUAL");
     Notify("MOOS_MANUAL_OVERIDE", "true");
   } else if (value == "false") {
     Notify("MOOS_MANUAL_OVERIDE", "false");
@@ -1058,16 +1482,19 @@ void WebSocket::handleDesiredSpeed(const std::string& value)
   Notify("WPT_UPDATE", "speed=" + std::to_string(value_speed));
 }
 
+// Manual remote control. Moving the rudder or thrust from the UI is the
+// operator taking over, so it ends a return to base - planchaPID would
+// otherwise keep overwriting these with the return's own commands.
 void WebSocket::handleDesiredRudder(const std::string& value)
 {
   double value_rudder = std::stod(value);
-  Notify("DESIRED_RUDDER", value_rudder);
+  postManual("DESIRED_RUDDER", value_rudder, cancelReturn("manual control (DESIRED_RUDDER)"));
 }
 
 void WebSocket::handleDesiredThrust(const std::string& value)
 {
   double value_thrust = std::stod(value);
-  Notify("DESIRED_THRUST", value_thrust);
+  postManual("DESIRED_THRUST", value_thrust, cancelReturn("manual control (DESIRED_THRUST)"));
 }
 
 void WebSocket::handleDesiredGear(const std::string& value)
@@ -1145,6 +1572,10 @@ void WebSocket::handleAutonomousStart(const std::string& value)
   // New format: true#SPEED#WAYPOINTS#REPEAT=true/false
   // Example: true#10#42.3601,-71.0589:42.3602,-71.0590#REPEAT=true
   
+  // A mission start, with or without waypoints, ends a return to base
+  if (value.compare(0, 4, "true") == 0)
+    cancelReturn("AUTONOMOUS_START");
+
   size_t firstHashPos = value.find('#');
   if (firstHashPos != std::string::npos) {
     std::string boolPart = value.substr(0, firstHashPos);
@@ -1322,6 +1753,7 @@ void WebSocket::handleAutonomousStart(const std::string& value)
 void WebSocket::handleAutonomousStop(const std::string& value)
 {
   if (value == "true") {
+    cancelReturn("AUTONOMOUS_STOP");
     //Notify("MOOS_MANUAL_OVERRIDE", "true");
     Notify("WAYPOINT", "false");
     Notify("STATIONING", "false"); //To end the station keep and not keep the mission stuck
@@ -1332,21 +1764,22 @@ void WebSocket::handleAutonomousStop(const std::string& value)
   }
 }
 
+// The same return the comms-loss watchdog engages, on demand: to the base
+// iWebSocket holds, at comms_loss_speed, then holding there.
 void WebSocket::handleAutonomousReturnToBase(const std::string& value)
 {
   if (value == "true") {
-    Notify("RETURN", "true");
+    if (base_coords == "")
+      reportRunWarning("AUTONOMOUS_RETURN_TO_BASE ignored, no base set");
+    else
+      engageReturn("operator");
   } else if (value == "false") {
-    Notify("RETURN", "false");
+    cancelReturn("AUTONOMOUS_RETURN_TO_BASE=false");
   }
 }
 
 void WebSocket::handleReturnUpdate(const std::string& value)
 {
-  static constexpr double kLatOrigin = 29.71970895316288;
-  static constexpr double kLonOrigin = -91.14705165281887;
-  m_geodesy.Initialise(kLatOrigin, kLonOrigin);
-
   auto eqPos = value.find('=');
   if (eqPos == std::string::npos) {
       MOOSTrace("RETURN_UPDATE malformed: missing '=' in \"%s\"", value.c_str());
@@ -1381,14 +1814,9 @@ void WebSocket::handleReturnUpdate(const std::string& value)
       return;
   }
 
-  double localY = 0.0, localX = 0.0;
-  m_geodesy.LatLong2LocalUTM(latDeg, lonDeg, localY, localX);
-
-  std::ostringstream oss;
-  oss << "points="
-      << std::fixed << std::setprecision(1)
-      << localX << "," << localY;
-  Notify("RETURN_UPDATE", oss.str());
+  // The return point is the base: going through setBase() keeps the hold
+  // point, BASE_COORDS and base_file in step with it.
+  setBase(latDeg, lonDeg, "ui");
 }
 
 void WebSocket::handleStopCan(const std::string& value)
@@ -1472,6 +1900,8 @@ void WebSocket::handleStationKeepWaypoint(const std::string& value)
     std::string boolPart = value.substr(0, hashPos);
 
     if (boolPart == "TRUE") {
+      cancelReturn("STATION_KEEP_WAYPOINT");
+
       // Extract parameters
       std::string params = value.substr(hashPos + 1);
 
@@ -1588,15 +2018,376 @@ void WebSocket::handleRepeat(const std::string& value)
   }
 }
 
+//---------------------------------------------------------
+// Procedure: handleBaseCoords()
+//   BASE_COORDS=29.722820,-91.215390  (lat,lon)
+//
+//   The base set on the chart. It is where the boat goes when the link to
+//   the UI is lost, so it is converted and handed to the helm at once, not
+//   only stored for the UI to read back.
+
 void WebSocket::handleBaseCoords(const std::string& value)
 {
-  // Save the base coordinates value
-  base_coords = value;
-  
-  // Notify MOOS with the BASE_COORDS value
-  Notify("BASE_COORDS", value);
-  
-  std::cout << "[BASE_COORDS] Saved and notified: " << value << std::endl;
+  double lat = 0, lon = 0;
+  if(!parseLatLon(value, lat, lon)) {
+    reportRunWarning("BASE_COORDS rejected, expected lat,lon: " + value);
+    return;
+  }
+  setBase(lat, lon, "ui");
+  std::cout << "[BASE_COORDS] " << base_coords << std::endl;
+}
+
+//---------------------------------------------------------
+// Procedure: setBase()
+//   Validate a new base, convert it to the helm's local grid and schedule
+//   the posts to the helm. A base from the UI or the MOOSDB is also saved to
+//   base_file, so a restart at sea does not quietly go back to the default.
+
+bool WebSocket::setBase(double lat, double lon, const std::string& source)
+{
+  if((lat < -90) || (lat > 90) || (lon < -180) || (lon > 180) ||
+     ((lat == 0) && (lon == 0))) {
+    reportRunWarning("Base rejected (" + source + "): " +
+                     doubleToString(lat, 6) + "," + doubleToString(lon, 6));
+    return(false);
+  }
+
+  // Same projection as the NODE_REPORT conversion above (USE_UTM)
+  CMOOSGeodesy geodesy;
+  geodesy.Initialise(m_lat_origin, m_lon_origin);
+  double north = 0, east = 0;
+#ifdef USE_UTM
+  geodesy.LatLong2LocalUTM(lat, lon, north, east);
+#else
+  geodesy.LatLong2LocalGrid(lat, lon, north, east);
+#endif
+
+  // A base hundreds of km from the mission origin is a typo or swapped
+  // coordinates, not somewhere to send an unmanned boat.
+  if((fabs(north) > 200000) || (fabs(east) > 200000)) {
+    reportRunWarning("Base rejected (" + source + "), more than 200 km from the mission origin: " +
+                     doubleToString(lat, 6) + "," + doubleToString(lon, 6));
+    return(false);
+  }
+
+  m_base_lat = lat;
+  m_base_lon = lon;
+  m_base_x = east;
+  m_base_y = north;
+  m_base_source = source;
+
+  std::ostringstream coords;
+  coords << std::fixed << std::setprecision(6) << lat << "," << lon;
+  base_coords = coords.str();
+
+  if((source == "ui") || (source == "moosdb"))
+    saveBaseFile();
+
+  // Posted on the next tick: from OnStartUp() the MOOSDB may not be
+  // connected yet, and after that the next tick is 50 ms away.
+  m_base_announced = false;
+
+  reportEvent("Base (" + source + "): " + base_coords + " = x=" +
+              doubleToString(m_base_x, 1) + ", y=" + doubleToString(m_base_y, 1));
+  return(true);
+}
+
+//---------------------------------------------------------
+// Procedure: postBaseToHelm()
+//   The return behaviour (comms_return in alpha.bhv) goes to the base at the
+//   failsafe speed; the hold behaviour (comms_hold) keeps station on it.
+
+bool WebSocket::postBaseToHelm()
+{
+  if(base_coords == "")
+    return(true);   // no valid base yet, nothing to post
+
+  std::ostringstream ret;
+  ret << std::fixed << std::setprecision(1)
+      << "point=" << m_base_x << "," << m_base_y
+      << " # speed=" << std::setprecision(2) << m_comms_loss_speed;
+
+  std::ostringstream hold;
+  hold << std::fixed << std::setprecision(1)
+       << "station_pt=" << m_base_x << "," << m_base_y;
+
+  // The base on pMarineViewer's chart, where the boat goes if the link to the
+  // UI is lost. Same label every time, so a new base replaces the old marker.
+  std::ostringstream marker;
+  marker << std::fixed << std::setprecision(1)
+         << "type=diamond,x=" << m_base_x << ",y=" << m_base_y
+         << ",width=15,color=red,label=comms_loss_base,msg=BASE (comms loss)";
+
+  bool ok = Notify("RETURN_UPDATE", ret.str());
+  ok = Notify("RETURN_HOLD_UPDATE", hold.str()) && ok;
+  ok = Notify("BASE_COORDS", base_coords) && ok;
+  ok = Notify("VIEW_MARKER", marker.str()) && ok;
+  return(ok);
+}
+
+//---------------------------------------------------------
+// Procedure: loadBaseFile() / saveBaseFile()
+//   base_file holds a single line, lat,lon. Written to a temporary file and
+//   renamed over the old one, so a power cut mid-write cannot leave half a
+//   base behind.
+
+bool WebSocket::loadBaseFile()
+{
+  std::ifstream in(m_base_file.c_str());
+  if(!in.is_open())
+    return(false);   // nothing saved yet: the configured base stands
+
+  std::string line;
+  std::getline(in, line);
+  double lat = 0, lon = 0;
+  if(!parseLatLon(line, lat, lon)) {
+    reportConfigWarning("base_file " + m_base_file + " ignored, expected lat,lon: " + line);
+    return(false);
+  }
+  return(setBase(lat, lon, "file"));
+}
+
+void WebSocket::saveBaseFile() const
+{
+  if(m_base_file == "")
+    return;
+
+  std::string tmp = m_base_file + ".tmp";
+  {
+    std::ofstream out(tmp.c_str(), std::ios::trunc);
+    if(!out.is_open()) {
+      std::cerr << "[BASE_COORDS] cannot write " << tmp << std::endl;
+      return;
+    }
+    out << base_coords << std::endl;
+  }
+  if(std::rename(tmp.c_str(), m_base_file.c_str()) != 0)
+    std::cerr << "[BASE_COORDS] cannot replace " << m_base_file << std::endl;
+}
+
+//---------------------------------------------------------
+// Procedure: isUnderway()
+//   Whether the boat is doing anything a lost link should interrupt: a mode
+//   running on the helm, thrust commanded, or moving (adrift included).
+
+bool WebSocket::isUnderway() const
+{
+  if((waypoint == "true") || (m_stationing == "true") || trailing)
+    return(true);
+  if(fabs(desired_thrust) > 0)
+    return(true);
+  return(nav_speed > m_underway_speed);
+}
+
+//---------------------------------------------------------
+// Procedure: stayReason()
+//   Why the boat would stay where it is if the link were lost now, or empty
+//   if it would return to base. It returns whenever the helm is in DRIVE -
+//   NothingToDo included - or the boat is underway. With the helm in PARK
+//   and the boat idle (the boat at the dock after power-up, start_in_drive =
+//   false) it stays, unless comms_loss_always is set.
+
+std::string WebSocket::stayReason() const
+{
+  if(!m_comms_loss_return)
+    return("comms_loss_return is off");
+  if(base_coords == "")
+    return("no base");
+  if(m_comms_loss_always || (ivphelm_state == "DRIVE") || isUnderway())
+    return("");
+  return("helm in " + (ivphelm_state == "" ? std::string("no state") : ivphelm_state) + ", not underway");
+}
+
+//---------------------------------------------------------
+// Procedure: checkCommsLoss()
+//   The comms-loss watchdog, once per tick. Armed by the first frame from a
+//   UI; the link counts as lost once nothing at all - no message, ping or
+//   pong - has come from any UI for comms_loss_timeout seconds.
+//
+//   On a loss the boat returns to the base - see stayReason() for when it
+//   does not. A boat left where it is is still watched: if it starts to drift,
+//   or the helm goes to DRIVE, the return is engaged then. When the link comes
+//   back the return carries on - it ends with the operator's next command, not
+//   by itself.
+
+void WebSocket::checkCommsLoss()
+{
+  double now = MOOSTime();
+
+  // Who engaged the current return stops mattering once it is over. Not on
+  // the first idle tick: the arrival endflags post RETURN=false and
+  // RETURN_HOLD=true together, and the mail can split them.
+  if(m_return_active || m_hold_active)
+    m_return_idle_since = 0;
+  else if(m_return_idle_since == 0)
+    m_return_idle_since = now;
+  else if((now - m_return_idle_since) > 3) {
+    m_return_by_failsafe = false;
+    m_return_reason = "";
+  }
+
+  if(!m_ui_seen.load())
+    return;
+
+  double last_rx = m_last_ui_rx.load();
+  double silent  = now - last_rx;
+
+  if(!m_comms_lost) {
+    if(silent <= m_comms_loss_timeout)
+      return;
+    m_comms_lost = true;
+    m_comms_loss_handled = false;
+    m_comms_lost_at = m_last_ui_rx_real.load();
+    m_comms_loss_count++;
+    m_comms_loss_action = "";
+    Notify("COMMS_LOSS", "true");
+    reportRunWarning("Comms with the UI lost");
+    reportEvent("Comms with the UI lost: nothing heard for " + doubleToString(silent, 1) + " s");
+  }
+  else if(silent <= m_comms_loss_timeout) {
+    m_comms_lost = false;
+    m_last_loss_duration = MOOSLocalTime(false) - m_comms_lost_at;
+    Notify("COMMS_LOSS", "false");
+    retractRunWarning("Comms with the UI lost");
+    reportEvent("Comms with the UI restored after " + doubleToString(m_last_loss_duration, 1) + " s");
+    return;
+  }
+
+  if(m_comms_loss_handled)
+    return;
+
+  std::string action;
+  std::string stay = stayReason();
+  if(m_return_active || m_hold_active) {
+    action = "none, already returning to base";
+    m_comms_loss_handled = true;
+  }
+  else if(stay == "") {
+    engageReturn("comms_loss");
+    action = "return to base";
+    m_comms_loss_handled = true;
+  }
+  else if(!m_comms_loss_return || (base_coords == "")) {
+    action = "none, " + stay;
+    m_comms_loss_handled = true;
+  }
+  else
+    action = "waiting, " + stay;   // looked at again every tick
+
+  if(action != m_comms_loss_action) {
+    m_comms_loss_action = action;
+    reportEvent("Comms loss: " + action);
+  }
+}
+
+//---------------------------------------------------------
+// Procedure: engageReturn()
+//   Hand the helm to the return behaviour. Everything that would fight it is
+//   stood down first - for the helm (the mission, station keep, trail) and
+//   for planchaPID (constant heading would steer a fixed heading instead of
+//   the helm's).
+
+void WebSocket::engageReturn(const std::string& reason)
+{
+  bool failsafe = (reason == "comms_loss");
+
+  postBaseToHelm();   // the target before the start, never a stale base
+
+  Notify("WAYPOINT", "false");
+  Notify("STATIONING", "false");
+  Notify("TRAILING", "false");
+  Notify("CONSTANT_HEADING", "false");
+  // Nobody is watching a failsafe return: run it on the configured gains,
+  // not on ones left over from a calibration session.
+  if(failsafe)
+    Notify("SERVICE_MODE", "false");
+  Notify("RETURN_HOLD", "false");
+  Notify("RETURN", "true");
+  Notify("MOOS_MANUAL_OVERRIDE", "false");   // the helm drives (PARK -> DRIVE)
+
+  m_deferred_manual.clear();   // a manual command still held back is overtaken
+  m_return_active = true;
+  m_hold_active = false;
+  m_return_by_failsafe = failsafe;
+  m_return_reason = reason;
+  m_return_idle_since = 0;
+
+  reportEvent("Returning to base " + base_coords + " (" + reason + ")");
+  std::cout << "[RETURN] to " << base_coords << " (" << reason << ")" << std::endl;
+}
+
+//---------------------------------------------------------
+// Procedure: cancelReturn()
+//   An operator command ends the return, or the hold at the base. Thrust and
+//   rudder go to zero first, as the behaviours' own endflags do: planchaPID
+//   stops publishing once RETURN/RETURN_HOLD drop, and its last command
+//   would otherwise stay on the actuators. The command that called this
+//   posts its own values straight after.
+
+bool WebSocket::cancelReturn(const std::string& reason)
+{
+  if(!m_return_active && !m_hold_active)
+    return(false);
+
+  Notify("RETURN", "false");
+  Notify("RETURN_HOLD", "false");
+  Notify("DESIRED_THRUST", 0.0);
+  Notify("DESIRED_RUDDER", 0.0);
+
+  m_return_active = false;
+  m_hold_active = false;
+  m_return_by_failsafe = false;
+  m_return_reason = "";
+
+  reportEvent("Return to base ended by " + reason);
+  std::cout << "[RETURN] ended by " << reason << std::endl;
+  return(true);
+}
+
+//---------------------------------------------------------
+// Procedure: postManual()
+//   A manual rudder/thrust command from the UI. If it has just ended a
+//   return, it is held back for 0.3 s: planchaPID posts zero thrust and
+//   rudder when it lets go of the actuators, and that zero must not be the
+//   last word over the operator's command. Commands arriving meanwhile
+//   replace the held ones and go out together.
+
+void WebSocket::postManual(const std::string& var, double value, bool cancelled)
+{
+  if(cancelled || !m_deferred_manual.empty()) {
+    if(m_deferred_manual.empty())
+      m_deferred_manual_at = MOOSTime() + 0.3;
+    m_deferred_manual[var] = value;
+    return;
+  }
+  Notify(var, value);
+}
+
+//---------------------------------------------------------
+// Procedure: commsLossJson()
+//   The failsafe as the UI sees it. LOST is only ever true for a moment on
+//   the UI side - while it is true nothing reaches the UI - so what matters
+//   there is RETURN/FAILSAFE and the record of the last loss.
+
+Json::Value WebSocket::commsLossJson() const
+{
+  Json::Value cl;
+  cl["ENABLED"]  = m_comms_loss_return;
+  cl["TIMEOUT"]  = m_comms_loss_timeout;
+  cl["ARMED"]    = m_ui_seen.load();
+  // What a loss now would do, so the UI can tell the operator beforehand
+  std::string stay = stayReason();
+  cl["WILL_RETURN"] = (stay == "");
+  cl["STAY_REASON"] = stay;
+  cl["LOST"]     = m_comms_lost;
+  cl["COUNT"]    = m_comms_loss_count;
+  cl["LOST_AT"]  = m_comms_lost_at;          // last frame before the loss, UNIX s
+  cl["DURATION"] = m_last_loss_duration;     // of the last loss that ended, s (wall clock)
+  cl["ACTION"]   = m_comms_loss_action;
+  cl["RETURN"]   = m_return_active ? "returning" : (m_hold_active ? "holding" : "idle");
+  cl["FAILSAFE"] = m_return_by_failsafe;
+  cl["REASON"]   = m_return_reason;
+  return(cl);
 }
 
 void WebSocket::handleCanSend(const std::string& value)

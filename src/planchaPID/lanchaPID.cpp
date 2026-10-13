@@ -70,7 +70,9 @@ double setpoint_heading; //Variável em que eu coloco o setpoint de rumo
 
 //Check when autonomous control is active
 std::string waypoint; //Variável para verificar se o controle autônomo é verdadeiro
-std::string return_var; //
+std::string return_var; // return to base (comms-loss failsafe or operator)
+std::string return_hold; // ...arrived, holding station at the base
+bool was_driving = false; // published DESIRED_THRUST/RUDDER on the last iteration
 std::string region; // Variável para verificar se o OpRegion está ativo
 
 //Cria os objetos para o controle PID com valores iniciais de kp, ki e kd lidos do arquivo
@@ -495,6 +497,8 @@ bool lanchaPID::OnNewMail(MOOSMSG_LIST &NewMail)
         waypoint = msg.GetString();
       else if(key == "RETURN")
         return_var = msg.GetString();
+      else if(key == "RETURN_HOLD")
+        return_hold = msg.GetString();
       else if(key == "NAV_COG")
         nav_cog = msg.GetDouble();
       else if(key == "STATIONING")
@@ -575,12 +579,28 @@ bool lanchaPID::Iterate()
   // TRAILING is the follow-a-contact mode (BHV_Trail). Without it here the helm
   // computes a pursuit solution that never reaches the actuators, because
   // engaging Follow deliberately clears WAYPOINT to stop the mission fighting it.
-  if ((waypoint == "true" && moos_manual_overide == "false") ||
+  // RETURN / RETURN_HOLD are the return to base and the hold there (comms_return
+  // and comms_hold in alpha.bhv) - the same story: iWebSocket clears WAYPOINT,
+  // STATIONING and TRAILING when it engages them.
+  bool driving =
+      (waypoint == "true" && moos_manual_overide == "false") ||
       (trailing == "true" && moos_manual_overide == "false") ||
-      stationing == "true" || region == "true") {
+      ((return_var == "true" || return_hold == "true") && moos_manual_overide == "false") ||
+      stationing == "true" || region == "true";
+  if (driving) {
     Notify("DESIRED_THRUST", desired_thrust);
     Notify("DESIRED_RUDDER", desired_rudder);
   }
+  // Letting go of the actuators: zero them once, as the behaviours' endflags
+  // do. Whoever ends a mode posts its own zero (AUTONOMOUS_STOP) or command
+  // (manual control), but this loop may have published once more after that
+  // reached the MOOSDB, and its last value would otherwise stay on the
+  // actuators - a boat that keeps going after Stop.
+  else if (was_driving) {
+    Notify("DESIRED_THRUST", 0.0);
+    Notify("DESIRED_RUDDER", 0.0);
+  }
+  was_driving = driving;
 
   // Report the gains actually being applied this cycle so the UI can show the
   // operator what the controller is running on (the manual values in service
@@ -714,6 +734,7 @@ void lanchaPID::registerVariables()
   Register("SETPOINT_HEADING",0);
   Register("WAYPOINT",0);
   Register("RETURN",0);
+  Register("RETURN_HOLD",0);
   Register("STATIONING",0);
   Register("TRAILING",0);
   Register("REGION",0);

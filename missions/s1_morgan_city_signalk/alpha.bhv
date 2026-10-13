@@ -2,6 +2,7 @@
 
 initialize   DEPLOY = false
 initialize   RETURN = false
+initialize   RETURN_HOLD = false
 initialize   WAYPOINT = false
 initialize   STATIONING = false
 initialize   REGION = false
@@ -13,6 +14,9 @@ Behavior = BHV_Waypoint_mod
   name      = waypt_survey
   pwt       = 100
   condition = WAYPOINT = true
+  // A return to base outranks the mission. iWebSocket clears WAYPOINT when it
+  // engages one, but RETURN can also come from pMarineViewer's RETURN button.
+  condition = RETURN != true
   endflag   = WAYPOINT = false
   //endflag   = MOOS_MANUAL_OVERRIDE = true
   endflag   = DESIRED_THRUST = 0 //zero thrust e rudder por segurança
@@ -37,6 +41,66 @@ Behavior = BHV_Waypoint_mod
     visual_hints = nextpt_lcolor=gray70
     visual_hints = vertex_color=dodger_blue, edge_color=white
     visual_hints = vertex_size=5, edge_size=1
+}
+
+//----------------------------------------------
+// Return to base, then hold there.
+//
+// Engaged by iWebSocket when the link to the UI ashore is lost - with the helm
+// in DRIVE, NothingToDo included, or the boat underway (comms_loss_* in its
+// config block) - or on demand with AUTONOMOUS_RETURN_TO_BASE. iWebSocket owns the base: the default comes from
+// base_lat/base_lon in its config block, the UI can move it (BASE_COORDS), and
+// every change reaches these two behaviours through RETURN_UPDATE and
+// RETURN_HOLD_UPDATE. The point and speed below are only the starting values,
+// replaced as soon as iWebSocket is up.
+//
+// The return is a straight line to the base - collision avoidance runs on the
+// way (avdcol_ below), but nothing here knows where the banks are.
+//
+// On arrival the endflags hand over to comms_hold, which keeps station on the
+// base until the operator's next command (any mission, stop, follow or manual
+// rudder/thrust from the UI ends both). Drop the RETURN_HOLD endflag to stop
+// on arrival instead - a stopped boat drifts with the current.
+
+Behavior = BHV_Waypoint
+{
+  name      = comms_return
+  pwt       = 100
+  condition = RETURN = true
+  endflag   = RETURN = false
+  endflag   = RETURN_HOLD = true
+  updates   = RETURN_UPDATE
+  perpetual = true
+
+  // Reports as WPT_STAT_RETURN, WPT_INDEX_RETURN... - the UI follows the
+  // mission's WPT_INDEX and must not read the return as mission progress.
+  post_suffix = RETURN
+
+           speed = 5                   // comms_loss_speed in iWebSocket (knots on the boat)
+           point = -6616.6,240.7       // 29.72282, -91.21539 in the local grid
+  capture_radius = 20
+     slip_radius = 40
+            lead = 20
+
+  visual_hints = nextpt_color=red, nextpt_lcolor=khaki
+  visual_hints = vertex_color=red, edge_color=red
+}
+
+Behavior = BHV_StationKeep
+{
+  name      = comms_hold
+  pwt       = 100
+  condition = RETURN_HOLD = true
+  updates   = RETURN_HOLD_UPDATE
+
+     station_pt = -6616.6,240.7        // the base, from iWebSocket
+   inner_radius = 15
+   outer_radius = 40
+    outer_speed = 1.0
+  transit_speed = 2.5
+     swing_time = 0
+
+  visual_hints = vertex_color=red, edge_color=red, label_color=white
 }
 
 //----------------------------------------------
@@ -74,9 +138,11 @@ Behavior = BHV_AvdColregsV22
 {
   name       = avdcol_
   pwt        = 250
-  //condition  = DEPLOY = true 
+  //condition  = DEPLOY = true
   //Coloquei para fazer o desvio quando estiver rodando os waypoints
-  condition = WAYPOINT = true
+  // ...and on the way back to base: a return after a comms loss has nobody
+  // watching, so it needs the avoidance more than a mission does.
+  condition = (WAYPOINT = true) or (RETURN = true)
   updates    = CONTACT_INFO
   templating = spawn
 

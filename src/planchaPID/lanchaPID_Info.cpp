@@ -113,7 +113,8 @@ void showInterfaceAndExit()
   blk("      bypassing the speed-based gain schedule. Used by the UI   ");
   blk("      to calibrate the boat without changing the backend.       ");
   blk("  DEPLOY, MOOS_MANUAL_OVERRIDE, CONSTANT_HEADING,               ");
-  blk("  SETPOINT_HEADING, WAYPOINT, RETURN, STATIONING, REGION        ");
+  blk("  SETPOINT_HEADING, WAYPOINT, RETURN, RETURN_HOLD, STATIONING,  ");
+  blk("  TRAILING, REGION                                              ");
   blk("                                                                ");
   blk("PUBLICATIONS:                                                   ");
   blk("------------------------------------                            ");

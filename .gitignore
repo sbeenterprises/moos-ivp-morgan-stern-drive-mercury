@@ -71,3 +71,7 @@ missions/**/.LastOpenedMOOSLogDirectory
 doc/html/
 doc/latex/
 doxygen_warnings.txt
+
+# Base set from the UI, saved by iWebSocket (base_file) - runtime state
+base_position*.txt
+base_position*.txt.tmp

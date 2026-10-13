@@ -49,6 +49,44 @@ Inside the src folder (That is one of the most important folder of the directory
 | pVisionDetector              | Detects targets through the camera and feeds the pHelmIvP       |
 | planchaPID              | PID Controller of the vehicle                   |
 
+# Comms-Loss Return to Base
+
+The Swiftships-UI runs ashore and reaches the boat through `iWebSocket`. If nothing at all is heard from any UI - no
+command, heartbeat or ping reply - for `comms_loss_timeout` seconds, `iWebSocket` sends the boat back to its base:
+
+1. The mission, station keep and follow are stood down and the helm takes control (`RETURN=true`).
+2. `comms_return` in `alpha.bhv` takes the boat to the base, with collision avoidance (`avdcol_`) running.
+3. On arrival `comms_hold` keeps station on the base (`RETURN_HOLD=true`).
+4. When the link comes back the boat stays in the return or the hold. The operator's next command from the UI (a
+   mission, Stop, station keep, follow, or manual rudder/thrust) ends it.
+
+It does so whenever pHelmIvP is in DRIVE, NothingToDo included, or the boat is underway: a mission, station keep or
+follow running, thrust commanded, or moving faster than `comms_loss_underway_speed` (drifting counts). With the helm
+in PARK and the boat idle - the boat at the dock after power-up, as `real.moos` starts the helm parked - it stays
+where it is, unless `comms_loss_always = true`. A boat in DRIVE at the dock leaves for the base too.
+
+The base starts at `base_lat`/`base_lon` (29.72282, -91.21539) and is moved from the UI (right click on the chart >
+Define base). `iWebSocket` converts it to the local grid, updates both behaviours (`RETURN_UPDATE`,
+`RETURN_HOLD_UPDATE`) and saves it to `base_file`, so a restart keeps it; delete the file to go back to the default.
+`AUTONOMOUS_RETURN_TO_BASE=true` from the UI runs the same return on demand. pMarineViewer shows the base as a red diamond labelled
+"BASE (comms loss)" (`VIEW_MARKER`), moved whenever the base changes.
+
+The return is a straight line to the base. Collision avoidance deals with traffic, not with the banks, so the base
+has to be reachable in a straight line from where the boat operates.
+
+| iWebSocket parameter        | Default              | Description |
+|:--------------------------- |:-------------------- |:----------- |
+| port                        | 8000                 | Websocket port the UI connects to |
+| comms_loss_return           | true                 | Return to base on a comms loss (false: only report the loss) |
+| comms_loss_timeout          | 30                   | Seconds without a frame from any UI (minimum 10) |
+| comms_loss_speed            | 5                    | Return speed, in the units of the UI's speed slider (knots) |
+| comms_loss_always           | false                | Also return with the helm in PARK and the boat idle |
+| comms_loss_underway_speed   | 1.0                  | NAV_SPEED above which the boat counts as underway |
+| base_lat / base_lon         | 29.72282 / -91.21539 | Default base |
+| base_file                   | (none)               | Keeps the base set from the UI across restarts |
+
+The appcast of `iWebSocket` (uMAC) shows the link, the last loss and what was done about it, and the base in use.
+
 # Useful Commands
 ```bash
 #Activate CAN

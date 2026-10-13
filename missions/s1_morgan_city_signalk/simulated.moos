@@ -111,28 +111,55 @@ ProcessConfig = pTrafficSim
   // dimensions sent to Signal K always use the real length/beam either way.
   report_length = 60
 
-  // (a) scripted contacts - deterministic, repeatable
-  // Three targets laid out on uSimMarine's outbound track (start_pos
-  // x=-6289, y=400, heading 38.7): one dead ahead, one 300 m to starboard and
-  // one 300 m to port, all 2500 m out along the track to the northeast.
+  // ---------------------------------------------------------------------
+  // (a) The traffic picture
   //
-  //                  PORT  *          * ALPHA          * STBD
-  //                   (-6.8 deg)      (dead ahead)      (+6.8 deg)
-  //                          \           |           /
-  //                           \          |          /   all three closing
-  //                            \         |         /    on hdg 218.7
-  //                                    [USV] hdg 38.7
+  // Laid out on the two waterways the USV actually runs. The corridors are
+  // the routes saved in Signal K, converted to this mission's local grid:
   //
-  // All three run the reciprocal heading (218.7) at 2.572 m/s = 5.0 knots -
-  // spd is in m/s, pTrafficSim converts to knots for the AIS SOG field. Because
-  // the tracks are parallel and opposing, each target holds its side of the
-  // track all the way in: ALPHA stays a head-on collision course, BRAVO passes
-  // 300 m down the starboard side and CHARLIE 300 m down the port side.
-  // For a crossing encounter instead, give a flanker hdg 308.7 (from starboard,
-  // USV gives way) or hdg 128.7 (from port, USV stands on).
-  contact = name=TARGET_ALPHA,   type=cargo, x=-4725.9, y=2351.1, hdg=218.7, spd=2.572, length=25, beam=9
-  contact = name=TARGET_BRAVO,   type=cargo, x=-4491.8, y=2163.5, hdg=218.7, spd=2.572, length=25, beam=9
-  contact = name=TARGET_CHARLIE, type=cargo, x=-4960.0, y=2538.6, hdg=218.7, spd=2.572, length=25, beam=9
+  //   GIWW  - east/west, centreline y ~ 388, x from -6250 out to -7150
+  //           (bearing 269). The saved routes "tug_overtake" (north lane,
+  //           y ~ 400) and "route_test" (south lane, y ~ 370) are its lanes.
+  //   River - northeast, (-6082,426) -> (-5813,1009) -> (-4485,2665),
+  //           the "avd3" route, bending from 024.8 to 038.7.
+  //
+  //                                 * PELICAN_STATE / DELTA_PRIDE
+  //                           river /   (avd3, 038.7)
+  //          MISS_SANDY --->        /  * LADY_CLAIRE (anchored)
+  //   ---[ GIWW 269 ]--------------+--------------
+  //          <--- CAPT_ROY          ^ USV start (-6289,400)
+  //     * MR_ELDRIDGE   * BARGE_FLEET (moored, south bank)
+  //
+  // What Berwick Bay actually carries: push tows at 4-5 kn, crew and supply
+  // boats at 10-12 kn, a shrimper working slow, and barges moored along the
+  // bank. Everything sits within ~2.5 km of the start position, so there is
+  // a picture on the chart from the moment the mission comes up, on either
+  // of the two routes.
+  //
+  // The transits are loop= rather than contact=: a contact= target holds its
+  // heading forever and is over the horizon within the hour, which is how a
+  // long run ends up with an empty chart. A loop ping-pongs its leg instead,
+  // turning at 15 deg/s at each end, so the traffic keeps coming back.
+
+  // Push tow on the north lane of the GIWW, 4.5 kn. A USV doing more than
+  // that overtakes it outbound (Rule 13) and meets it head-on (Rule 14) on
+  // the way back.
+  loop = name=MISS_SANDY, type=tug, spd=2.3, length=105, beam=16, pts=-6250,400 : -7150,386
+
+  // Crew boat on the south lane at 12 kn, starting at the west end. Faster
+  // than the USV, so this is the one that overtakes rather than being
+  // overtaken.
+  loop = name=CAPT_ROY, type=passenger, spd=6.2, length=38, beam=9, pts=-7150,362 : -6250,376
+
+  // Loaded tow working up the river, 35 m to starboard of the avd3 track.
+  loop = name=DELTA_PRIDE, type=tug, spd=2.1, length=120, beam=16, pts=-6050,411 : -5783,991 : -4458,2643
+
+  // Supply boat coming down the river on the other side of the channel, so
+  // the two of them pass port to port the way a river pair does.
+  loop = name=PELICAN_STATE, type=cargo, spd=5.5, length=55, beam=12, pts=-4512,2687 : -5845,1024 : -6114,441
+
+  // Shrimper working the junction, slow and not going anywhere in a hurry.
+  loop = name=BAYOU_BELLE, type=fishing, spd=1.5, length=22, beam=7, pts=-6180,300 : -5960,640 : -6260,520
 
   // Escort for the follow-by-AIS test (BHV_Trail / TRAIL_FOLLOW).
   //
@@ -153,29 +180,39 @@ ProcessConfig = pTrafficSim
   // resolves to in iWebSocket.
   contact = name=ESCORT_DELTA, type=tug, mmsi=366999777, x=-6039.0, y=520.1, hdg=38.7, spd=3.0, length=25, beam=9
 
+  // Barge fleeting area on the south bank, ~95 m off the channel. Moored
+  // (navstatus 5), so they stay put. avdcol_ still gives them a berth on the
+  // way past, which is what a real boat does - move them further off the
+  // line if that deflection gets in the way of a test.
+  contact = name=BARGE_FLEET_A, type=cargo, x=-6700, y=292, hdg=269, spd=0, length=60, beam=11, navstatus=5
+  contact = name=BARGE_FLEET_B, type=cargo, x=-6760, y=290, hdg=269, spd=0, length=60, beam=11, navstatus=5
+
+  // Towboat at anchor (navstatus 1) up the river, 120 m off the track to
+  // starboard - about 1 km from the start position.
+  contact = name=LADY_CLAIRE, type=tug, x=-5563, y=1129, hdg=200, spd=0, length=30, beam=10, navstatus=1
+
+  // Shrimper tied up on the north bank at the west end of the GIWW leg.
+  contact = name=MR_ELDRIDGE, type=fishing, x=-7071, y=450, hdg=89, spd=0, length=20, beam=6, navstatus=5
+
+  // Deterministic head-on trio, kept for repeatable tests. Three cargo
+  // targets 2500 m out on the outbound river track, all closing on the
+  // reciprocal (218.7) at 5 kn: ALPHA dead ahead, BRAVO 300 m to starboard,
+  // CHARLIE 300 m to port. Uncomment to put the old test rig back.
+  //contact = name=TARGET_ALPHA,   type=cargo, x=-4725.9, y=2351.1, hdg=218.7, spd=2.572, length=25, beam=9
+  //contact = name=TARGET_BRAVO,   type=cargo, x=-4491.8, y=2163.5, hdg=218.7, spd=2.572, length=25, beam=9
+  //contact = name=TARGET_CHARLIE, type=cargo, x=-4960.0, y=2538.6, hdg=218.7, spd=2.572, length=25, beam=9
   // Same trio 1000 m out - closer start, wider relative bearings (+/-16.7 deg)
   //contact = name=TARGET_ALPHA,   type=cargo, x=-5663.8, y=1180.4, hdg=218.7, spd=2.572, length=25, beam=9
   //contact = name=TARGET_BRAVO,   type=cargo, x=-5429.6, y=992.9,  hdg=218.7, spd=2.572, length=25, beam=9
   //contact = name=TARGET_CHARLIE, type=cargo, x=-5897.9, y=1368.0, hdg=218.7, spd=2.572, length=25, beam=9
 
-  // Previous setups - kept for reference, uncomment to restore
-  // Two stationary targets abeam of each other, head-on test:
-  //contact = name=TARGET_ALPHA, type=cargo, x=-5689, y=1400, hdg=218.7, spd=0, length=25, beam=9
-  //contact = name=TARGET_BRAVO, type=cargo, x=-5489, y=1400, hdg=218.7, spd=0, length=25, beam=9
-  // Single 5 kn tug just west of the USV:
-  //contact = name=TUG_CHARLIE, type=tug, x=-6650, y=400, hdg=270, spd=2.572, length=25, beam=9
-  // Original mixed traffic:
-  //contact = name=TUG_ALPHA, type=tug, x=-6000, y=600, hdg=270, spd=4, length=25, beam=9
-  //contact = name=FERRY_BRAVO, type=ferry, x=-6800, y=1000, hdg=90, spd=8, length=60, beam=14
-
-  // (b) random traffic around the USV - off, this test needs exactly 3 contacts
+  // (b) random traffic around the USV - off. It respawns contacts on a ring
+  // around the boat at any bearing, which keeps the count up but puts them
+  // wherever the ring lands, bank or not. The corridors above are on water.
   random_contacts = 0
   random_radius   = 1500
   random_spd_min  = 2
   random_spd_max  = 9
-
-  // (c) closed-loop patrol - off for the same reason
-  //loop = name=WORKBOAT_ECHO, type=cargo, spd=5, pts=-6000,200:-5600,200:-5600,800:-6000,800
 }
 
 // pColavEval Config Block
@@ -290,13 +327,48 @@ ProcessConfig = iWebSocket
    AppTick   = 20
    CommsTick = 20
 
-   // Collision avoidance envelope shown in the UI's Calibration tab. These
-   // must mirror the avdcol_ block in alpha.bhv: until the operator edits
-   // them the behaviour is running on its own configuration, and the panel is
-   // only reporting it. Editing them in the panel pushes the new values into
-   // every avdcol_ instance (and into pContactMgrV20's alert range) without
-   // relaunching the mission - but does not write them back here, so a
-   // relaunch returns to the .bhv values.
+   // Websocket port the UI connects to (Settings > MOOS-IvP in the UI)
+   port = 8000
+
+   // Comms-loss failsafe. The UI runs ashore; if nothing at all is heard from
+   // it - no command, heartbeat or ping reply - for comms_loss_timeout seconds,
+   // the boat returns to the base and holds there (comms_return / comms_hold
+   // in alpha.bhv). It does so whenever the helm is in DRIVE, NothingToDo
+   // included, or the boat is underway (a mission, station keep or follow
+   // running, thrust commanded, or moving faster than
+   // comms_loss_underway_speed - adrift counts). With the helm in PARK and the
+   // boat idle it stays put, unless comms_loss_always = true. The return
+   // carries on after the link comes back, until the operator's next command
+   // from the UI.
+   comms_loss_return         = true
+   comms_loss_timeout        = 30     // s
+   comms_loss_speed          = 5      // the UI's speed units (knots on the boat, m/s in uSimMarineV22)
+   comms_loss_always         = false  // true: also with the helm in PARK and the boat idle
+   comms_loss_underway_speed = 1.0    // NAV_SPEED (m/s here, knots from the GPS on the boat)
+
+   // Default base. Defining a base on the chart (right click > Define base)
+   // moves it, and base_file keeps that one across restarts - delete the file
+   // to go back to these.
+   base_lat  = 29.72282
+   base_lon  = -91.21539
+   base_file = base_position_sim.txt
+
+   // "Limit AIS contacts" in the UI's Calibration tab holds off every contact
+   // beyond a range of the boat, so a single manoeuvre can be watched instead
+   // of the helm solving a dozen at once. The range is AIS_RADIUS, in metres,
+   // and the UI draws it as a ring around the boat. It does its work through
+   // pContactMgrV20's disable variables, so these two have to match the ones
+   // in its block above.
+   ais_disable_var = XYZ_DISABLE_TARGET
+   ais_enable_var  = XYZ_REENABLE_TARGET
+
+   // Collision avoidance envelope shown in the same tab. These must mirror the
+   // avdcol_ block in alpha.bhv: until the operator edits them the behaviour is
+   // running on its own configuration, and the panel is only reporting it.
+   // Editing them in the panel pushes the new values into every avdcol_
+   // instance (and into pContactMgrV20's alert range) without relaunching the
+   // mission - but does not write them back here, so a relaunch returns to the
+   // .bhv values.
    colav_pwt_outer_dist    = 300
    colav_pwt_inner_dist    = 150
    colav_completed_dist    = 1500
@@ -380,7 +452,7 @@ ProcessConfig = uSimMarineV22
   AppTick  	= 4
   CommsTick	= 4
 
-  start_pos     = x=-6289, y=400, heading=38.7, speed=0   // aimed straight at TARGET_BRAVO
+  start_pos     = x=-6289, y=400, heading=38.7, speed=0   // on the river track, at the GIWW junction
   prefix        = NAV
   turn_rate     = 95
   thrust_map    = 0:0, 20:3, 40:6, 60:9, 80:12, 100:15
