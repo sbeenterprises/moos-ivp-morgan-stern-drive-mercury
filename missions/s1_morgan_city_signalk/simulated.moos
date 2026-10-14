@@ -353,6 +353,14 @@ ProcessConfig = iWebSocket
    base_lon  = -91.21539
    base_file = base_position_sim.txt
 
+   // Collision alerts. Every contact the helm is steering around (an avdcol_
+   // instance it lists in IVPHELM_BHV_ACTIVE) goes to the UI's Alert List as
+   // COLAV_ALERTS, with its heading, speed, range, bearing, CPA and TCPA.
+   // uSimMarineV22 posts NAV_SPEED in m/s, the units of the contacts already;
+   // on the boat it is knots from the GPS.
+   nav_speed_units  = mps
+   colav_alert_hold = 15      // s an alert stays up after the avoidance ends
+
    // "Limit AIS contacts" in the UI's Calibration tab holds off every contact
    // beyond a range of the boat, so a single manoeuvre can be watched instead
    // of the helm solving a dozen at once. The range is AIS_RADIUS, in metres,

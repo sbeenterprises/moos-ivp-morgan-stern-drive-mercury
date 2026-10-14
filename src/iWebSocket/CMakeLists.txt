@@ -23,6 +23,7 @@ TARGET_LINK_LIBRARIES(iWebSocket
    ${JSONCPP_LIBRARIES}
    ${MOOSGeodesy_LIBRARIES}
    jsoncpp_lib
+   geometry
    apputil
    mbutil
    m

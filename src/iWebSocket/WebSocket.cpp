@@ -12,6 +12,8 @@
 #include <algorithm>
 #include "MBUtils.h"
 #include "ACTable.h"
+#include "AngleUtils.h"
+#include "CPAEngine.h"
 #include "MOOS/libMOOSGeodesy/MOOSGeodesy.h"
 #include "../MOOSGeodesy.cpp"
 #include "WebSocket.h"
@@ -98,6 +100,21 @@ std::string colav_dist;         // the set as last applied, echoed to the UI
 // and the set is pushed again on the next tick.
 bool colav_respawn_seen = false;
 
+// The helm names each spawned avoidance instance after the template in
+// alpha.bhv plus the contact: avdcol_AIS366999901.
+const std::string colav_bhv_prefix = "avdcol_";
+
+// How long a new collision alert waits for the behaviour to classify the
+// encounter (see updateColavAlerts()) before it is raised anyway, MOOS s.
+const double colav_classify_wait = 2.0;
+
+// The behaviour reports none:none until it has classified an encounter, and
+// complete:* once it is over; neither says what the boat is doing.
+static bool colavModeKnown(const std::string& mode)
+{
+  return((mode != "") && !strBegins(mode, "none") && !strBegins(mode, "complete"));
+}
+
 // Limit AIS contacts: the range around the boat inside which the collision
 // avoidance engages a contact. Anything beyond it is held off through
 // pContactMgrV20's disable variable, which reaches the spawned avdcol_
@@ -114,8 +131,13 @@ std::string  ais_enable_var  = "XYZ_REENABLE_TARGET";
 double       ais_last_apply  = 0;
 double       ais_last_repost = 0;
 
+// The rest of each report is kept for the collision alerts (COLAV_ALERTS).
+// spd is in NODE_REPORT units, m/s - iDivisorNMEA converts the AIS knots.
 struct AisContact {
   double x, y, utc;
+  double lat, lon;
+  double hdg, spd, len;
+  std::string type;
 };
 std::map<std::string, AisContact> ais_contacts;  // every contact heard from
 std::set<std::string> ais_held;                  // the ones currently held off
@@ -189,6 +211,12 @@ WebSocket::WebSocket()
   m_base_x = 0;
   m_base_y = 0;
   m_base_announced = false;
+
+  m_colav_alerts_json  = "[]";
+  m_colav_alerts_built = 0;
+  m_colav_alerts_dirty = true;
+  m_colav_alert_hold   = 15.0;
+  m_nav_speed_to_mps   = 0.514444;   // knots, the boat's GPS
 
   initializeMessageHandlers();
 }
@@ -383,8 +411,36 @@ bool WebSocket::OnNewMail(MOOSMSG_LIST &NewMail)
       desired_rudder = msg.GetDouble();
     else if(key == "DESIRED_THRUST")
       desired_thrust = msg.GetDouble();
-    else if(key == "IVPHELM_STATE")
+    else if(key == "IVPHELM_STATE") {
+      if(msg.GetString() != ivphelm_state)
+        m_colav_alerts_dirty = true;
       ivphelm_state = msg.GetString();
+    }
+    else if(key == "IVPHELM_BHV_ACTIVE") {
+      // Posted by the helm on every change: the behaviours that produced an
+      // objective function on its last iteration, comma separated.
+      m_helm_avoiding.clear();
+      vector<string> bhvs = parseString(msg.GetString(), ',');
+      for(unsigned int i=0; i<bhvs.size(); i++) {
+        string bhv = stripBlankEnds(bhvs[i]);
+        if((bhv.size() > colav_bhv_prefix.size()) && strBegins(bhv, colav_bhv_prefix))
+          m_helm_avoiding.insert(bhv.substr(colav_bhv_prefix.size()));
+      }
+      m_colav_alerts_dirty = true;
+    }
+    else if(key == "COLAV_BHV_TRACE") {
+      // avdcol_'s runxflag, every helm iteration while an instance runs:
+      // the COLREGS mode it is in for that contact. A new mode for a contact
+      // being avoided goes out on the next tick rather than the next second -
+      // going in extremis is the one the operator most needs to see.
+      string cn   = tokStringParse(msg.GetString(), "cn", ',', '=');
+      string mode = tokStringParse(msg.GetString(), "mode", ',', '=');
+      if((cn != "") && (mode != "")) {
+        if(m_helm_avoiding.count(cn) && (m_colav_mode[cn] != mode))
+          m_colav_alerts_dirty = true;
+        m_colav_mode[cn] = mode;
+      }
+    }
     else if(key == "WPT_INDEX")
       wpt_index = msg.GetDouble();
     else if(key == "WPT_PCT_COMPLETE")
@@ -478,8 +534,9 @@ bool WebSocket::OnNewMail(MOOSMSG_LIST &NewMail)
       std::string node_report = msg.GetString();
 
       std::string name = "";
+      std::string type = "";
       double x = 0, y = 0;
-      double spd = 0, hdg = 0;
+      double spd = 0, hdg = 0, len = 0;
 
       // Parse the comma-separated key=value pairs
       std::istringstream iss(node_report);
@@ -501,6 +558,10 @@ bool WebSocket::OnNewMail(MOOSMSG_LIST &NewMail)
             spd = std::stod(val_part);
           } else if (key_part == "HDG") {
             hdg = std::stod(val_part);
+          } else if (key_part == "LENGTH") {
+            len = atof(val_part.c_str());
+          } else if (key_part == "TYPE") {
+            type = val_part;
           }
         }
       }
@@ -530,6 +591,12 @@ bool WebSocket::OnNewMail(MOOSMSG_LIST &NewMail)
         cn.x = x;
         cn.y = y;
         cn.utc = MOOSTime();
+        cn.lat = lat;
+        cn.lon = lon;
+        cn.hdg = hdg;
+        cn.spd = spd;
+        cn.len = len;
+        cn.type = type;
         ais_contacts[name] = cn;
       }
 
@@ -656,6 +723,7 @@ bool WebSocket::Iterate()
   }
 
   applyAisLimit(false);
+  updateColavAlerts();
 
   // After the inbox: a command that arrived with the link coming back has
   // already been dispatched by the time the loss is judged.
@@ -716,6 +784,7 @@ bool WebSocket::Iterate()
   root["COLAV_DIST"] = colav_dist;
   root["AIS_RADIUS"] = ais_limit_report;
   root["COMMS_LOSS"] = commsLossJson();
+  root["COLAV_ALERTS"] = m_colav_alerts_json;
 
   // Add contact info as nested object
   Json::Value contact;
@@ -818,6 +887,21 @@ bool WebSocket::OnStartUp()
       m_base_file = value;
       handled = true;
     }
+    // Collision alerts. NAV_SPEED is knots from the GPS on the boat and m/s
+    // in uSimMarineV22; the CPA needs it in m/s, the units of the contacts.
+    else if(param == "nav_speed_units") {
+      string units = tolower(value);
+      if((units == "knots") || (units == "kts") || (units == "kn")) {
+        m_nav_speed_to_mps = 0.514444;
+        handled = true;
+      }
+      else if((units == "mps") || (units == "m/s")) {
+        m_nav_speed_to_mps = 1.0;
+        handled = true;
+      }
+    }
+    else if(param == "colav_alert_hold")
+      handled = setNonNegDoubleOnString(m_colav_alert_hold, value);
     else if(param == "foo") {
       handled = true;
     }
@@ -924,6 +1008,8 @@ void WebSocket::registerVariables()
   Register("RETURN_HOLD", 0); //...arrived, holding at the base
   Register("STATIONING", 0);  //Station keep active, for the underway test
   Register("NAV_SPEED", 0);   //...and the boat's speed
+  Register("IVPHELM_BHV_ACTIVE", 0); //Behaviours steering the boat - avdcol_ ones are collision alerts
+  Register("COLAV_BHV_TRACE", 0);    //COLREGS mode of each running avdcol_ instance
 
 }
 
@@ -1002,6 +1088,22 @@ bool WebSocket::buildReport()
   if (m_base_file != "")
     fstab << "Base file" << m_base_file;
   m_msgs << fstab.getFormattedString();
+
+  // Collision alerts, as sent to the UI
+  m_msgs << endl << endl << "Collision alerts (COLAV_ALERTS): "
+         << m_colav_alerts.size() << ", hold " << doubleToString(m_colav_alert_hold, 0)
+         << " s, NAV_SPEED x" << doubleToString(m_nav_speed_to_mps, 3) << " = m/s" << endl;
+  if (!m_colav_alerts.empty()) {
+    ACTable catab(4);
+    catab << "Contact | State | Mode | For";
+    catab.addHeaderLines();
+    for (const auto& kv : m_colav_alerts) {
+      catab << kv.first << (kv.second.active ? "avoiding" : "ended")
+            << ((kv.second.mode == "") ? std::string("-") : kv.second.mode)
+            << doubleToString(now - kv.second.since, 0) + " s";
+    }
+    m_msgs << catab.getFormattedString();
+  }
 
   return true;
 }
@@ -2388,6 +2490,150 @@ Json::Value WebSocket::commsLossJson() const
   cl["FAILSAFE"] = m_return_by_failsafe;
   cl["REASON"]   = m_return_reason;
   return(cl);
+}
+
+//---------------------------------------------------------
+// Procedure: updateColavAlerts()
+//   The contacts the helm is steering around, for the Alert List in the UI.
+//
+//   Taken from the helm itself: an avdcol_ instance is in IVPHELM_BHV_ACTIVE
+//   when it produced an objective function on the helm's last iteration, so
+//   the avoidance is part of the heading and speed the boat is being given.
+//   A contact that is only being watched - inside the alert range but outside
+//   the behaviour's envelope, or held off by the AIS limit - is not an alert.
+//   The helm stops posting the list when it leaves DRIVE, so the last one is
+//   only believed while IVPHELM_STATE is DRIVE.
+//
+//   An alert stays up for colav_alert_hold seconds after the avoidance ends,
+//   marked inactive. The behaviour drops in and out of ACTIVE as the geometry
+//   moves through its envelope, and without the hold every flicker would
+//   raise the alert on the operator's screen again.
+//
+//   The COLREGS mode comes from the behaviour's trace, which runs one helm
+//   iteration behind IVPHELM_BHV_ACTIVE: a contact that has only just become
+//   active still reads none:none. An alert keeps the last mode the behaviour
+//   classified its avoidance as, and a new one is held back until there is
+//   one - otherwise the operator reads "classifying" for a second, and an
+//   encounter that is in extremis from the start sounds a warning before its
+//   alarm. One the behaviour never classifies goes out after
+//   colav_classify_wait all the same.
+//
+//   Range, bearing, CPA and TCPA are worked out here from the contact's last
+//   NODE_REPORT and the boat's NAV_*, with the CPAEngine the behaviour uses -
+//   on reported positions, where the behaviour extrapolates. -1 is unknown.
+//   TCPA is 0 once the range is opening; the CPA is then the current range.
+//
+//   Rebuilt when the active set or the mode of a contact being avoided
+//   changes, and once a second otherwise.
+
+void WebSocket::updateColavAlerts()
+{
+  double now = MOOSTime();
+  if(!m_colav_alerts_dirty && ((now - m_colav_alerts_built) < 1.0))
+    return;
+  m_colav_alerts_dirty = false;
+  m_colav_alerts_built = now;
+
+  std::set<std::string> avoiding;
+  if(ivphelm_state == "DRIVE")
+    avoiding = m_helm_avoiding;
+
+  // A contact back to active inside its hold carries on the same alert
+  for(const std::string& cn : avoiding) {
+    ColavAlert& alert = m_colav_alerts[cn];
+    if(alert.since == 0)
+      alert.since = now;
+    alert.active = true;
+    alert.last_active = now;
+  }
+  for(auto it = m_colav_alerts.begin(); it != m_colav_alerts.end(); ) {
+    if(avoiding.count(it->first) == 0) {
+      if(it->second.active) {
+        it->second.active = false;
+        it->second.last_active = now;
+      }
+      if((now - it->second.last_active) >= m_colav_alert_hold) {
+        it = m_colav_alerts.erase(it);
+        continue;
+      }
+    }
+    ++it;
+  }
+  for(auto it = m_colav_mode.begin(); it != m_colav_mode.end(); ) {
+    if((m_colav_alerts.count(it->first) == 0) && (ais_contacts.count(it->first) == 0))
+      it = m_colav_mode.erase(it);
+    else
+      ++it;
+  }
+
+  auto r1 = [](double v) { return(std::round(v * 10) / 10); };
+
+  Json::Value list(Json::arrayValue);
+  for(auto& kv : m_colav_alerts) {
+    const std::string& cn = kv.first;
+    ColavAlert& alert = kv.second;
+
+    auto mode = m_colav_mode.find(cn);
+    if(alert.active && (mode != m_colav_mode.end()) && colavModeKnown(mode->second))
+      alert.mode = mode->second;
+    if(alert.active && (alert.mode == "") && ((now - alert.since) < colav_classify_wait))
+      continue;
+
+    Json::Value a;
+    a["cn"] = cn;
+    // AIS contacts are named AIS<mmsi> by iDivisorNMEA and pTrafficSim alike;
+    // the UI looks the ship's name up by the MMSI.
+    Json::UInt mmsi = 0;
+    if(strBegins(cn, "AIS") && isNumber(cn.substr(3), false))
+      mmsi = (Json::UInt) atol(cn.substr(3).c_str());
+    a["mmsi"] = mmsi;
+    a["active"] = alert.active;
+    a["for"] = (Json::Int) std::round(now - alert.since);
+    a["mode"] = (alert.mode == "") ? std::string("none") : alert.mode;
+
+    double range = -1, bng = -1, rel_bng = -1, cpa = -1, tcpa = -1;
+    auto rep = ais_contacts.find(cn);
+    if(rep != ais_contacts.end()) {
+      const AisContact& c = rep->second;
+      a["hdg"]  = r1(angle360(c.hdg));
+      a["spd"]  = std::round(c.spd * 100) / 100;
+      a["lat"]  = c.lat;
+      a["lon"]  = c.lon;
+      a["len"]  = r1(c.len);
+      a["type"] = c.type;
+      a["age"]  = r1(now - c.utc);
+      if(nav_xy_known) {
+        range   = std::hypot(c.x - nav_x, c.y - nav_y);
+        bng     = relAng(nav_x, nav_y, c.x, c.y);
+        rel_bng = angle360(bng - nav_heading);
+        double osv = std::max(0.0, nav_speed * m_nav_speed_to_mps);
+        CPAEngine engine(c.y, c.x, c.hdg, c.spd, nav_y, nav_x);
+        cpa  = engine.evalCPA(nav_heading, osv, 3600);
+        tcpa = engine.evalTimeCPA(nav_heading, osv, 3600);
+      }
+    }
+    else {
+      a["hdg"] = -1;
+      a["spd"] = -1;
+      a["age"] = -1;
+    }
+    a["range"]  = r1(range);
+    a["bng"]    = r1(bng);
+    a["relBng"] = r1(rel_bng);
+    a["cpa"]    = r1(cpa);
+    a["tcpa"]   = r1(tcpa);
+    list.append(a);
+  }
+
+  Json::StreamWriterBuilder writer;
+  writer["indentation"] = "";
+  writer["precision"] = 6;
+  writer["precisionType"] = "decimal";
+  std::string json = Json::writeString(writer, list);
+  if(json != m_colav_alerts_json) {
+    m_colav_alerts_json = json;
+    Notify("COLAV_ALERTS", json);
+  }
 }
 
 void WebSocket::handleCanSend(const std::string& value)

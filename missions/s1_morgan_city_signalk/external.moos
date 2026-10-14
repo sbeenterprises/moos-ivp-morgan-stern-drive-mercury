@@ -236,6 +236,14 @@ ProcessConfig = iWebSocket
    base_lat  = 29.72282
    base_lon  = -91.21539
    base_file = base_position.txt
+
+   // Collision alerts. Every contact the helm is steering around (an avdcol_
+   // instance it lists in IVPHELM_BHV_ACTIVE) goes to the UI's Alert List as
+   // COLAV_ALERTS, with its heading, speed, range, bearing, CPA and TCPA. The
+   // CPA is worked out in m/s, the units of the contacts' NODE_REPORTs, so
+   // the boat's own NAV_SPEED has to be converted from the GPS's knots.
+   nav_speed_units  = knots   // NAV_SPEED from the GPS ($GPRMC)
+   colav_alert_hold = 15      // s an alert stays up after the avoidance ends
 }
 
 //------------------------------------------------

@@ -28,6 +28,10 @@ void showSynopsis()
   blk("  and holds there (RETURN_HOLD) - whenever the helm is in DRIVE ");
   blk("  or the boat is underway; with the helm in PARK and the boat   ");
   blk("  idle only if comms_loss_always is set.                        ");
+  blk("  Every contact the helm is steering around (an avdcol_ instance ");
+  blk("  in IVPHELM_BHV_ACTIVE) is sent to the UI's Alert List as      ");
+  blk("  COLAV_ALERTS, with its heading, speed, range, bearing, CPA and ");
+  blk("  TCPA.                                                         ");
 }
 
 //----------------------------------------------------------------
@@ -88,6 +92,9 @@ void showExampleConfigAndExit()
   blk("  base_lat  = 29.72282          // default base                 ");
   blk("  base_lon  = -91.21539                                         ");
   blk("  base_file = base_position.txt // keeps a base set from the UI ");
+  blk("                                                                ");
+  blk("  nav_speed_units  = knots  // NAV_SPEED: knots (GPS) or mps    ");
+  blk("  colav_alert_hold = 15     // s an alert stays once avoided    ");
   blk("}                                                               ");
   blk("                                                                ");
   exit(0);
@@ -122,6 +129,24 @@ void showInterfaceAndExit()
   blk("  BASE_COORDS        = lat,lon                                  ");
   blk("  VIEW_MARKER        = type=diamond,x=..,y=..,label=comms_loss_base");
   blk("                       (the base, drawn in pMarineViewer)         ");
+  blk("                                                                ");
+  blk("SUBSCRIPTIONS (collision alerts):                              ");
+  blk("------------------------------------                            ");
+  blk("  IVPHELM_BHV_ACTIVE = waypt_survey,avdcol_AIS366999901          ");
+  blk("  IVPHELM_STATE      = DRIVE (the list is only believed in DRIVE)");
+  blk("  COLAV_BHV_TRACE    = cn=..,mode=giveway:stern,.. (avdcol_ flag)");
+  blk("  NODE_REPORT, NAV_X, NAV_Y, NAV_HEADING, NAV_SPEED             ");
+  blk("                                                                ");
+  blk("PUBLICATIONS (collision alerts):                                ");
+  blk("------------------------------------                            ");
+  blk("  COLAV_ALERTS = [{\"cn\":\"AIS366999901\",\"mmsi\":366999901,      ");
+  blk("                 \"active\":true,\"for\":42,\"mode\":\"giveway:stern\",");
+  blk("                 \"hdg\":218.7,\"spd\":2.57,\"range\":412.3,         ");
+  blk("                 \"bng\":35.2,\"relBng\":356.5,\"cpa\":38.1,           ");
+  blk("                 \"tcpa\":61.4,\"lat\":..,\"lon\":..,\"len\":25,      ");
+  blk("                 \"type\":\"cargo\",\"age\":0.6}]                    ");
+  blk("    m, degrees true, m/s, s; -1 unknown. Posted on change, at   ");
+  blk("    most once a second; also sent to the UI on every tick.      ");
   blk("                                                                ");
   blk("  Commands from the UI are posted as their MOOS variables; see  ");
   blk("  the Swiftships-UI README for the list.                        ");

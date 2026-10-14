@@ -87,6 +87,28 @@ has to be reachable in a straight line from where the boat operates.
 
 The appcast of `iWebSocket` (uMAC) shows the link, the last loss and what was done about it, and the base in use.
 
+# Collision Alerts
+
+Every contact pHelmIvP is steering around is raised in the Alert List of the Swiftships-UI, with its name, heading,
+speed, range, bearing, CPA, TCPA and COLREGS situation. `iWebSocket` builds the list (`COLAV_ALERTS`) from the helm
+itself: an `avdcol_` instance in `IVPHELM_BHV_ACTIVE` is one whose avoidance is part of the heading and speed the boat
+is being given. A contact the avoidance is only watching - in the alert range but outside its envelope, or held off
+by the AIS limit - is not an alert. The list is only believed while the helm is in DRIVE.
+
+The figures come from each contact's last `NODE_REPORT` and the boat's `NAV_*`, with the `CPAEngine` the behaviour
+uses. The COLREGS mode comes from the behaviour's `COLAV_BHV_TRACE` flag in `alpha.bhv`, which runs one helm
+iteration behind, so a new alert waits for the encounter to be classified (2 s at most). An alert stays up, marked
+ended, for `colav_alert_hold` seconds after the avoidance ends, so a behaviour dropping in and out of active does not
+raise it again. Stand-on in extremis (Rule 17(b)) is raised as an alarm, everything else as a warning.
+
+This works in every mission `iWebSocket` runs in. `pColavEval`, which feeds the UI's COLREGS box and test metrics,
+only runs in `simulated.moos`.
+
+| iWebSocket parameter        | Default              | Description |
+|:--------------------------- |:-------------------- |:----------- |
+| nav_speed_units             | knots                | Units of NAV_SPEED: `knots` (GPS, on the boat) or `mps` (uSimMarineV22). The CPA is worked out in m/s, the units of the contacts |
+| colav_alert_hold            | 15                   | Seconds an alert stays up after the avoidance ends |
+
 # Useful Commands
 ```bash
 #Activate CAN

@@ -149,6 +149,24 @@ class WebSocket : public AppCastingMOOSApp
   // lands after planchaPID's own zero on letting go of the actuators.
   std::map<std::string, double> m_deferred_manual;
   double      m_deferred_manual_at;
+
+  // Collision alerts: the contacts the helm is steering around, sent to the
+  // UI's Alert List as COLAV_ALERTS. See updateColavAlerts().
+  struct ColavAlert {
+    bool   active;                         // the helm is avoiding it right now
+    double since;                          // start of this avoidance, MOOS time
+    double last_active;                    // last seen active, for the hold
+    std::string mode;                      // COLREGS mode last classified in this avoidance
+    ColavAlert() : active(false), since(0), last_active(0) {}
+  };
+  std::map<std::string, ColavAlert>  m_colav_alerts;   // by contact name
+  std::set<std::string>              m_helm_avoiding;  // contacts of the active avdcol_ instances
+  std::map<std::string, std::string> m_colav_mode;     // latest COLREGS mode, by contact
+  std::string m_colav_alerts_json;
+  double      m_colav_alerts_built;
+  bool        m_colav_alerts_dirty;                    // rebuild on the next tick
+  double      m_colav_alert_hold;                      // s an alert stays up once the avoidance ends
+  double      m_nav_speed_to_mps;                      // NAV_SPEED to m/s (knots on the boat)
   
   // Connection monitoring
   double m_connection_timeout; // Timeout in seconds for stale connections
@@ -215,6 +233,9 @@ class WebSocket : public AppCastingMOOSApp
   bool loadBaseFile();
   void saveBaseFile() const;
   Json::Value commsLossJson() const;
+
+  // Collision alerts
+  void updateColavAlerts();
 
 };
 
