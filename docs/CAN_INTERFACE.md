@@ -37,7 +37,9 @@ Behaviour common to every boat (`src/lib_canprofile/DriveCore.cpp`):
   (sign ignored). Forward or reverse with 0 thrust = in gear at idle;
   thrust in neutral does nothing. Choosing a different gear resets thrust
   to 0. Autonomy still takes the gear from the sign of thrust. iCAN option
-  `manual_gear = command` (default) or `thrust_sign` (old behaviour).
+  `manual_gear = command` (default) or `thrust_sign` (one lever: the
+  sign of `DESIRED_THRUST` sets the gear, 0 = neutral; `DESIRED_GEAR` ignored).
+  `real.moos` uses `thrust_sign`.
 - **Shift interlock.** Reversing passes through neutral for
   `shift_neutral_secs`; throttle stays at 0 for `shift_settle_secs` after a
   gear engages. Both are 0 on USV-725 (placeholder, to confirm with the drive maker).

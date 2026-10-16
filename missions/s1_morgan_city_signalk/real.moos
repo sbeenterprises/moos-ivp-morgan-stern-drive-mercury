@@ -123,6 +123,12 @@ ProcessConfig = iCAN
    AppTick   = 50
    CommsTick = 50
 
+   // Manual control, one lever: DESIRED_THRUST -100..+100 sets gear and
+   // throttle together (+ ahead, - astern, 0 neutral); DESIRED_GEAR is
+   // ignored. The profile's shift interlock still passes through neutral.
+   // Set to "command" for separate gear buttons (A/N/R) + throttle.
+   manual_gear = thrust_sign
+
    // The boat's CAN IDs, scaling, limits and lost-link values live in
    // this profile; nothing is hardcoded in iCAN. For USV-722 use
    //   profile_file = ../../profiles/usv722_glendinning.prf

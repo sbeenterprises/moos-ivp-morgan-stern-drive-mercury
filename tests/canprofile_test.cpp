@@ -668,6 +668,60 @@ static void testManualGear()
 }
 
 //------------------------------------------------------------------
+// Manual control, one lever (manual_gear = thrust_sign)
+
+static void testManualOneLever()
+{
+  Profile u;
+  u.load(g_profile_dir + "/usv722_glendinning.prf");   // neutral 1.0 s, settle 0.5 s
+  DriveCore core;
+  core.configure(u);
+  core.setManualGearFromCommand(false);
+  core.setOwner(OWNER_MANUAL);
+  CHECK(!core.gearFromCommand(), "one lever: gear comes from the thrust sign");
+
+  double t = 10;
+  DriveCommand cmd;
+
+  // +30: forward engages at once, throttle after the settle time
+  core.setThrust(30);
+  cmd = core.update(t += 0.05);
+  CHECK(cmd.gear == GEAR_FWD && cmd.thrust_pct == 0, "+30: forward, throttle held while settling");
+  for(int i=0; i<12; i++)
+    cmd = core.update(t += 0.05);
+  CHECK(cmd.gear == GEAR_FWD && cmd.thrust_pct == 30, "+30: forward 30% after settling");
+
+  // -20: through neutral for 1.0 s, then reverse, then throttle
+  core.setThrust(-20);
+  cmd = core.update(t += 0.05);
+  CHECK(cmd.gear == GEAR_NEUTRAL && cmd.thrust_pct == 0, "-20: neutral first");
+  for(int i=0; i<10; i++)
+    cmd = core.update(t += 0.05);
+  CHECK(cmd.gear == GEAR_NEUTRAL, "-20: still neutral before 1.0 s");
+  for(int i=0; i<30; i++)
+    cmd = core.update(t += 0.05);
+  CHECK(cmd.gear == GEAR_REV && cmd.thrust_pct == -20, "-20: reverse 20% after neutral + settle");
+
+  // 0: neutral
+  core.setThrust(0);
+  cmd = core.update(t += 0.05);
+  CHECK(cmd.gear == GEAR_NEUTRAL && cmd.thrust_pct == 0, "0: neutral");
+
+  // Lost link: neutral and 0 until a new command
+  core.setThrust(40);
+  for(int i=0; i<40; i++)
+    cmd = core.update(t += 0.05);
+  CHECK(cmd.gear == GEAR_FWD && cmd.thrust_pct == 40, "forward 40% before link loss");
+  core.setLinkOk(false);
+  cmd = core.update(t += 0.05);
+  CHECK(cmd.gear == GEAR_NEUTRAL && cmd.thrust_pct == 0, "lost link: neutral, 0");
+  core.setLinkOk(true);
+  for(int i=0; i<40; i++)
+    cmd = core.update(t += 0.05);
+  CHECK(cmd.gear == GEAR_NEUTRAL && cmd.thrust_pct == 0, "stays neutral after the link returns");
+}
+
+//------------------------------------------------------------------
 
 int main(int argc, char* argv[])
 {
@@ -682,6 +736,7 @@ int main(int argc, char* argv[])
   testDriveCore();
   testTrim();
   testManualGear();
+  testManualOneLever();
 
   cout << g_checks << " checks, " << g_failures << " failed" << endl;
   return g_failures ? 1 : 0;

@@ -65,7 +65,7 @@ lists use `:`, coordinates are `lat,lon`. Unknown keys are ignored.
 | `CONTROLE_MANUAL` | `true\|false` | `MOOS_MANUAL_OVERRIDE` (SS UI becomes the drive owner; manual rudder/thrust latch until changed), on false also rudder/thrust 0; plus `DEPLOY=1.0` (double) from `main.cpp` |
 | `AUTONOMOUS_CONTROL` | any | `MOOS_MANUAL_OVERIDE=true` (typo) |
 | `DESIRED_HEADING` / `DESIRED_RUDDER` / `DESIRED_THRUST` | number | same name |
-| `DESIRED_GEAR` | `1\|0\|-1` | `DESIRED_GEAR=A\|N\|R`. In manual control iCAN engages this gear; `DESIRED_THRUST` is then throttle only (0 = idle in gear). A gear change resets thrust to 0. Ignored in autonomy |
+| `DESIRED_GEAR` | `1\|0\|-1` | `DESIRED_GEAR=A\|N\|R`. Used only with iCAN `manual_gear = command`: in manual control iCAN engages this gear; `DESIRED_THRUST` is then throttle only (0 = idle in gear). A gear change resets thrust to 0. Ignored in autonomy, and ignored by `real.moos`, which uses `manual_gear = thrust_sign` (one lever: `DESIRED_THRUST` -100..+100 sets gear and throttle, 0 = neutral) |
 | `CAN_SEND` | `true\|false` | `CAN_SEND` (iCAN transmit enable) |
 | `STOP_CAN`, `CONSTANT_HEADING` | `true\|false` | same name |
 | `SETPOINT_HEADING` | number | same name |
