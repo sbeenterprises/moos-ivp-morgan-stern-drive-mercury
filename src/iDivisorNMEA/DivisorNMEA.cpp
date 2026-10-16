@@ -99,6 +99,14 @@ struct sockaddr_in cliAddr, servAddr;
 char msg[MAX_MSG];
 
 
+// True if the NMEA address is <any 2-letter talker><type>, e.g. GPHDT,
+// IIHDT, HEHDT for type "HDT". Signal K's signalk-to-nmea0183 plugin sends
+// heading as $IIHDT, while a GPS or VectorNav sends $GPHDT.
+static bool isSentence(const char* cmd, const char* type)
+{
+  return cmd && strlen(cmd) == 5 && strcmp(cmd + 2, type) == 0;
+}
+
 ///
 /// \class MyParser
 /// \brief child class of CNMEAParser which will redefine notification calls from the parent class.
@@ -162,17 +170,22 @@ protected:
 				//printf("   Geoidal Separation:  %f\n", ggaData.m_dGeoidalSep);
 				//printf("   Vertical Speed:      %.02f\n", ggaData.m_dVertSpeed);
 			}
-		} else if (strstr(pCmd, "GPRMC") != NULL) {
+		} else if (isSentence(pCmd, "RMC")) {
+      // The parser library decodes GPRMC, GNRMC and GARMC only
       CNMEAParserData::RMC_DATA_T rmcdata;
-      if (GetGPRMC(rmcdata) == CNMEAParserData::ERROR_OK) {
+      CNMEAParserData::ERROR_E err;
+      if (strncmp(pCmd, "GN", 2) == 0)      err = GetGNRMC(rmcdata);
+      else if (strncmp(pCmd, "GA", 2) == 0) err = GetGARMC(rmcdata);
+      else                                  err = GetGPRMC(rmcdata);
+      if (err == CNMEAParserData::ERROR_OK) {
         lat_gps = rmcdata.m_dLatitude; // Latitude recebida
         long_gps = rmcdata.m_dLongitude; // Longitude recebida 
         //speed_gps = rmcdata.m_dSpeedKnots; // SOG do GPS
         //heading_gps = rmcdata.m_dTrackAngle; // Marcação vinda do GPS - tirei esse e coloquei o heading vindo da giro
 
       }
-    } else if (strstr(pCmd, "GPHDT") != NULL) { //fix for boat 
-      //Take the value from $GPHDT string and put into heading_giro
+    } else if (isSentence(pCmd, "HDT")) { // $GPHDT, $IIHDT, ...
+      //Take the value from the HDT string and put into heading_giro
       std::string input = pData;
       std::stringstream ss(input);
       double number;
@@ -445,7 +458,8 @@ void DivisorNMEA::processSentence(const std::string& msg_string)
   }*/
 
   // Parser da Velocidade dada pelo GPS
-  else if (msg_string.rfind("$GPRMC", 0) == 0) {  // rfind evita substr + ==  
+  else if (msg_string.size() > 6 && msg_string[0] == '$' &&
+           msg_string.compare(3, 3, "RMC") == 0) {  // $GPRMC, $GNRMC, ...
     std::string sog_field = libais::GetNthField(msg_string, 7, ",");
     std::string cog_field = libais::GetNthField(msg_string, 8, ",");
 

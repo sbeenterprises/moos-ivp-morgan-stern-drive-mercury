@@ -39,7 +39,9 @@ the current `main`.
 - **Pubs**: `NAV_LAT`, `NAV_LONG`, `NAV_SPEED` (**knots**), `NAV_HEADING`, `GPS_HEADING`,
   `NAV_COG`, `NAV_DEPTH`, `ANGULO_LEME`, `NAV_YAW`, `WIND_ANGLE`, `WIND_SPEED`,
   `GYRO_X/Y/Z`, `MSG_UDP` (raw sentence), `NODE_REPORT` (`NAME=AIS<mmsi>`, m/s, `MODE=AIS`).
-- **I/O**: UDP in, non-blocking. Sentences: `$GPRMC`, `$GPHDT`, `$GPGGA` (ignored),
+- **I/O**: UDP in, non-blocking. Sentences: `$--RMC` (GP, GN or GA talker for
+  position), `$--HDT` (any talker, e.g. `$GPHDT`, or `$IIHDT` from Signal K's
+  signalk-to-nmea0183 plugin), `$GPGGA` (ignored),
   `$SDDPT`, `$AGRSA`, `$VNYMR`, `$WIMWV`, `!AIVDM/!AIVDO` (types 1/2/3/5/18/24 via `AisDecode`).
 - Libraries: `NMEAParserLib` (VisualGPS CNMEAParser), partial `libais` (only `GetNthField`).
 - Honors `USE_UTM` for contact X/Y.
