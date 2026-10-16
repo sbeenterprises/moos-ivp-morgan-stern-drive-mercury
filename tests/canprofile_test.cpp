@@ -8,6 +8,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -17,11 +18,6 @@
 
 using namespace std;
 using namespace canprofile;
-
-// Old iCAN frame builders (legacy_mercury_frames.cpp)
-string legacyRudderFrame(double rudder_value);
-string legacyGearFrame(double thrust_value);
-string legacyThrustFrame(double thrust_value);
 
 static int g_checks = 0;
 static int g_failures = 0;
@@ -45,13 +41,6 @@ static const TxMsg* msgNamed(const Profile& p, const string& name)
   return 0;
 }
 
-static Gear legacyGear(double thrust)
-{
-  if(thrust > 0) return GEAR_FWD;
-  if(thrust == 0) return GEAR_NEUTRAL;
-  return GEAR_REV;
-}
-
 static string fmt(double v)
 {
   char buf[32];
@@ -65,10 +54,22 @@ static void printErrors(const Profile& p)
     cout << "    " << p.errors()[i] << endl;
 }
 
-//------------------------------------------------------------------
-// Mercury: every frame must equal the old hardcoded tables
+static double rxValue(const Profile& p, uint32_t id, bool ext,
+                      const vector<uint8_t>& data, const string& name, string* sval = 0)
+{
+  vector<RxValue> vals = p.decode(id, ext, &data[0], (int)data.size());
+  for(size_t i=0; i<vals.size(); i++)
+    if(vals[i].name == name) {
+      if(sval) *sval = vals[i].sval;
+      return vals[i].dval;
+    }
+  return -9999;
+}
 
-static void testMercuryMatchesLegacy()
+//------------------------------------------------------------------
+// Mercury (USV-725): frames must match the CAN ID mapping (15 Oct 2026)
+
+static void testMercuryFrames()
 {
   Profile p;
   bool ok = p.load(g_profile_dir + "/mercury_sterndrive.prf");
@@ -77,58 +78,110 @@ static void testMercuryMatchesLegacy()
 
   const TxMsg* steer = msgNamed(p, "steer");
   const TxMsg* gear  = msgNamed(p, "gear");
-  const TxMsg* tsc1  = msgNamed(p, "tsc1");
-  CHECK(steer && gear && tsc1, "mercury has steer, gear and tsc1 messages");
-  if(!steer || !gear || !tsc1) return;
+  const TxMsg* thr   = msgNamed(p, "throttle");
+  CHECK(steer && gear && thr, "mercury has steer, gear and throttle messages");
+  if(!steer || !gear || !thr) return;
 
-  int compared = 0;
-  for(int i=-600; i<=600; i++) {
-    double v = i * 0.25;    // -150 .. 150 in quarter steps
-    DriveCommand cmd;
-    cmd.rudder_pct = v;
-    string got = p.encode(*steer, cmd).str();
-    string want = legacyRudderFrame(v);
-    CHECK(got == want, "rudder " << fmt(v) << ": got " << got << " want " << want);
+  // Only the four PC commands the boat accepts, all guarded. Never
+  // TSC1 (SA 23 owns engine speed) or the steering controller's frame.
+  CHECK(p.txMessages().size() == 4, "mercury sends exactly four messages");
+  string name;
+  CHECK(!p.isTxId(0x18000017, true, name), "mercury never sends TSC1");
+  CHECK(!p.isTxId(0x18F30A1A, true, name), "mercury never sends 18F30A1A");
+  for(size_t i=0; i<p.txMessages().size(); i++)
+    CHECK(p.txMessages()[i].guard, "mercury " << p.txMessages()[i].name << " is guarded");
 
+  DriveCommand cmd;
+  cmd.rudder_pct = -100;
+  CHECK(p.encode(*steer, cmd).str() == "18FF11D0#0000FFFFFFFFFFFF", "steer full port 0");
+  cmd.rudder_pct = 0;
+  CHECK(p.encode(*steer, cmd).str() == "18FF11D0#FF01FFFFFFFFFFFF", "steer centre 511");
+  cmd.rudder_pct = 100;
+  CHECK(p.encode(*steer, cmd).str() == "18FF11D0#F403FFFFFFFFFFFF", "steer full starboard 1012");
+
+  // Throttle sweep: byte 1 = % / 0.4, same value ahead and astern
+  int pct[5]  = {0, 25, 50, 75, 100};
+  int byte[5] = {0x00, 0x3F, 0x7D, 0xBC, 0xFA};   // x2.5, rounded
+  for(int i=0; i<5; i++) {
+    char want[64];
+    snprintf(want, sizeof(want), "0CF003D0#FF%02XFFFFFFFFFFFF", byte[i]);
     cmd = DriveCommand();
-    cmd.thrust_pct = v;
-    cmd.gear = legacyGear(v);
-    got = p.encode(*gear, cmd).str();
-    want = legacyGearFrame(v);
-    CHECK(got == want, "gear for thrust " << fmt(v) << ": got " << got << " want " << want);
-    got = p.encode(*tsc1, cmd).str();
-    want = legacyThrustFrame(v);
-    CHECK(got == want, "tsc1 for thrust " << fmt(v) << ": got " << got << " want " << want);
-    compared += 3;
+    cmd.gear = GEAR_FWD;
+    cmd.thrust_pct = pct[i];
+    CHECK(p.encode(*thr, cmd).str() == want, "throttle " << pct[i] << "% -> " << want);
+    cmd.gear = GEAR_REV;
+    cmd.thrust_pct = -pct[i];
+    CHECK(p.encode(*thr, cmd).str() == want, "throttle -" << pct[i] << "% -> " << want);
   }
 
-  // Small values that the old code truncated to centre / idle
-  double odd[] = {-0.999, -0.5, -0.001, 0.001, 0.5, 0.999, 99.999, -99.999};
-  for(int i=0; i<8; i++) {
-    DriveCommand cmd;
-    cmd.rudder_pct = odd[i];
-    CHECK(p.encode(*steer, cmd).str() == legacyRudderFrame(odd[i]),
-          "rudder " << odd[i] << " matches legacy");
-    cmd.thrust_pct = odd[i];
-    cmd.gear = legacyGear(odd[i]);
-    CHECK(p.encode(*tsc1, cmd).str() == legacyThrustFrame(odd[i]),
-          "tsc1 " << odd[i] << " matches legacy");
-    CHECK(p.encode(*gear, cmd).str() == legacyGearFrame(odd[i]),
-          "gear " << odd[i] << " matches legacy");
-  }
-  cout << "  mercury: compared " << compared + 24 << " frames with the old code" << endl;
+  cmd = DriveCommand();
+  cmd.gear = GEAR_FWD;
+  CHECK(p.encode(*gear, cmd).str() == "18F005D0#7EFFFFFFFFFFFFFF", "gear forward 7E");
+  cmd.gear = GEAR_NEUTRAL;
+  CHECK(p.encode(*gear, cmd).str() == "18F005D0#7DFFFFFFFFFFFFFF", "gear neutral 7D");
+  cmd.gear = GEAR_REV;
+  CHECK(p.encode(*gear, cmd).str() == "18F005D0#7CFFFFFFFFFFFFFF", "gear reverse 7C");
 
-  // The same through DriveCore (no shift pauses on this boat), so the
-  // whole path from DESIRED_THRUST to frame is unchanged.
+  // Manual: forward gear with no throttle sends 7E and throttle 0
   DriveCore core;
   core.configure(p);
-  double t = 0;
-  for(int i=-100; i<=100; i+=7) {
-    core.setThrust(i);
-    DriveCommand cmd = core.update(t += 0.05);
-    CHECK(p.encode(*gear, cmd).str() == legacyGearFrame(i), "core gear for thrust " << i);
-    CHECK(p.encode(*tsc1, cmd).str() == legacyThrustFrame(i), "core tsc1 for thrust " << i);
-  }
+  core.setManualGearFromCommand(true);
+  core.setOwner(OWNER_MANUAL);
+  core.setGear(GEAR_FWD);
+  cmd = core.update(1.0);
+  CHECK(p.encode(*gear, cmd).str() == "18F005D0#7EFFFFFFFFFFFFFF", "manual forward gear frame");
+  CHECK(p.encode(*thr, cmd).str() == "0CF003D0#FF00FFFFFFFFFFFF", "manual forward, throttle 0");
+
+  // Feedback, frames from the 15 Oct captures
+  uint8_t sd[] = {0xD9, 0x6A, 0xFF, 0xFF, 0xFF, 0xFF, 0xE5, 0x01};    // -39 = full port
+  CHECK(fabs(rxValue(p, 0x18F30A1A, true, vector<uint8_t>(sd, sd + 8),
+                     "CAN_STEER_DEMAND_PCT") + 100) < 1e-6, "steer demand -39 -> -100%");
+  uint8_t th[] = {0xFF, 0xFA, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+  CHECK(fabs(rxValue(p, 0x0CF003D0, true, vector<uint8_t>(th, th + 8),
+                     "CAN_HELM_THROTTLE_PCT") - 100) < 1e-9, "helm throttle FA -> 100%");
+  string s;
+  uint8_t ge[] = {0x7D, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+  rxValue(p, 0x18F005D0, true, vector<uint8_t>(ge, ge + 8), "CAN_HELM_GEAR", &s);
+  CHECK(s == "neutral", "helm gear 7D -> neutral");
+  uint8_t ts[] = {0xC1, 0x40, 0x83, 0xE1, 0xFF, 0xFF, 0xFF, 0xFF};
+  CHECK(rxValue(p, 0x18000017, true, vector<uint8_t>(ts, ts + 8),
+                "CAN_ENGINE_RPM_REQUEST") == 4200, "TSC1 40 83 -> 4200 rpm");
+}
+
+//------------------------------------------------------------------
+// map=table: input truncated, looked up in a CSV next to the profile
+
+static void testTableMap()
+{
+  string dir = "/tmp";
+  if(getenv("TMPDIR")) dir = getenv("TMPDIR");
+  string csv = dir + "/canprofile_table_test.csv";
+  FILE* f = fopen(csv.c_str(), "w");
+  CHECK(f != 0, "can write a table file");
+  if(!f) return;
+  fprintf(f, "# input,raw\n");
+  for(int i=-100; i<=100; i++)
+    fprintf(f, "%d,%d\n", i, 1000 + 10 * i);
+  fclose(f);
+
+  Profile p;
+  p.loadFromString(
+    "profile = t\ncan_interface = vcan0\ncapabilities = steer\n"
+    "tx_msg = name=steer, cap=steer, id=18FF11D0, dlc=8, period_ms=100\n"
+    "tx_field = msg=steer, src=rudder_pct, byte=0, bits=16, order=be, map=table, "
+    "table=canprofile_table_test.csv\n", dir);
+  remove(csv.c_str());
+  CHECK(p.valid(), "table profile is valid");
+  if(!p.valid()) { printErrors(p); return; }
+
+  const TxMsg* steer = msgNamed(p, "steer");
+  DriveCommand cmd;
+  cmd.rudder_pct = 0;
+  CHECK(p.encode(*steer, cmd).str() == "18FF11D0#03E8FFFFFFFFFFFF", "table 0 -> 1000: got " << p.encode(*steer, cmd).str());
+  cmd.rudder_pct = 25.9;     // truncated to 25
+  CHECK(p.encode(*steer, cmd).str() == "18FF11D0#04E2FFFFFFFFFFFF", "table 25.9 -> 1250: got " << p.encode(*steer, cmd).str());
+  cmd.rudder_pct = -100;
+  CHECK(p.encode(*steer, cmd).str() == "18FF11D0#0000FFFFFFFFFFFF", "table -100 -> 0: got " << p.encode(*steer, cmd).str());
 }
 
 //------------------------------------------------------------------
@@ -194,18 +247,6 @@ static void testUsv722Frames()
   CHECK(p.encode(*steer, cmd).str() == "18FF11D0#0000FFFFFFFFFFFF", "steer clamps at 0");
   cmd.rudder_pct = NAN;
   CHECK(p.encode(*steer, cmd).str() == "18FF11D0#FF01FFFFFFFFFFFF", "NaN steers to centre");
-}
-
-static double rxValue(const Profile& p, uint32_t id, bool ext,
-                      const vector<uint8_t>& data, const string& name, string* sval = 0)
-{
-  vector<RxValue> vals = p.decode(id, ext, &data[0], (int)data.size());
-  for(size_t i=0; i<vals.size(); i++)
-    if(vals[i].name == name) {
-      if(sval) *sval = vals[i].sval;
-      return vals[i].dval;
-    }
-  return -9999;
 }
 
 static void testUsv722Feedback()
@@ -624,20 +665,6 @@ static void testManualGear()
   for(int i=0; i<40; i++)
     cmd = core.update(t += 0.05);
   CHECK(cmd.gear == GEAR_FWD && cmd.thrust_pct == 40, "autonomy: +40 thrust -> forward");
-
-  // Mercury: forward at idle sends 7E and the 700 rpm TSC1 frame
-  Profile m;
-  m.load(g_profile_dir + "/mercury_sterndrive.prf");
-  DriveCore mc;
-  mc.configure(m);
-  mc.setManualGearFromCommand(true);
-  mc.setOwner(OWNER_MANUAL);
-  mc.setGear(GEAR_FWD);
-  cmd = mc.update(1.0);
-  const TxMsg* gear = msgNamed(m, "gear");
-  const TxMsg* tsc1 = msgNamed(m, "tsc1");
-  CHECK(gear && m.encode(*gear, cmd).str() == "18F005D0#7EFFFFFFFFFFFFFF", "mercury forward gear frame");
-  CHECK(tsc1 && m.encode(*tsc1, cmd).str() == "18000017#C1E015E1FFFFFFFF", "mercury idle 700 rpm in gear");
 }
 
 //------------------------------------------------------------------
@@ -647,7 +674,8 @@ int main(int argc, char* argv[])
   g_profile_dir = (argc > 1) ? argv[1] : "profiles";
 
   cout << "lib_canprofile tests (profiles from " << g_profile_dir << ")" << endl;
-  testMercuryMatchesLegacy();
+  testMercuryFrames();
+  testTableMap();
   testUsv722Frames();
   testUsv722Feedback();
   testValidation();

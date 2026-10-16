@@ -14,7 +14,7 @@ ProcessConfig = iCAN
 
 | File | Boat | Status |
 |---|---|---|
-| `mercury_sterndrive.prf` | Mercury stern-drive boat | Same frames as the old hardcoded iCAN (checked by the tests) |
+| `mercury_sterndrive.prf` | USV-725, Mercury Diesel stern drive | USV-725 CAN ID mapping (15 Oct 2026): 18FF11D0, 0CF003D0, 18F005D0, 18FF08D0; never TSC1 |
 | `usv722_glendinning.prf` | USV-722, Yamaha F115B, Glendinning helm | From the 9 Oct 2026 captures. Sends only while the helm is not sending the same ID |
 | `tables/*.csv` | Lookup tables used by profiles | Mercury steering and RPM tables, generated from the old code |
 
@@ -61,7 +61,7 @@ One `key = value` per line. `//` starts a comment.
 ```
 tx_msg   = name=steer, cap=steer, id=18FF11D0, dlc=8, period_ms=130, fill=FF, guard=true
 tx_field = msg=steer, src=rudder_pct, byte=0, bits=16, order=le, map=points, points=-100:0|0:511|100:1012
-tx_const = msg=tsc1, byte=0, value=C1
+tx_const = msg=steer, byte=2, value=C1
 ```
 
 `tx_msg`: `id` in hex (11-bit IDs need `ext=false`), `dlc` 1-8,

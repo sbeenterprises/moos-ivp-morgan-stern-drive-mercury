@@ -1,60 +1,96 @@
 //------------------------------------------------------------------
-// Drive profile: Mercury stern-drive boat (the boat this repo was
-// written for). Frames are identical to the hardcoded tables in
-// src/iCAN/CAN.cpp before October 2026; tests/canprofile_test.cpp
-// checks every rudder and throttle step against that old code.
+// Drive profile: USV-725
+//   Mercury Diesel 2.0L stern drive, engine ECU at address 0
+//   Glendinning helm at address 208 (0xD0), vessel / engine
+//   controller at 23 (0x17, owns TSC1), steering controller at
+//   26 (0x1A), steering actuator on 11-bit ID 0x210.
 //
-// Status marks:  [V] verified (in use on the boat)   [P] placeholder
+// Source: USV-725-CAN-ID-Mapping (captures of 15 Oct 2026, boat on
+// the hard, engine off). The PC sends the four commands the boat
+// accepted from the PC: steering 18FF11D0, throttle 0CF003D0,
+// gear 18F005D0 and trim 18FF08D0.
+//
+// Status marks:  [V] verified on usv-725   [P] placeholder
+//
+// guard=true on every message: iCAN listens first and refuses to
+// transmit an ID another node is still sending (CAN_CONFLICT). The
+// helm sends EEC2 and ETC2 itself, so its lever must be silent (or
+// the helm head off) before the PC drives throttle and gear.
+//
+// Not sent on purpose:
+//   TSC1 18000017   engine speed request; SA 23 owns it ("never send
+//                   TSC1 from the PC"). The engine follows the lever
+//                   that SA 23 reads: rpm = 700 + 35 x throttle %.
+//   18F30A1A        steering controller's own demand output
+//   key 0CFF0F10    never send START from the PC
 //------------------------------------------------------------------
 
 profile        = mercury_sterndrive
 can_interface  = slcan0                       // [V]
 capabilities   = steer, thrust, trim
 
-// Limits and interlock. Shift pauses are 0 so gear changes exactly as
-// before (gear follows the sign of thrust). Raise them once confirmed
-// with the drive maker; e.g. shift_neutral_secs = 1.0.
 rudder_limit_pct     = 100
 thrust_limit_pct     = 100
 thrust_deadband_pct  = 0
-shift_neutral_secs   = 0                      // [P]
+shift_neutral_secs   = 0                      // [P] confirm with the drive maker
 shift_settle_secs    = 0                      // [P]
 
 // Lost link to SS UI while in manual: rudder 0, throttle 0 (neutral)
 lost_link_rudder_pct = 0
 lost_link_thrust_pct = 0
 
-// Do not transmit an ID that another device is already sending
 guard_secs = 1.0
 
-//--- Steering: 18F30A1A, DLC 7 ------------------------------------
-// Bytes 0-1: signed 16-bit big-endian position from the table.
-// Bytes 5-6: FF E5 when turning to port, 1A FD at centre/starboard.
-tx_msg   = name=steer, cap=steer, id=18F30A1A, dlc=7, period_ms=50, fill=FF
-tx_field = msg=steer, src=rudder_pct, byte=0, bits=16, order=be, signed=true, map=table, table=tables/mercury_steer.csv
-tx_field = msg=steer, src=rudder_side, byte=5, bits=16, order=be, map=enum, values=port:FFE5|center:1AFD|stbd:1AFD
+//--- Steering command: 18FF11D0 (PGN 65297) -------------------- [P]
+// Not sent by anything on usv-725, but the steering actuator accepts
+// it from the PC (15 Oct test). Coding taken from usv-722: bytes 0-1
+// low byte first, 0 = full port, 511 = centre, 1012 = full starboard,
+// bytes 2-7 FF. Confirm the full-lock values on usv-725.
+tx_msg   = name=steer, cap=steer, id=18FF11D0, dlc=8, period_ms=130, fill=FF, guard=true
+tx_field = msg=steer, src=rudder_pct, byte=0, bits=16, order=le, map=points, points=-100:0|0:511|100:1012
 
-//--- Gear: J1939 ETC2 18F005D0 ------------------------------------
-tx_msg   = name=gear, cap=thrust, id=18F005D0, dlc=8, period_ms=50, fill=FF
+//--- Gear: J1939 ETC2 18F005D0 --------------------------------- [P]
+// Byte 0: 7E forward, 7D neutral, 7C reverse (usv-722 coding). With
+// the engine off the helm kept reporting 7D in forward and reverse;
+// repeat the gear capture with the engine running.
+tx_msg   = name=gear, cap=thrust, id=18F005D0, dlc=8, period_ms=50, fill=FF, guard=true
 tx_field = msg=gear, src=gear, byte=0, bits=8, map=enum, values=fwd:7E|neutral:7D|rev:7C
 
-//--- Engine speed: J1939 TSC1 18000017 ----------------------------
-// Byte 0 C1 = speed control override, bytes 1-2 requested speed
-// (0.125 rpm/bit, 700-4200 rpm from the table), byte 3 E1.
-tx_msg   = name=tsc1, cap=thrust, id=18000017, dlc=8, period_ms=50, fill=FF
-tx_const = msg=tsc1, byte=0, value=C1
-tx_field = msg=tsc1, src=thrust_abs_pct, byte=1, bits=16, order=le, map=table, table=tables/mercury_rpm.csv
-tx_const = msg=tsc1, byte=3, value=E1
+//--- Throttle: J1939 EEC2 0CF003D0 ----------------------------- [V]
+// Byte 1 = throttle % / 0.4 (00 = 0 %, FA = 100 %), unsigned: the
+// same value ahead and astern, the direction comes from the gear.
+// Throttle sweep 02:12: 0 / 24.8 / 50.4 / 74.8 / 100 %. Helm sends
+// every 40 ms.
+tx_msg   = name=throttle, cap=thrust, id=0CF003D0, dlc=8, period_ms=40, fill=FF, guard=true
+tx_field = msg=throttle, src=thrust_abs_pct, byte=1, bits=8, map=linear, scale=2.5
 
 //--- Trim: 18FF08D0 (PGN 65288) -------------------------------- [V]
-// PC trim command accepted by the boat (USV-725 CAN ID mapping, 15 Oct
-// 2026). The helm's own trim switch is 0CFF08D0; the PC must not reuse
-// it. Byte 0: F1 = trim up held, F4 = trim down held, F0 = idle.
-// Momentary: the motor runs while F1/F4 is sent. The F0 idle frame is
-// sent once when a pulse ends. No trim position on the bus.
+// PC trim command. The helm's own trim switch is 0CFF08D0; the PC
+// must not reuse it. Byte 0: F1 = trim up held, F4 = trim down held,
+// F0 = idle. Momentary: the motor runs while F1/F4 is sent. The F0
+// idle frame is sent once when a pulse ends. No trim position on the
+// bus, and the battery sagged 0.7 V under the trim motor.
 trim_up_secs   = 1.2                          // [P]
 trim_down_secs = 1.2                          // [P]
 tx_msg   = name=trim, cap=trim, id=18FF08D0, dlc=8, period_ms=50, fill=FF, guard=true
 tx_field = msg=trim, src=trim, byte=0, bits=8, map=enum, values=up:F1|down:F4|idle:F0
 
-// Engine telemetry on this boat is decoded by iCANRec (ENGINE_*).
+//--- Feedback ------------------------------------------------------
+// Steering controller demand (wheel or PC), 18F30A1A byte 0, signed,
+// -39 full port .. +39 full starboard: % = value / 39            [V]
+// Actual rudder position is in 0x210 frames with byte 5 = 64, but the
+// same ID also carries command frames (byte 5 = 00) and rx_field
+// cannot filter on a byte yet, so no rudder_feedback alarm here.
+rx_field = name=CAN_STEER_DEMAND_PCT, id=18F30A1A, parts=B0, signed=true, map=linear, scale=2.564102564
+
+// Helm lever                                                       [V]
+rx_field = name=CAN_HELM_GEAR, id=18F005D0, parts=B0, map=enum, values=7E:fwd|7D:neutral|7C:rev
+rx_field = name=CAN_HELM_THROTTLE_PCT, id=0CF003D0, parts=B1, map=linear, scale=0.4
+
+// Engine speed request from SA 23 (TSC1), 0.125 rpm/bit            [V]
+rx_field = name=CAN_ENGINE_RPM_REQUEST, id=18000017, parts=B1:0-7|B2:0-7, map=linear, scale=0.125
+
+// Fuel tank 0, NMEA 2000 PGN 127505 (Maretron TLM100)              [V]
+rx_field = name=CAN_FUEL_PCT, id=19F21170, parts=B1:0-7|B2:0-7, map=linear, scale=0.004
+
+// Engine telemetry (EEC1, ET1, ...) is decoded by iCANRec (ENGINE_*).

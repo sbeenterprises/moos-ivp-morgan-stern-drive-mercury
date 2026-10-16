@@ -7,7 +7,7 @@ sudo slcand -o -c -s5 /dev/ttyACM2 slcan0
 sudo ip link set slcan0 up
 ```
 
-All Mercury frames use 29-bit extended IDs; USV-722 steering feedback is 11-bit.
+All commands use 29-bit extended IDs; the steering actuator (0x210) on both boats is 11-bit.
 
 ## Commands out (iCAN + boat profile)
 
@@ -40,7 +40,7 @@ Behaviour common to every boat (`src/lib_canprofile/DriveCore.cpp`):
   `manual_gear = command` (default) or `thrust_sign` (old behaviour).
 - **Shift interlock.** Reversing passes through neutral for
   `shift_neutral_secs`; throttle stays at 0 for `shift_settle_secs` after a
-  gear engages. Both are 0 on the Mercury boat (unchanged behaviour).
+  gear engages. Both are 0 on USV-725 (placeholder, to confirm with the drive maker).
 - **Guard.** iCAN listens `guard_secs` before sending and will not send an ID
   another node is sending (`CAN_CONFLICT`). On USV-722 the helm must have its
   steering switched off before the PC can steer.
@@ -53,24 +53,31 @@ Behaviour common to every boat (`src/lib_canprofile/DriveCore.cpp`):
   accepted from `trim_sources` (iWebSocket), only with `CAN_SEND=true`, and
   only if the profile lists the `trim` capability. State: `CAN_TRIM_STATE`.
 
-### Mercury stern-drive (`profiles/mercury_sterndrive.prf`)
+### USV-725, Mercury stern-drive (`profiles/mercury_sterndrive.prf`)
 
-Frames are byte-for-byte those of the old hardcoded iCAN
-(`tests/canprofile_test.cpp` compares 3,600+ frames).
+From the 15 Oct 2026 captures (`USV-725-CAN-ID-Mapping`). The PC sends only
+the four commands the boat accepted from the PC, all with `guard=true`. The
+helm sends EEC2 and ETC2 itself, so its lever must be silent before the PC
+drives throttle and gear.
 
 | CAN ID | Meaning | Payload |
 |---|---|---|
-| `18F30A1A` | Steering (PGN 0xF30A, SA 0x1A; source of this format unconfirmed) | DLC 7. Bytes 0–1 big-endian int16 from `tables/mercury_steer.csv`, indexed by truncated `DESIRED_RUDDER` (% of travel). Bytes 5–6 `FF E5` to port, `1A FD` centre/starboard. |
-| `18F005D0` | ETC2 (PGN 61445) selected gear | `7E` forward, `7D` neutral, `7C` reverse; rest `FF`. |
-| `18000017` | TSC1 (PGN 0) to engine #1, SA 0x17 | `C1`, bytes 1–2 requested speed LE 0.125 rpm/bit from `tables/mercury_rpm.csv` (700–4200 rpm), `E1`, `FF…`. |
+| `18FF11D0` | Steering command (PGN 65297) | Bytes 0–1 LE: 0 full port, 511 centre, 1012 full starboard (usv-722 coding, accepted by the 725 actuator; full-lock values to confirm). Every 130 ms. |
+| `0CF003D0` | EEC2 (PGN 61443) throttle lever | Byte 1 = throttle % / 0.4 (`00`–`FA`), same ahead and astern. Every 40 ms. |
+| `18F005D0` | ETC2 (PGN 61445) gear lever | `7E` forward, `7D` neutral, `7C` reverse. Forward/reverse still to be seen with the engine running. |
+| `18FF08D0` | Trim (PGN 65288) | `F1` up / `F4` down every 50 ms, 1.2 s per command, one `F0` idle frame when the pulse ends. `0CFF08D0` is the helm's own switch. |
 
-Table defects kept on purpose (fix in the CSV, not in code): 71 % equals
-50 %; 23–27 % is non-monotonic.
+**Never sent:** TSC1 `18000017` (SA 23 owns engine speed; it follows the
+lever as rpm = 700 + 35 × throttle %), the steering controller's
+`18F30A1A`, and the key switch. Until October 2026 this profile sent the old
+hardcoded frames (`18F30A1A` + TSC1); they were replaced to match the
+mapping.
 
-Trim `18FF08D0` (PC trim command from the USV-725 CAN ID mapping, 15 Oct
-2026; `0CFF08D0` is the helm's own switch): `F1` up / `F4` down every 50 ms,
-1.2 s per command, one `F0` idle frame when the pulse ends. **Enabled**,
-with `guard=true`.
+Feedback: `CAN_STEER_DEMAND_PCT` (`18F30A1A` byte 0 / 39), `CAN_HELM_GEAR`,
+`CAN_HELM_THROTTLE_PCT`, `CAN_ENGINE_RPM_REQUEST` (TSC1 from SA 23),
+`CAN_FUEL_PCT`. The actual rudder (0x210 frames with byte 5 = `64`) shares
+its ID with command frames, and `rx_field` cannot filter on a byte yet, so
+there is no rudder-mismatch alarm on this boat.
 
 ### USV-722 (`profiles/usv722_glendinning.prf`)
 
