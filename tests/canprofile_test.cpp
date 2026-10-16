@@ -432,26 +432,29 @@ static void testDriveCore()
 
 static void testTrim()
 {
-  // Mercury: same bytes the old (disabled) iCAN trim code sent
+  // Mercury: PC trim command from the USV-725 CAN ID mapping
   Profile m;
   CHECK(m.load(g_profile_dir + "/mercury_sterndrive.prf"), "mercury loads with trim message");
   const TxMsg* mt = msgNamed(m, "trim");
   CHECK(mt != 0, "mercury defines a trim message");
-  CHECK(!m.hasCapability("trim"), "mercury trim is off by default");
+  CHECK(m.hasCapability("trim"), "mercury trim is enabled");
   if(mt) {
     DriveCommand cmd;
     cmd.trim = TRIM_UP;
-    CHECK(m.encode(*mt, cmd).str() == "0CFF08D0#F1FFFFFFFFFFFFFF", "mercury trim up = old F1 frame");
+    CHECK(m.encode(*mt, cmd).str() == "18FF08D0#F1FFFFFFFFFFFFFF", "mercury trim up F1");
     cmd.trim = TRIM_DOWN;
-    CHECK(m.encode(*mt, cmd).str() == "0CFF08D0#F4FFFFFFFFFFFFFF", "mercury trim down = old F4 frame");
-    CHECK(!m.hasTrimIdle(*mt), "mercury has no idle frame (old code sent none)");
+    CHECK(m.encode(*mt, cmd).str() == "18FF08D0#F4FFFFFFFFFFFFFF", "mercury trim down F4");
+    cmd.trim = TRIM_IDLE;
+    CHECK(m.encode(*mt, cmd).str() == "18FF08D0#F0FFFFFFFFFFFFFF", "mercury trim idle F0");
+    CHECK(m.hasTrimIdle(*mt), "mercury has an idle frame");
+    CHECK(mt->guard, "mercury trim is guarded");
   }
 
   // USV-722: trim switch byte from the workbook
   Profile u;
   CHECK(u.load(g_profile_dir + "/usv722_glendinning.prf"), "usv722 loads with trim message");
   const TxMsg* ut = msgNamed(u, "trim");
-  CHECK(ut != 0 && !u.hasCapability("trim"), "usv722 defines trim, off by default");
+  CHECK(ut != 0 && u.hasCapability("trim"), "usv722 defines trim, enabled");
   if(ut) {
     DriveCommand cmd;
     cmd.trim = TRIM_UP;

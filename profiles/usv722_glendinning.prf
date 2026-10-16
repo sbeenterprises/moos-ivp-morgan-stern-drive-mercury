@@ -16,14 +16,14 @@
 // sending (posted as CAN_CONFLICT). Switch off the helm's steering
 // before PC steering, as in the runbook's send test.
 //
-// Trim (18FF08D0) is defined below but off; see the notes there.
+// Trim (18FF08D0) is enabled; see the notes there.
 // Not included on purpose:
 //   key (18FF0F10)  never send START from the PC (runbook)
 //------------------------------------------------------------------
 
 profile        = usv722_glendinning
 can_interface  = slcan0                       // [V] 250 kbit/s, k800-can.service
-capabilities   = steer, thrust     // add trim to enable PC trim (read the trim notes first)
+capabilities   = steer, thrust, trim
 
 rudder_limit_pct     = 100
 thrust_limit_pct     = 100
@@ -62,7 +62,7 @@ tx_field = msg=throttle, src=thrust_abs_pct, byte=1, bits=8, map=linear, scale=2
 //--- Trim switch: 18FF08D0 (PGN 65288) -------------------------- [V]
 // Byte 0: F1 = trim up held, F4 = trim down held, F0 = idle.
 // The F0 idle frame is sent once when a pulse ends.
-// Before enabling, per the runbook:
+// Enabled. Open points from the runbook:
 //  - Trim is momentary with no position feedback. Up runs on into full
 //    tilt; down runs to the bottom stop (skeg touches ground), so the
 //    down pulse is shorter.                                         [P]

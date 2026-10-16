@@ -9,9 +9,7 @@
 
 profile        = mercury_sterndrive
 can_interface  = slcan0                       // [V]
-capabilities   = steer, thrust
-// Trim is defined below but off, as it was in the old iCAN (its trim code
-// was commented out). To enable:  capabilities = steer, thrust, trim
+capabilities   = steer, thrust, trim
 
 // Limits and interlock. Shift pauses are 0 so gear changes exactly as
 // before (gear follows the sign of thrust). Raise them once confirmed
@@ -48,13 +46,15 @@ tx_const = msg=tsc1, byte=0, value=C1
 tx_field = msg=tsc1, src=thrust_abs_pct, byte=1, bits=16, order=le, map=table, table=tables/mercury_rpm.csv
 tx_const = msg=tsc1, byte=3, value=E1
 
-//--- Trim: 0CFF08D0 ------------------------------------------------
-// From the old iCAN (disabled there): F1 = trim up, F4 = trim down,
-// sent every 100 ms, 12 frames = 1.2 s per TRIM command. No idle value
-// was ever sent; the motor stops when the frames stop.            [P]
-trim_up_secs   = 1.2
-trim_down_secs = 1.2
-tx_msg   = name=trim, cap=trim, id=0CFF08D0, dlc=8, period_ms=100, fill=FF
-tx_field = msg=trim, src=trim, byte=0, bits=8, map=enum, values=up:F1|down:F4
+//--- Trim: 18FF08D0 (PGN 65288) -------------------------------- [V]
+// PC trim command accepted by the boat (USV-725 CAN ID mapping, 15 Oct
+// 2026). The helm's own trim switch is 0CFF08D0; the PC must not reuse
+// it. Byte 0: F1 = trim up held, F4 = trim down held, F0 = idle.
+// Momentary: the motor runs while F1/F4 is sent. The F0 idle frame is
+// sent once when a pulse ends. No trim position on the bus.
+trim_up_secs   = 1.2                          // [P]
+trim_down_secs = 1.2                          // [P]
+tx_msg   = name=trim, cap=trim, id=18FF08D0, dlc=8, period_ms=50, fill=FF, guard=true
+tx_field = msg=trim, src=trim, byte=0, bits=8, map=enum, values=up:F1|down:F4|idle:F0
 
 // Engine telemetry on this boat is decoded by iCANRec (ENGINE_*).

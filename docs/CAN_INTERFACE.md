@@ -67,9 +67,10 @@ Frames are byte-for-byte those of the old hardcoded iCAN
 Table defects kept on purpose (fix in the CSV, not in code): 71 % equals
 50 %; 23–27 % is non-monotonic.
 
-Trim `0CFF08D0`: `F1` up / `F4` down every 100 ms, 1.2 s per command (the
-old iCAN's disabled trim code). Defined but **off**; add `trim` to
-`capabilities` to enable.
+Trim `18FF08D0` (PC trim command from the USV-725 CAN ID mapping, 15 Oct
+2026; `0CFF08D0` is the helm's own switch): `F1` up / `F4` down every 50 ms,
+1.2 s per command, one `F0` idle frame when the pulse ends. **Enabled**,
+with `guard=true`.
 
 ### USV-722 (`profiles/usv722_glendinning.prf`)
 
@@ -87,8 +88,8 @@ Decoded feedback: `CAN_RUDDER_ACTUAL_PCT`, `CAN_RUDDER_ECHO_PCT`,
 (`18FF08D0` high nibble), `CAN_HELM_GEAR`, `CAN_HELM_THROTTLE_PCT`,
 `CAN_ENGINE_GEAR`, `CAN_ENGINE_THROTTLE_PCT` (processor 226), `CAN_FUEL_PCT`.
 Trim `18FF08D0` (`F1` up / `F4` down / `F0` idle; up 1.0 s, down 0.5 s)
-is defined but **off**: the helm sends this ID continuously (the guard
-would block it), the trim pump wiring is unconfirmed, and the byte's high
+is **enabled**. Open points: the helm sends this ID continuously (the guard
+blocks PC trim while the helm is on), the trim pump wiring is unconfirmed, and the byte's high
 nibble is the helm-in-command flag. The key switch is never sent.
 
 ## Feedback (iCANRec, `src/iCANRec/CANRec.cpp`)
