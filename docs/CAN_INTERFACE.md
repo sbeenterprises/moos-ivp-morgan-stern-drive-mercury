@@ -40,6 +40,14 @@ Behaviour common to every boat (`src/lib_canprofile/DriveCore.cpp`):
   `manual_gear = command` (default) or `thrust_sign` (one lever: the
   sign of `DESIRED_THRUST` sets the gear, 0 = neutral; `DESIRED_GEAR` ignored).
   `real.moos` uses `thrust_sign`.
+- **Rudder vs speed.** If the profile has `rudder_limit_speed`, iCAN reads
+  `NAV_SPEED` and limits the rudder (manual and autonomy) to the table's
+  value for the current speed; with no `NAV_SPEED` for `speed_stale_secs`
+  the smallest value applies. Posted as `CAN_RUDDER_LIMIT_PCT`.
+  `rudder_rate_pct_s` limits how fast the rudder command may change.
+- **Throttle ramp-up.** `thrust_rate_up_pct_s` lets the throttle actually sent
+  rise by at most that % per second, for the UI lever and the autopilot alike;
+  less throttle, stop, neutral and lost link are sent at once.
 - **Shift interlock.** Reversing passes through neutral for
   `shift_neutral_secs`; throttle stays at 0 for `shift_settle_secs` after a
   gear engages. Both are 0 on USV-725 (placeholder, to confirm with the drive maker).

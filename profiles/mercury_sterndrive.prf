@@ -35,6 +35,11 @@ thrust_deadband_pct  = 0
 shift_neutral_secs   = 0                      // [P] confirm with the drive maker
 shift_settle_secs    = 0                      // [P]
 
+// Throttle ramp-up, manual and autopilot alike: the throttle sent rises
+// by at most 10 % per second (0 -> 50 % in 5 s). Less throttle, stop,
+// neutral and lost link act at once.                              [P]
+thrust_rate_up_pct_s = 10
+
 // Lost link to SS UI while in manual: rudder 0, throttle 0 (neutral)
 lost_link_rudder_pct = 0
 lost_link_thrust_pct = 0
@@ -74,6 +79,25 @@ trim_up_secs   = 1.2                          // [P]
 trim_down_secs = 1.2                          // [P]
 tx_msg   = name=trim, cap=trim, id=18FF08D0, dlc=8, period_ms=50, fill=FF, guard=true
 tx_field = msg=trim, src=trim, byte=0, bits=8, map=enum, values=up:F1|down:F4|idle:F0
+
+//--- Autopilot (planchaPID) -----------------------------------------
+// planchaPID reads these from this profile (see AutoTuning.h). These are
+// the values that were hardcoded in planchaPID / set in real.moos before
+// October 2026, so behaviour is unchanged. The 15 Oct log showed the
+// boat pulling to port with only +/-20 % rudder: raise the rudder
+// limits once the steering centre is checked.                     [P]
+auto_speed_ff              = 0:0|3:8|5:14|7:22|8:27|10:35|12:36|15:37|18:41|20:44
+auto_speed_gains           = 2:0.35:0.005|6:0.25:0.004|12:0.16:0.003|1000:0.10:0.002
+auto_speed_i_authority_pct = 2
+auto_thrust_max_pct        = 50
+auto_heading_kp            = 0.15
+auto_heading_ki            = 0.0
+auto_heading_kd            = 0.26
+auto_heading_limit_pct     = 20
+auto_rudder_max_pct        = 20
+auto_rudder_min_pct        = 8
+auto_rudder_speed_low      = 5
+auto_rudder_speed_high     = 18
 
 //--- Feedback ------------------------------------------------------
 // Steering controller demand (wheel or PC), 18F30A1A byte 0, signed,

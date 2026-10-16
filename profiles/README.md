@@ -55,6 +55,30 @@ One `key = value` per line. `//` starts a comment.
 | `rudder_feedback` | none | rx_field holding the actual rudder %, for the mismatch alarm |
 | `rudder_alarm_pct`, `rudder_alarm_secs` | 0 (off), 3 | `CAN_RUDDER_MISMATCH=true` when feedback stays this far off for this long |
 | `trim_up_secs`, `trim_down_secs` | 1.0, 1.0 | Length of one trim pulse per `TRIM` command (0 < value ≤ 5) |
+| `thrust_rate_up_pct_s` | 0 (off) | Throttle ramp-up, % per second: the throttle sent rises gradually (manual and autopilot); any decrease, stop, neutral or lost link is immediate, and each shift restarts from 0 |
+| `rudder_limit_speed` | none | speed:max-rudder% points (NAV_SPEED units), e.g. `0:100\|5:100\|10:40\|18:12\|27:8`. Rudder limit that shrinks with speed, manual and autopilot alike. Empty = no speed limit |
+| `speed_stale_secs` | 3 | With no `NAV_SPEED` this recent, the smallest `rudder_limit_speed` value applies |
+
+### Autopilot tuning (read by planchaPID)
+
+Optional; the defaults are the values that were hardcoded in planchaPID /
+set in `real.moos` before October 2026. Speeds are in `NAV_SPEED` units
+(knots on the real boats); thrust is `DESIRED_THRUST` %, i.e. before the
+throttle `tx_field` map.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `auto_speed_ff` | `0:0\|3:8\|5:14\|...\|20:44` | speed:thrust% points, the thrust that holds each speed (feed-forward) |
+| `auto_speed_gains` | `2:0.35:0.005\|6:0.25:0.004\|12:0.16:0.003\|1000:0.10:0.002` | up_to:kp:ki steps by desired speed |
+| `auto_speed_i_authority_pct` | 2 | Most thrust the speed I-term may add, % |
+| `auto_thrust_max_pct` | 50 | Highest `DESIRED_THRUST` the autopilot sends |
+| `auto_heading_kp`, `_ki`, `_kd` | 0.15, 0, 0.26 | Heading PID |
+| `auto_heading_limit_pct` | 20 | Heading PID output clamp, ± rudder % |
+| `auto_rudder_max_pct`, `auto_rudder_min_pct` | 20, 8 | Rudder limit at low / high speed |
+| `auto_rudder_speed_low`, `auto_rudder_speed_high` | 5, 18 | Speeds where the rudder limit starts / stops shrinking |
+
+A throttle curve (lever % -> engine %) belongs in the throttle `tx_field`
+as `map=points`; see `usv722_glendinning.prf`.
 
 ### Messages sent
 

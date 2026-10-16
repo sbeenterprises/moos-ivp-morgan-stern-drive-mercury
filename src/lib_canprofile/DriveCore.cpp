@@ -45,6 +45,8 @@ DriveCore::DriveCore()
   m_settle_secs  = 0;
   m_rudder_rate  = 0;
   m_thrust_rate  = 0;
+  m_thrust_rate_up = 0;
+  m_thrust_sent  = 0;
   m_lost_rudder  = 0;
   m_lost_thrust  = 0;
   m_trim_up_secs   = 1.0;
@@ -53,6 +55,11 @@ DriveCore::DriveCore()
   m_trim_end     = 0;
   m_manual_gear_cmd = false;
   m_gear_sp      = GEAR_NEUTRAL;
+  m_speed_stale_secs = 3.0;
+  m_speed        = 0;
+  m_speed_time   = -1e9;   // no speed yet: stale
+  m_speed_stale  = true;
+  m_rudder_limit_now = 100;
 }
 
 void DriveCore::configure(const Profile& p)
@@ -64,10 +71,26 @@ void DriveCore::configure(const Profile& p)
   m_settle_secs  = p.setting("shift_settle_secs");
   m_rudder_rate  = p.setting("rudder_rate_pct_s");
   m_thrust_rate  = p.setting("thrust_rate_pct_s");
+  m_thrust_rate_up = p.setting("thrust_rate_up_pct_s");
   m_lost_rudder  = p.setting("lost_link_rudder_pct");
   m_lost_thrust  = p.setting("lost_link_thrust_pct");
   m_trim_up_secs   = p.setting("trim_up_secs");
   m_trim_down_secs = p.setting("trim_down_secs");
+  m_speed_stale_secs = p.setting("speed_stale_secs");
+  string err;
+  m_rudder_speed.clear();
+  if(!p.stringSetting("rudder_limit_speed").empty())
+    AutoTuning::parseSpeedPct(p.stringSetting("rudder_limit_speed"), "rudder_limit_speed",
+                              m_rudder_speed, err);
+  m_rudder_limit_now = m_rudder_limit;
+}
+
+void DriveCore::setSpeed(double speed, double now)
+{
+  if(std::isnan(speed))
+    return;
+  m_speed = fabs(speed);
+  m_speed_time = now;
 }
 
 void DriveCore::setOwner(Owner owner)
@@ -108,6 +131,7 @@ void DriveCore::resetToNeutral(double now)
   m_thrust_sp  = 0;
   m_rudder_out = 0;
   m_thrust_req = 0;
+  m_thrust_sent = 0;
   m_trim = TRIM_IDLE;
   m_gear_sp = GEAR_NEUTRAL;
   if(m_gear != GEAR_NEUTRAL) {
@@ -145,7 +169,24 @@ DriveCommand DriveCore::update(double now)
   if(m_trim != TRIM_IDLE && now >= m_trim_end)
     m_trim = TRIM_IDLE;   // pulse over
 
-  double rudder_target = clampAbs(m_rudder_sp, m_rudder_limit);
+  // Rudder limit: the profile's fixed limit, and below it the
+  // speed-dependent one. With no recent speed, the most cautious entry.
+  double rlim = m_rudder_limit;
+  m_speed_stale = (now - m_speed_time > m_speed_stale_secs);
+  if(!m_rudder_speed.empty()) {
+    double slim = m_rudder_speed[0].thrust;
+    if(m_speed_stale) {
+      for(size_t i=1; i<m_rudder_speed.size(); i++)
+        if(m_rudder_speed[i].thrust < slim)
+          slim = m_rudder_speed[i].thrust;
+    }
+    else
+      slim = AutoTuning::interpSpeed(m_rudder_speed, m_speed);
+    if(slim < rlim)
+      rlim = slim;
+  }
+  m_rudder_limit_now = rlim;
+  double rudder_target = clampAbs(m_rudder_sp, rlim);
   double thrust_target = clampAbs(m_thrust_sp, m_thrust_limit);
 
   m_rudder_out = limitRate(m_rudder_out, rudder_target, m_rudder_rate, dt);
@@ -185,6 +226,19 @@ DriveCommand DriveCore::update(double now)
     cmd.thrust_pct = 0;
   else
     cmd.thrust_pct = (m_gear == GEAR_FWD) ? fabs(m_thrust_req) : -fabs(m_thrust_req);
+
+  // Ramp-up: the throttle actually sent may rise by at most
+  // thrust_rate_up_pct_s per second. Any decrease (less throttle, stop,
+  // neutral, lost link) is sent at once, and because neutral and the
+  // settle time send 0, every shift restarts the ramp from 0.
+  double mag = fabs(cmd.thrust_pct);
+  if(m_thrust_rate_up > 0 && mag > m_thrust_sent) {
+    double up = m_thrust_sent + m_thrust_rate_up * dt;
+    if(mag > up)
+      mag = up;
+  }
+  cmd.thrust_pct = (cmd.thrust_pct < 0) ? -mag : mag;
+  m_thrust_sent = mag;
   return cmd;
 }
 

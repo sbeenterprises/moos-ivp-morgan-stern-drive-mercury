@@ -154,11 +154,10 @@ ProcessConfig = planchaPID
 {
    AppTick   = 20
    CommsTick = 20
-   HEADING_KP = 0.15
-   HEADING_KI = 0.0
-   HEADING_KD = 0.26
-   HEADING_UPPER_BOUND = 20
-   HEADING_LOWER_BOUND = -20
+
+   // Heading gains, rudder and thrust limits and the speed -> thrust map
+   // are per boat: auto_* keys in the boat profile. planchaPID uses the
+   // profile_file of the iCAN block below (or its own profile_file line).
 }
 
 

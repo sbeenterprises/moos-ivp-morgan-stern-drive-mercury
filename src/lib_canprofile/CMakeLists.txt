@@ -6,4 +6,5 @@
 ADD_LIBRARY(canprofile STATIC
   CanProfile.cpp
   DriveCore.cpp
+  AutoTuning.cpp
 )

@@ -8,6 +8,8 @@
 #include "MBUtils.h"
 #include "ACTable.h"
 #include "lanchaPID.h"
+#include "AutoTuning.h"
+#include "CanProfile.h"
 //#include "PIDParameterReader.h"
 #include <cmath>
 #include <string>
@@ -76,6 +78,12 @@ std::string region; // Variável para verificar se o OpRegion está ativo
 //Cria os objetos para o controle PID com valores iniciais de kp, ki e kd lidos do arquivo
 //PIDController speedController("/home/dueiras/vsnt/moos-ivp-vsnt/src/planchaPID/speed_pid_parameters.txt");
 //PIDController headingController("/home/dueiras/vsnt/moos-ivp-vsnt/src/planchaPID/heading_pid_parameters.txt");
+// Boat-specific autopilot settings (speed feed-forward, speed gains, rudder
+// and thrust limits). Read from the boat profile (auto_* keys) in OnStartUp;
+// the defaults are the values that used to be hardcoded here.
+canprofile::AutoTuning g_tuning;
+std::string g_tuning_source = "built-in defaults";
+
 PIDController speedController(speed_kp, speed_ki, speed_kd);
 PIDController headingController(heading_kp, heading_ki, heading_kd);
 
@@ -103,22 +111,9 @@ PIDController::PIDController(double kp, double ki, double kd)
 // thrust output is in the same 0–40 % scale you use elsewhere
 double PIDController::CalculateSpeed(double desired, double current, double dt)
 {
-    // ------- 1. Feed-forward (static map) -----------------
-    // Recalibrated from log MOOSLog_29_5_2026_____09_33_03: sustained ~38 %
-    // thrust settled the hull near ~18 kt and ~24-28 % held ~5-6 kt, so the
-    // old map (10 kt -> 32.7 %) was over-driving. Equilibrium thrust vs speed:
-    static const std::vector<double> ff_speed  = {0, 3, 5, 7, 8, 10, 12, 15, 18, 20};
-    static const std::vector<double> ff_thrust = {0, 8, 14, 22, 27, 35, 36, 37, 41, 44};
-
-    // linear interpolation
-    double ff = ff_thrust.back();                 // default (highest bin)
-    for(size_t i=1; i<ff_speed.size(); ++i){
-        if(desired <= ff_speed[i]){
-            double w = (desired - ff_speed[i-1])/(ff_speed[i]-ff_speed[i-1]);
-            ff = ff_thrust[i-1] + w*(ff_thrust[i]-ff_thrust[i-1]);
-            break;
-        }
-    }
+    // ------- 1. Feed-forward (profile auto_speed_ff) ------
+    // Thrust that holds the desired speed, from the boat profile.
+    double ff = g_tuning.feedForward(desired);
 
     // ------- 2. PID feedback (gain-scheduled) -------------
     double error      = desired - current;
@@ -137,27 +132,9 @@ double PIDController::CalculateSpeed(double desired, double current, double dt)
     // the gains stay constant throughout a setpoint, so they no longer
     // jump as the boat accelerates across the 2 kt / 6 kt thresholds.
     else {
-        double v = desired;
-        if(v < 2.0) {
-          eff_kp = 0.35;
-          eff_ki = 0.005;
-          eff_kd = 0.0;
-        }
-        else if(v < 6.0) {
-            eff_kp = 0.25;
-            eff_ki = 0.004;
-            eff_kd = 0.0;
-        }
-        else if(v < 12.0) {
-            eff_kp = 0.16;
-            eff_ki = 0.003;
-            eff_kd = 0.0;
-        }
-        else {
-            eff_kp = 0.10;
-            eff_ki = 0.002;
-            eff_kd = 0.0;
-        }
+        // profile auto_speed_gains: kp/ki by desired speed
+        g_tuning.gains(desired, eff_kp, eff_ki);
+        eff_kd = 0.0;
     }
 
     // Integral with *bounded authority* anti-wind-up. The old code clamped
@@ -165,7 +142,7 @@ double PIDController::CalculateSpeed(double desired, double current, double dt)
     // eff_ki*100 (40..120 %!) of thrust and stay pinned high while the hull
     // lag caught up -> overshoot. Now we cap the integral so its
     // *contribution* never exceeds +/- I_AUTHORITY percent of thrust.
-    const double I_AUTHORITY = 2.0;   // max thrust (%) the I-term may add
+    const double I_AUTHORITY = g_tuning.i_authority;   // max thrust (%) the I-term may add
     integral += error * dt;
     if(eff_ki > 1e-6){
         double i_max = I_AUTHORITY / eff_ki;
@@ -563,9 +540,9 @@ bool lanchaPID::Iterate()
   //Speed controller - New function
   desired_thrust = speedController.CalculateSpeed(desired_speed, nav_speed,dt);
 
-  // Limit maximum thrust to 50 %
-  if(desired_thrust > 50.0)
-    desired_thrust = 50.0;
+  // Highest thrust the autopilot may ask for (profile auto_thrust_max_pct)
+  if(desired_thrust > g_tuning.thrust_max)
+    desired_thrust = g_tuning.thrust_max;
 
   // Imprima as saídas dos controladores
 
@@ -617,11 +594,22 @@ bool lanchaPID::OnStartUp()
   if(!m_MissionReader.GetConfiguration(GetAppName(), sParams))
     reportConfigWarning("No config block found for " + GetAppName());
 
+  string profile_file;
+  vector<string> moos_tuning;   // tuning keys also set in this .moos block
+
   STRING_LIST::iterator p;
   for(p=sParams.begin(); p!=sParams.end(); p++) {
     string orig  = *p;
     string line  = *p;
     string param = tolower(biteStringX(line, '='));
+
+    // Boat profile with the auto_* tuning (string, so before stod below)
+    if(param == "profile_file") {
+      profile_file = line;
+      continue;
+    }
+    if(param.find("heading_") == 0 || param.find("rudder_limit_") == 0)
+      moos_tuning.push_back(param);
 
     // SERVICE_MODE is the only boolean parameter - handle it before the
     // numeric conversion below, which would throw on "true"/"false".
@@ -691,7 +679,56 @@ bool lanchaPID::OnStartUp()
     if(!handled)
       reportUnhandledConfigWarning(orig);
   }
-  
+
+  // No profile_file here: use the one iCAN loads, so one line in the
+  // mission selects the boat for both apps.
+  if(profile_file.empty()) {
+    STRING_LIST ican;
+    if(m_MissionReader.GetConfiguration("iCAN", ican)) {
+      for(STRING_LIST::iterator q=ican.begin(); q!=ican.end(); q++) {
+        string line = *q;
+        if(tolower(biteStringX(line, '=')) == "profile_file")
+          profile_file = line;
+      }
+    }
+  }
+
+  if(profile_file.empty())
+    reportConfigWarning("No profile_file: using built-in autopilot tuning");
+  else {
+    canprofile::Profile prof;
+    string err;
+    if(!prof.load(profile_file)) {
+      reportConfigWarning("Profile " + profile_file +
+                          " is invalid: using built-in autopilot tuning");
+      for(size_t i=0; i<prof.errors().size(); i++)
+        reportConfigWarning("  " + prof.errors()[i]);
+    }
+    else if(!g_tuning.configure(prof, &err))
+      reportConfigWarning("Profile " + profile_file + ": " + err);
+    else {
+      g_tuning_source = profile_file;
+      // The profile is the one source of these values on a real boat
+      for(size_t i=0; i<moos_tuning.size(); i++)
+        reportConfigWarning(toupper(moos_tuning[i]) +
+                            " in the .moos file is ignored: set it in " + profile_file);
+    }
+  }
+
+  // With a profile, its heading gains and rudder limits replace the .moos
+  // values. Without one, the .moos values (or the built-in ones) stay.
+  if(g_tuning_source != "built-in defaults") {
+    headingController.setKP(g_tuning.heading_kp);
+    headingController.setKI(g_tuning.heading_ki);
+    headingController.setKD(g_tuning.heading_kd);
+    headingController.setUpper(g_tuning.heading_limit);
+    headingController.setLower(-g_tuning.heading_limit);
+    rudder_limit_max        = g_tuning.rudder_max;
+    rudder_limit_min        = g_tuning.rudder_min;
+    rudder_limit_speed_low  = g_tuning.rudder_speed_low;
+    rudder_limit_speed_high = g_tuning.rudder_speed_high;
+  }
+
   registerVariables();	
   return(true);
 }
@@ -740,6 +777,15 @@ bool lanchaPID::buildReport()
   actab1 << desired_thrust << desired_rudder << constant_heading << setpoint_heading;
   m_msgs << actab1.getFormattedString();
   m_msgs << endl;
+  m_msgs << "---------------------------------------------------" << endl;
+
+  m_msgs << "Tuning: " << g_tuning_source << endl;
+  m_msgs << "  rudder limit " << rudder_limit_max << "% (<= " << rudder_limit_speed_low
+         << ") .. " << rudder_limit_min << "% (>= " << rudder_limit_speed_high
+         << ")   thrust max " << g_tuning.thrust_max << "%   speed I-term max "
+         << g_tuning.i_authority << "%" << endl;
+  m_msgs << "  speed feed-forward: " << g_tuning.feedForward(desired_speed)
+         << "% for desired speed " << desired_speed << endl;
   m_msgs << "---------------------------------------------------" << endl;
 
   m_msgs << "SERVICE MODE (manual gains): "

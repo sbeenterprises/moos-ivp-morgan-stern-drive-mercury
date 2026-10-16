@@ -13,6 +13,7 @@ g++ -std=c++11 -Wall -Wextra -O1 \
     -I"$ROOT/src/lib_canprofile" \
     "$ROOT/src/lib_canprofile/CanProfile.cpp" \
     "$ROOT/src/lib_canprofile/DriveCore.cpp" \
+    "$ROOT/src/lib_canprofile/AutoTuning.cpp" \
     "$ROOT/tests/canprofile_test.cpp" \
     -o "$OUT"
 

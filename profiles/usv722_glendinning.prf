@@ -31,6 +31,22 @@ thrust_deadband_pct  = 0
 shift_neutral_secs   = 1.0                    // [P] processor also sequences shifts
 shift_settle_secs    = 0.5                    // [P]
 
+// Rudder vs speed, manual and autopilot alike (iCAN). The same rudder
+// turns the hull harder as speed rises (16 Oct: 20 % gave 1.5 deg/s at
+// 1.6 kn, 3.8 deg/s at 6.7 kn), and full lock while planing could roll
+// the boat. speed (kn, NAV_SPEED):max rudder %. With no NAV_SPEED for
+// speed_stale_secs the smallest value (8 %) applies.               [P]
+rudder_limit_speed   = 0:100|5:100|10:40|18:12|27:8
+speed_stale_secs     = 3
+// Rudder slew: at most 50 % of travel per second (full swing about
+// 4 s), so no sudden swing at speed.                               [P]
+rudder_rate_pct_s    = 50
+
+// Throttle ramp-up, manual and autopilot alike: the throttle sent rises
+// by at most 10 % of lever per second (0 -> full lever in 10 s). Less
+// throttle, stop, neutral and lost link act at once.               [P]
+thrust_rate_up_pct_s = 10
+
 // Lost link to SS UI while in manual: rudder 0, throttle 0 (neutral)
 lost_link_rudder_pct = 0
 lost_link_thrust_pct = 0
@@ -54,10 +70,24 @@ tx_msg   = name=gear, cap=thrust, id=18F005D0, dlc=8, period_ms=130, fill=FF, gu
 tx_field = msg=gear, src=gear, byte=0, bits=8, map=enum, values=fwd:7E|neutral:7D|rev:7C
 
 //--- Throttle lever: J1939 EEC2 0CF003D0 ----------------------- [V]
-// Byte 1 = thrust % / 0.4 (00 = 0 %, FA = 100 %), same in forward
-// and reverse. Byte 0 FF. Helm sends about every 70 ms.
+// Byte 1 = engine throttle % / 0.4 (00 = 0 %, FA = 100 %), same in
+// forward and reverse. Byte 0 FF. Helm sends about every 70 ms.
+//
+// Lever curve: DESIRED_THRUST % (UI lever / autopilot) -> engine %.
+// Measured on 16 Oct 2026 (MOOSLog_16_10_2026_____10_19_49, 10_38_23),
+// forward, steady state:
+//   engine  0-30 %   1.3-1.7 kn  (idle in gear, no gain)
+//   engine 31-36 %   3.5-4.3 kn
+//   engine    40 %   4.8-5.1 kn
+//   engine    45 %   6.4-8.2 kn
+//   engine    50 %  24-27.6 kn  (planes; 42 % holds 17.7 kn once planing)
+// The dead 0-30 % is squeezed into the first 10 % of the lever and
+// lever 100 % = engine 50 %, the highest throttle wanted on this boat
+// (about 27 kn). Points are lever%:byte, byte = engine % x 2.5.
+//   lever   0  10  40   70  100
+//   engine  0  30  40   45   50
 tx_msg   = name=throttle, cap=thrust, id=0CF003D0, dlc=8, period_ms=70, fill=FF, guard=true
-tx_field = msg=throttle, src=thrust_abs_pct, byte=1, bits=8, map=linear, scale=2.5
+tx_field = msg=throttle, src=thrust_abs_pct, byte=1, bits=8, map=points, points=0:0|10:75|40:100|70:113|100:125
 
 //--- Trim switch: 18FF08D0 (PGN 65288) -------------------------- [V]
 // Byte 0: F1 = trim up held, F4 = trim down held, F0 = idle.
@@ -76,6 +106,31 @@ trim_up_secs   = 1.0                          // [P]
 trim_down_secs = 0.5                          // [P] shorter: skeg ground risk
 tx_msg   = name=trim, cap=trim, id=18FF08D0, dlc=8, period_ms=130, fill=FF, guard=true
 tx_field = msg=trim, src=trim, byte=0, bits=8, map=enum, values=up:F1|down:F4|idle:F0
+
+//--- Autopilot (planchaPID) -----------------------------------------
+// planchaPID reads these from this profile (see AutoTuning.h). Speeds
+// are NAV_SPEED (knots); thrust is DESIRED_THRUST, i.e. lever % above.
+//
+// Speed feed-forward: lever % that holds a speed, from the table above.
+// 8-24 kn has no steady state (the hull either ploughs or planes); the
+// speed PID trims around it.                                       [P]
+auto_speed_ff              = 0:0|1.5:9|4:25|5:40|7:70|24:100
+auto_speed_gains           = 2:0.35:0.005|6:0.25:0.004|12:0.16:0.003|1000:0.10:0.002
+auto_speed_i_authority_pct = 10                // [P] was 2: could not leave the dead zone
+auto_thrust_max_pct        = 100               // lever 100 % = engine 50 %
+//
+// Steering, from the same logs: + rudder turns to starboard, almost no
+// pull at 0 (-0.05 deg/s at 1.6 kn, -0.5 at 4.6 kn). Turn rate at
+// 20 % rudder: 1.5 deg/s at 1.6 kn, 3.8 deg/s at 6.7 kn. The old 20 %
+// limit was too little at low speed.                               [P]
+auto_heading_kp            = 0.15
+auto_heading_ki            = 0.0
+auto_heading_kd            = 0.26
+auto_heading_limit_pct     = 40
+auto_rudder_max_pct        = 40                // at or below 5 kn
+auto_rudder_min_pct        = 10                // at or above 18 kn (planing)
+auto_rudder_speed_low      = 5
+auto_rudder_speed_high     = 18
 
 //--- Feedback ------------------------------------------------------
 // Steering actuator, 11-bit ID 210                                 [V]

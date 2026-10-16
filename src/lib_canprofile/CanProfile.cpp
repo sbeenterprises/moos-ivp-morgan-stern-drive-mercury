@@ -4,6 +4,7 @@
 /************************************************************/
 
 #include "CanProfile.h"
+#include "AutoTuning.h"
 
 #include <algorithm>
 #include <cctype>
@@ -293,6 +294,7 @@ Profile::Profile() : m_loaded(false)
   m_settings["shift_settle_secs"]    = 0;
   m_settings["rudder_rate_pct_s"]    = 0;    // 0 = no rate limit
   m_settings["thrust_rate_pct_s"]    = 0;
+  m_settings["thrust_rate_up_pct_s"] = 0;    // ramp up only; cuts are immediate
   m_settings["guard_secs"]           = 1.0;
   m_settings["lost_link_rudder_pct"] = 0;
   m_settings["lost_link_thrust_pct"] = 0;
@@ -302,6 +304,28 @@ Profile::Profile() : m_loaded(false)
   m_settings["trim_down_secs"]       = 1.0;  // length of one trim-down pulse
 
   m_string_settings["rudder_feedback"] = "";
+
+  // Speed-dependent rudder limit, manual and autopilot alike (iCAN):
+  // speed:max-rudder% points in NAV_SPEED units. Empty = no speed limit.
+  // Without a NAV_SPEED newer than speed_stale_secs the smallest limit
+  // in the table applies.
+  m_string_settings["rudder_limit_speed"] = "";
+  m_settings["speed_stale_secs"]          = 3.0;
+
+  // Autopilot (planchaPID) tuning, see AutoTuning.h. The defaults are the
+  // values that used to be hardcoded in planchaPID / set in real.moos.
+  m_settings["auto_heading_kp"]            = 0.15;
+  m_settings["auto_heading_ki"]            = 0.0;
+  m_settings["auto_heading_kd"]            = 0.26;
+  m_settings["auto_heading_limit_pct"]     = 20;
+  m_settings["auto_rudder_max_pct"]        = 20;
+  m_settings["auto_rudder_min_pct"]        = 8;
+  m_settings["auto_rudder_speed_low"]      = 5;
+  m_settings["auto_rudder_speed_high"]     = 18;
+  m_settings["auto_thrust_max_pct"]        = 50;
+  m_settings["auto_speed_i_authority_pct"] = 2;
+  m_string_settings["auto_speed_ff"]       = DEFAULT_AUTO_SPEED_FF;
+  m_string_settings["auto_speed_gains"]    = DEFAULT_AUTO_SPEED_GAINS;
 }
 
 double Profile::setting(const string& key) const
@@ -730,8 +754,8 @@ void Profile::validate()
     addError(0, "lost_link_thrust_pct is outside thrust_limit_pct");
   const char* nonneg[] = {"thrust_deadband_pct","shift_neutral_secs","shift_settle_secs",
                           "rudder_rate_pct_s","thrust_rate_pct_s","guard_secs",
-                          "rudder_alarm_pct","rudder_alarm_secs"};
-  for(int i=0; i<8; i++)
+                          "rudder_alarm_pct","rudder_alarm_secs","thrust_rate_up_pct_s"};
+  for(int i=0; i<9; i++)
     if(setting(nonneg[i]) < 0)
       addError(0, string(nonneg[i]) + " must not be negative");
 
@@ -783,6 +807,37 @@ void Profile::validate()
     for(size_t j=i+1; j<m_rx.size(); j++)
       if(m_rx[i].name == m_rx[j].name)
         addError(0, "rx_field name " + m_rx[i].name + " is used twice");
+
+  // Speed-dependent rudder limit
+  string err;
+  vector<SpeedPoint> rls;
+  if(!stringSetting("rudder_limit_speed").empty() &&
+     !AutoTuning::parseSpeedPct(stringSetting("rudder_limit_speed"), "rudder_limit_speed",
+                                rls, err))
+    addError(0, err);
+  if(setting("speed_stale_secs") <= 0)
+    addError(0, "speed_stale_secs must be more than 0");
+
+  // Autopilot tuning
+  vector<SpeedPoint> ff;
+  vector<GainStep> gains;
+  if(!AutoTuning::parseSpeedFF(stringSetting("auto_speed_ff"), ff, err))
+    addError(0, err);
+  if(!AutoTuning::parseGains(stringSetting("auto_speed_gains"), gains, err))
+    addError(0, err);
+  const char* auto_pct[] = {"auto_heading_limit_pct", "auto_rudder_max_pct",
+                            "auto_rudder_min_pct", "auto_thrust_max_pct",
+                            "auto_speed_i_authority_pct"};
+  for(int i=0; i<5; i++)
+    if(setting(auto_pct[i]) < 0 || setting(auto_pct[i]) > 100)
+      addError(0, string(auto_pct[i]) + " must be 0..100");
+  if(setting("auto_rudder_min_pct") > setting("auto_rudder_max_pct"))
+    addError(0, "auto_rudder_min_pct is above auto_rudder_max_pct");
+  if(setting("auto_rudder_speed_low") >= setting("auto_rudder_speed_high"))
+    addError(0, "auto_rudder_speed_low must be below auto_rudder_speed_high");
+  if(setting("auto_heading_kp") < 0 || setting("auto_heading_ki") < 0 ||
+     setting("auto_heading_kd") < 0)
+    addError(0, "auto_heading_kp/ki/kd must not be negative");
 
   string fb = stringSetting("rudder_feedback");
   if(!fb.empty()) {

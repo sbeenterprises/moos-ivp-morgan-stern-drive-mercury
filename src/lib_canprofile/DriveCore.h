@@ -8,6 +8,8 @@
 /*      - setpoints latch until the owner changes them      */
 /*      - lost link in manual -> lost_link_* values (0)     */
 /*      - rudder/thrust limits and optional rate limits     */
+/*      - throttle ramp-up (thrust_rate_up_pct_s): the sent */
+/*        throttle only rises gradually; cuts are immediate */
 /*      - shift interlock: neutral pause when reversing,    */
 /*        throttle held at 0 just after engaging a gear     */
 /*      - trim: each command is one short timed pulse       */
@@ -19,7 +21,9 @@
 #define DRIVE_CORE_HEADER
 
 #include <string>
+#include <vector>
 #include "CanProfile.h"
+#include "AutoTuning.h"
 
 namespace canprofile {
 
@@ -39,6 +43,13 @@ class DriveCore {
   Owner owner() const { return m_owner; }
 
   void setRudder(double pct)  { m_rudder_sp = pct; }
+
+  // Boat speed (NAV_SPEED) for the profile's rudder_limit_speed table.
+  // The rudder limit then shrinks with speed, in manual and autonomy.
+  void setSpeed(double speed, double now);
+  double rudderLimitNow() const { return m_rudder_limit_now; }
+  bool   speedLimitActive() const { return !m_rudder_speed.empty(); }
+  bool   speedStale() const { return m_speed_stale; }
   void setThrust(double pct)  { m_thrust_sp = pct; }
 
   // Manual gear selection. When enabled (setManualGearFromCommand) and the
@@ -103,10 +114,20 @@ class DriveCore {
   double m_settle_secs;
   double m_rudder_rate;
   double m_thrust_rate;
+  double m_thrust_rate_up;     // ramp-up limit on the throttle sent
+  double m_thrust_sent;        // |throttle| sent last tick
   double m_lost_rudder;
   double m_lost_thrust;
   double m_trim_up_secs;
   double m_trim_down_secs;
+
+  // speed-dependent rudder limit
+  std::vector<SpeedPoint> m_rudder_speed;
+  double m_speed_stale_secs;
+  double m_speed;
+  double m_speed_time;
+  bool   m_speed_stale;
+  double m_rudder_limit_now;
 
   Trim   m_trim;
   double m_trim_end;

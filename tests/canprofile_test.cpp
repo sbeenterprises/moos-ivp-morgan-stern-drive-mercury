@@ -9,12 +9,14 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <fstream>
 #include <iostream>
 #include <string>
 #include <vector>
 
 #include "CanProfile.h"
 #include "DriveCore.h"
+#include "AutoTuning.h"
 
 using namespace std;
 using namespace canprofile;
@@ -216,20 +218,33 @@ static void testUsv722Frames()
     CHECK(f.str() == want, "steer " << pct << "%: got " << f.str() << " want " << want);
   }
 
-  // "Throttle & Gear Lookup" sheet: throttle % -> byte 1
-  int thr_byte[21] = {0, 13, 25, 38, 50, 63, 75, 88, 100, 113, 125, 138, 150,
-                      163, 175, 188, 200, 213, 225, 238, 250};
-  for(int i=0; i<21; i++) {
-    int pct = 5 * i;
+  // Lever curve (16 Oct 2026 logs): lever % -> engine byte, same astern.
+  // lever 0/10/40/70/100 -> engine 0/30/40/45/50 % (byte = engine x 2.5)
+  int lever[5] = {0, 10, 40, 70, 100};
+  int ebyte[5] = {0x00, 0x4B, 0x64, 0x71, 0x7D};
+  for(int i=0; i<5; i++) {
     DriveCommand cmd;
-    cmd.thrust_pct = pct;
+    cmd.thrust_pct = lever[i];
     cmd.gear = GEAR_FWD;
     char want[64];
-    snprintf(want, sizeof(want), "0CF003D0#FF%02XFFFFFFFFFFFF", thr_byte[i]);
-    CHECK(p.encode(*thr, cmd).str() == want, "throttle " << pct << "% -> " << want);
-    cmd.thrust_pct = -pct;     // same lever value in reverse
+    snprintf(want, sizeof(want), "0CF003D0#FF%02XFFFFFFFFFFFF", ebyte[i]);
+    CHECK(p.encode(*thr, cmd).str() == want, "lever " << lever[i] << "% -> " << want
+          << " got " << p.encode(*thr, cmd).str());
+    cmd.thrust_pct = -lever[i];     // same lever value in reverse
     cmd.gear = GEAR_REV;
-    CHECK(p.encode(*thr, cmd).str() == want, "throttle -" << pct << "% -> " << want);
+    CHECK(p.encode(*thr, cmd).str() == want, "lever -" << lever[i] << "% -> " << want);
+  }
+  {
+    // Never above engine 50 % (byte 7D), even past 100 %
+    DriveCommand cmd;
+    cmd.gear = GEAR_FWD;
+    bool capped = true;
+    for(int v=0; v<=150; v++) {
+      cmd.thrust_pct = v;
+      string f = p.encode(*thr, cmd).str();
+      if(strtol(f.substr(11, 2).c_str(), 0, 16) > 0x7D) capped = false;
+    }
+    CHECK(capped, "722 throttle never above engine 50 %");
   }
 
   DriveCommand cmd;
@@ -368,10 +383,25 @@ static void testValidation()
 //------------------------------------------------------------------
 // DriveCore: latch, owner change, lost link, limits, shift interlock
 
+// The USV-722 profile without its rudder speed limit, rudder slew and
+// throttle ramp-up, for tests of the other DriveCore behaviour (those
+// have their own tests).
+static void loadUsv722NoRudderShaping(Profile& p)
+{
+  ifstream in((g_profile_dir + "/usv722_glendinning.prf").c_str());
+  string line, text;
+  while(getline(in, line))
+    if(line.find("rudder_limit_speed") != 0 && line.find("rudder_rate_pct_s") != 0 &&
+       line.find("thrust_rate_up_pct_s") != 0)
+      text += line + "\n";
+  p.loadFromString(text, g_profile_dir);
+}
+
 static void testDriveCore()
 {
   Profile p;
-  p.load(g_profile_dir + "/usv722_glendinning.prf");
+  loadUsv722NoRudderShaping(p);
+  CHECK(p.valid(), "usv722 profile (no rudder shaping) loads");
   DriveCore core;
   core.configure(p);   // shift_neutral_secs 1.0, settle 0.5
 
@@ -585,7 +615,7 @@ static void testTrim()
 static void testManualGear()
 {
   Profile u;
-  u.load(g_profile_dir + "/usv722_glendinning.prf");   // neutral 1.0 s, settle 0.5 s
+  loadUsv722NoRudderShaping(u);   // neutral 1.0 s, settle 0.5 s
   DriveCore core;
   core.configure(u);
   core.setManualGearFromCommand(true);
@@ -673,7 +703,7 @@ static void testManualGear()
 static void testManualOneLever()
 {
   Profile u;
-  u.load(g_profile_dir + "/usv722_glendinning.prf");   // neutral 1.0 s, settle 0.5 s
+  loadUsv722NoRudderShaping(u);   // neutral 1.0 s, settle 0.5 s
   DriveCore core;
   core.configure(u);
   core.setManualGearFromCommand(false);
@@ -722,6 +752,187 @@ static void testManualOneLever()
 }
 
 //------------------------------------------------------------------
+// AutoTuning: planchaPID settings from the boat profile
+
+static void testAutoTuning()
+{
+  // Built-in defaults = the values that used to be hardcoded in planchaPID
+  AutoTuning d;
+  CHECK(fabs(d.feedForward(5) - 14) < 1e-9, "default ff 5 -> 14 %");
+  CHECK(fabs(d.feedForward(9) - 31) < 1e-9, "default ff 9 -> 31 %");
+  CHECK(fabs(d.feedForward(50) - 44) < 1e-9, "default ff held flat above 20");
+  double kp, ki;
+  d.gains(1, kp, ki);   CHECK(kp == 0.35 && ki == 0.005, "default gains below 2");
+  d.gains(2, kp, ki);   CHECK(kp == 0.25 && ki == 0.004, "default gains at 2");
+  d.gains(7, kp, ki);   CHECK(kp == 0.16 && ki == 0.003, "default gains 6..12");
+  d.gains(30, kp, ki);  CHECK(kp == 0.10 && ki == 0.002, "default gains above 12");
+  CHECK(fabs(d.rudderLimit(10) - (20 + 5.0 / 13 * (8 - 20))) < 1e-9, "default rudder limit at 10");
+  CHECK(d.thrust_max == 50 && d.i_authority == 2, "default thrust max 50, I-term 2");
+
+  // The Mercury profile spells out the same values: no behaviour change
+  Profile m;
+  CHECK(m.load(g_profile_dir + "/mercury_sterndrive.prf"), "mercury loads with auto_* keys");
+  AutoTuning mt;
+  CHECK(mt.configure(m), "mercury tuning configures");
+  for(double v=0; v<=25; v+=0.5) {
+    double a, b, c, e;
+    d.gains(v, a, b);
+    mt.gains(v, c, e);
+    CHECK(fabs(mt.feedForward(v) - d.feedForward(v)) < 1e-9 && a == c && b == e &&
+          fabs(mt.rudderLimit(v) - d.rudderLimit(v)) < 1e-9, "mercury = old tuning at " << v);
+  }
+
+  // USV-722: measured curve, wider rudder limits
+  Profile u;
+  CHECK(u.load(g_profile_dir + "/usv722_glendinning.prf"), "usv722 loads with auto_* keys");
+  printErrors(u);
+  AutoTuning ut;
+  CHECK(ut.configure(u), "usv722 tuning configures");
+  CHECK(fabs(ut.feedForward(5) - 40) < 1e-9, "usv722 ff 5 kn -> lever 40 %");
+  CHECK(ut.rudderLimit(2) == 40 && ut.rudderLimit(20) == 10, "usv722 rudder 40 % slow, 10 % planing");
+  CHECK(ut.thrust_max == 100 && ut.i_authority == 10, "usv722 thrust max 100, I-term 10");
+
+  // Validation
+  CHECK(rejects("auto_speed_ff = 0:0|5:20|4:30\n", "speeds must increase"), "ff speeds must increase");
+  CHECK(rejects("auto_speed_ff = 0:0|5:120\n", "percent must be 0..100"), "ff thrust above 100");
+  CHECK(rejects("auto_speed_gains = 2:0.3\n", "up_to:kp:ki"), "gain step needs three values");
+  CHECK(rejects("auto_rudder_min_pct = 50\n", "above auto_rudder_max_pct"), "rudder min above max");
+  CHECK(rejects("auto_thrust_max_pct = 150\n", "must be 0..100"), "thrust max above 100");
+}
+
+//------------------------------------------------------------------
+// Speed-dependent rudder limit (rudder_limit_speed), manual and autonomy
+
+static void testRudderSpeedLimit()
+{
+  Profile p;
+  p.loadFromString(
+    "profile = t\ncan_interface = vcan0\ncapabilities = steer\n"
+    "tx_msg = name=steer, cap=steer, id=18FF11D0, dlc=8, period_ms=100\n"
+    "tx_field = msg=steer, src=rudder_pct, byte=0, bits=16, map=points, points=-100:0|0:511|100:1012\n"
+    "rudder_limit_speed = 0:100|5:100|10:40|18:12|27:8\n", g_profile_dir);
+  CHECK(p.valid(), "profile with rudder_limit_speed is valid");
+  printErrors(p);
+
+  DriveCore core;
+  core.configure(p);
+  CHECK(core.speedLimitActive(), "speed limit active");
+  core.setOwner(OWNER_MANUAL);
+  core.setRudder(100);
+
+  double t = 100;
+  core.setSpeed(2, t);
+  CHECK(core.update(t += 0.05).rudder_pct == 100, "2 kn: full rudder allowed");
+  core.setSpeed(10, t);
+  CHECK(core.update(t += 0.05).rudder_pct == 40, "10 kn: rudder 40 %");
+  core.setSpeed(14, t);
+  CHECK(fabs(core.update(t += 0.05).rudder_pct - 26) < 1e-9, "14 kn: rudder 26 % (interpolated)");
+  core.setSpeed(27, t);
+  CHECK(core.update(t += 0.05).rudder_pct == 8, "27 kn: rudder 8 %");
+  core.setRudder(-100);
+  CHECK(core.update(t += 0.05).rudder_pct == -8, "27 kn: -8 % to port as well");
+  core.setSpeed(40, t);
+  CHECK(core.update(t += 0.05).rudder_pct == -8, "above the table: last value");
+
+  // Stale speed: most cautious value, and recovers when NAV_SPEED returns
+  CHECK(core.update(t += 5).rudder_pct == -8 && core.speedStale(), "no NAV_SPEED for 5 s: 8 %");
+  core.setSpeed(2, t);
+  CHECK(core.update(t += 0.05).rudder_pct == -100 && !core.speedStale(), "NAV_SPEED back: full rudder");
+
+  // Autonomy goes through the same limit
+  core.setOwner(OWNER_AUTONOMY);
+  core.setRudder(60);
+  core.setSpeed(18, t);
+  CHECK(core.update(t += 0.05).rudder_pct == 12, "autonomy at 18 kn: 12 %");
+
+  // Without the key nothing changes
+  Profile m;
+  m.load(g_profile_dir + "/mercury_sterndrive.prf");
+  DriveCore mc;
+  mc.configure(m);
+  mc.setRudder(100);
+  CHECK(!mc.speedLimitActive() && mc.update(1.0).rudder_pct == 100, "no rudder_limit_speed: no speed limit");
+
+  // USV-722 profile has the table and a slew limit
+  Profile u;
+  CHECK(u.load(g_profile_dir + "/usv722_glendinning.prf"), "usv722 loads with rudder_limit_speed");
+  CHECK(u.setting("rudder_rate_pct_s") == 50, "usv722 rudder slew 50 %/s");
+
+  CHECK(rejects("rudder_limit_speed = 0:100|10:150\n", "percent must be 0..100"), "rudder limit above 100");
+  CHECK(rejects("rudder_limit_speed = 10:100|5:50\n", "speeds must increase"), "rudder limit speeds must increase");
+}
+
+//------------------------------------------------------------------
+// Throttle ramp-up (thrust_rate_up_pct_s): gradual increase, instant cut
+
+static void testThrottleRampUp()
+{
+  Profile p;
+  p.loadFromString(
+    "profile = t\ncan_interface = vcan0\ncapabilities = thrust\n"
+    "tx_msg = name=throttle, cap=thrust, id=0CF003D0, dlc=8, period_ms=100\n"
+    "tx_field = msg=throttle, src=thrust_abs_pct, byte=1, bits=8, map=linear, scale=2.5\n"
+    "thrust_rate_up_pct_s = 10\n", g_profile_dir);
+  CHECK(p.valid(), "profile with thrust_rate_up_pct_s is valid");
+  printErrors(p);
+
+  DriveCore core;
+  core.configure(p);
+  core.setOwner(OWNER_AUTONOMY);
+  double t = 0;
+  DriveCommand cmd = core.update(t);
+
+  // 0 -> 95 %: rises 10 %/s, never jumps
+  core.setThrust(95);
+  double prev = 0;
+  bool smooth = true;
+  for(int i=0; i<20; i++) {               // 1 s
+    cmd = core.update(t += 0.05);
+    if(cmd.thrust_pct - prev > 0.5 + 1e-9) smooth = false;
+    prev = cmd.thrust_pct;
+  }
+  CHECK(smooth, "throttle rises at most 0.5 % per 50 ms tick");
+  CHECK(fabs(cmd.thrust_pct - 10) < 1e-6, "after 1 s: 10 %, got " << cmd.thrust_pct);
+  for(int i=0; i<200; i++)
+    cmd = core.update(t += 0.05);
+  CHECK(cmd.thrust_pct == 95, "after 11 s: 95 %");
+
+  // A cut is immediate
+  core.setThrust(20);
+  cmd = core.update(t += 0.05);
+  CHECK(cmd.thrust_pct == 20, "95 -> 20 % at once");
+  core.setThrust(0);
+  cmd = core.update(t += 0.05);
+  CHECK(cmd.thrust_pct == 0 && cmd.gear == GEAR_NEUTRAL, "stop: 0 and neutral at once");
+
+  // Reverse ramps from 0 as well
+  core.setThrust(-50);
+  cmd = core.update(t += 0.05);
+  CHECK(cmd.gear == GEAR_REV && cmd.thrust_pct > -1, "reverse starts from 0, got " << cmd.thrust_pct);
+  for(int i=0; i<20; i++)
+    cmd = core.update(t += 0.05);
+  CHECK(fabs(cmd.thrust_pct + 10.5) < 1e-6, "reverse after ~1 s: -10.5 %, got " << cmd.thrust_pct);
+
+  // Lost link in manual: 0 at once
+  core.setOwner(OWNER_MANUAL);
+  core.setThrust(60);
+  for(int i=0; i<200; i++)
+    cmd = core.update(t += 0.05);
+  CHECK(cmd.thrust_pct == 60, "manual ramps up to 60 %");
+  core.setLinkOk(false);
+  cmd = core.update(t += 0.05);
+  CHECK(cmd.thrust_pct == 0, "lost link: 0 at once");
+
+  // Both boat profiles ramp up
+  Profile u, m;
+  u.load(g_profile_dir + "/usv722_glendinning.prf");
+  m.load(g_profile_dir + "/mercury_sterndrive.prf");
+  CHECK(u.setting("thrust_rate_up_pct_s") > 0 && m.setting("thrust_rate_up_pct_s") > 0,
+        "both boats have a throttle ramp-up");
+  CHECK(rejects("thrust_rate_up_pct_s = -1\n", "must not be negative"), "negative ramp-up rejected");
+}
+
+//------------------------------------------------------------------
 
 int main(int argc, char* argv[])
 {
@@ -737,6 +948,9 @@ int main(int argc, char* argv[])
   testTrim();
   testManualGear();
   testManualOneLever();
+  testAutoTuning();
+  testRudderSpeedLimit();
+  testThrottleRampUp();
 
   cout << g_checks << " checks, " << g_failures << " failed" << endl;
   return g_failures ? 1 : 0;

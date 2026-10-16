@@ -13,6 +13,7 @@ SET(SRC
 ADD_EXECUTABLE(planchaPID ${SRC})
 
 TARGET_LINK_LIBRARIES(planchaPID
+   canprofile
    ${MOOS_LIBRARIES}
    apputil
    mbutil

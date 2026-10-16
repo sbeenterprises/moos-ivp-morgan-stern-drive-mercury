@@ -77,6 +77,10 @@ bool CAN::OnNewMail(MOOSMSG_LIST &NewMail)
 
     if(key == "DESIRED_RUDDER")
       handleDemand(msg, true);
+    else if(key == "NAV_SPEED") {      // for the profile's rudder_limit_speed
+      if(msg.IsDouble())
+        m_core.setSpeed(msg.GetDouble(), MOOSTime());
+    }
     else if(key == "DESIRED_THRUST")
       handleDemand(msg, false);
     else if(key == "TRIM")
@@ -358,6 +362,7 @@ void CAN::registerVariables()
   Register("CAN_SEND", 0);
   Register("TRIM", 0);
   Register("DESIRED_GEAR", 0);
+  Register("NAV_SPEED", 0);
 }
 
 //---------------------------------------------------------
@@ -662,6 +667,8 @@ void CAN::postStatus(const DriveCommand& cmd, double now)
   Notify("CAN_LOST_LINK", m_core.lostLink() ? "true" : "false");
   Notify("CAN_CONFLICT", conflict == "" ? "none" : conflict);
   Notify("CAN_TX_RUDDER_PCT", cmd.rudder_pct);
+  if(m_core.speedLimitActive())
+    Notify("CAN_RUDDER_LIMIT_PCT", m_core.rudderLimitNow());
   Notify("CAN_TX_THRUST_PCT", cmd.thrust_pct);
   Notify("CAN_TX_GEAR", gearName(cmd.gear));
   Notify("CAN_TRIM_STATE", trimName(cmd.trim));
@@ -713,6 +720,10 @@ bool CAN::buildReport()
   else
     m_msgs << "  gear from thrust sign";
   m_msgs << endl;
+  if(m_core.speedLimitActive())
+    m_msgs << "Rudder limit: " << doubleToString(m_core.rudderLimitNow(), 1) << "%"
+           << (m_core.speedStale() ? "  (NAV_SPEED stale: most cautious limit)"
+                                   : "  (from rudder_limit_speed)") << endl;
   m_msgs << "Sending:      rudder " << doubleToString(m_last_cmd.rudder_pct, 1)
          << "%  thrust " << doubleToString(m_last_cmd.thrust_pct, 1)
          << "%  gear " << gearName(m_last_cmd.gear)
