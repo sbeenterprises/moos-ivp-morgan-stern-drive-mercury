@@ -72,7 +72,8 @@ throttle `tx_field` map.
 | `auto_speed_gains` | `2:0.35:0.005\|6:0.25:0.004\|12:0.16:0.003\|1000:0.10:0.002` | up_to:kp:ki steps by desired speed |
 | `auto_speed_i_authority_pct` | 2 | Most thrust the speed I-term may add, % |
 | `auto_thrust_max_pct` | 50 | Highest `DESIRED_THRUST` the autopilot sends |
-| `auto_heading_kp`, `_ki`, `_kd` | 0.15, 0, 0.26 | Heading PID |
+| `auto_heading_gains` | `5:0.28:0:0.07\|10:0.22:0:0.06\|...\|1000:0.05:0:0.025` | up_to:kp:ki:kd steps by `NAV_SPEED`; kp in rudder % per degree of heading error |
+| `auto_heading_i_authority_pct` | 0 | Most rudder the heading I-term may add, %; trims out a steady pull or current |
 | `auto_heading_limit_pct` | 20 | Heading PID output clamp, ± rudder % |
 | `auto_rudder_max_pct`, `auto_rudder_min_pct` | 20, 8 | Rudder limit at low / high speed |
 | `auto_rudder_speed_low`, `auto_rudder_speed_high` | 5, 18 | Speeds where the rudder limit starts / stops shrinking |

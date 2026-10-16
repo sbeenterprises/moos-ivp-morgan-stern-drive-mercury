@@ -314,10 +314,9 @@ Profile::Profile() : m_loaded(false)
 
   // Autopilot (planchaPID) tuning, see AutoTuning.h. The defaults are the
   // values that used to be hardcoded in planchaPID / set in real.moos.
-  m_settings["auto_heading_kp"]            = 0.15;
-  m_settings["auto_heading_ki"]            = 0.0;
-  m_settings["auto_heading_kd"]            = 0.26;
   m_settings["auto_heading_limit_pct"]     = 20;
+  m_settings["auto_heading_i_authority_pct"] = 0;
+  m_string_settings["auto_heading_gains"]  = DEFAULT_AUTO_HEADING_GAINS;
   m_settings["auto_rudder_max_pct"]        = 20;
   m_settings["auto_rudder_min_pct"]        = 8;
   m_settings["auto_rudder_speed_low"]      = 5;
@@ -825,19 +824,18 @@ void Profile::validate()
     addError(0, err);
   if(!AutoTuning::parseGains(stringSetting("auto_speed_gains"), gains, err))
     addError(0, err);
+  if(!AutoTuning::parseHeadingGains(stringSetting("auto_heading_gains"), gains, err))
+    addError(0, err);
   const char* auto_pct[] = {"auto_heading_limit_pct", "auto_rudder_max_pct",
                             "auto_rudder_min_pct", "auto_thrust_max_pct",
-                            "auto_speed_i_authority_pct"};
-  for(int i=0; i<5; i++)
+                            "auto_speed_i_authority_pct", "auto_heading_i_authority_pct"};
+  for(int i=0; i<6; i++)
     if(setting(auto_pct[i]) < 0 || setting(auto_pct[i]) > 100)
       addError(0, string(auto_pct[i]) + " must be 0..100");
   if(setting("auto_rudder_min_pct") > setting("auto_rudder_max_pct"))
     addError(0, "auto_rudder_min_pct is above auto_rudder_max_pct");
   if(setting("auto_rudder_speed_low") >= setting("auto_rudder_speed_high"))
     addError(0, "auto_rudder_speed_low must be below auto_rudder_speed_high");
-  if(setting("auto_heading_kp") < 0 || setting("auto_heading_ki") < 0 ||
-     setting("auto_heading_kd") < 0)
-    addError(0, "auto_heading_kp/ki/kd must not be negative");
 
   string fb = stringSetting("rudder_feedback");
   if(!fb.empty()) {

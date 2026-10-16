@@ -119,13 +119,16 @@ auto_speed_gains           = 2:0.35:0.005|6:0.25:0.004|12:0.16:0.003|1000:0.10:0
 auto_speed_i_authority_pct = 10                // [P] was 2: could not leave the dead zone
 auto_thrust_max_pct        = 100               // lever 100 % = engine 50 %
 //
-// Steering, from the same logs: + rudder turns to starboard, almost no
-// pull at 0 (-0.05 deg/s at 1.6 kn, -0.5 at 4.6 kn). Turn rate at
-// 20 % rudder: 1.5 deg/s at 1.6 kn, 3.8 deg/s at 6.7 kn. The old 20 %
-// limit was too little at low speed.                               [P]
-auto_heading_kp            = 0.15
-auto_heading_ki            = 0.0
-auto_heading_kd            = 0.26
+// Steering, from the same logs: + rudder turns to starboard. Turn rate
+// at 20 % rudder: 1.5 deg/s at 1.6 kn, 3.8 deg/s at 6.7 kn.
+// 16 Oct 11:27 autonomous run: with the old hardcoded gains (kp 0.22 at
+// 6 kn, no I-term) a 20 deg error gave only 4.5 % rudder, about what
+// the boat needs to cancel its slight port pull at that speed, so it
+// held 20 deg to port of the course for 100+ s. Higher kp, plus an
+// I-term (up to 10 % rudder) to trim out the pull.                 [P]
+// Gains by NAV_SPEED (kn), up_to:kp:ki:kd; rudder % per deg error.
+auto_heading_gains         = 5:0.6:0.03:0.10|10:0.5:0.03:0.10|15:0.35:0.02:0.08|20:0.25:0.015:0.06|1000:0.15:0.01:0.04
+auto_heading_i_authority_pct = 10
 auto_heading_limit_pct     = 40
 auto_rudder_max_pct        = 40                // at or below 5 kn
 auto_rudder_min_pct        = 10                // at or above 18 kn (planing)

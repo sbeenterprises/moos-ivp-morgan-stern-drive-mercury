@@ -768,6 +768,11 @@ static void testAutoTuning()
   d.gains(30, kp, ki);  CHECK(kp == 0.10 && ki == 0.002, "default gains above 12");
   CHECK(fabs(d.rudderLimit(10) - (20 + 5.0 / 13 * (8 - 20))) < 1e-9, "default rudder limit at 10");
   CHECK(d.thrust_max == 50 && d.i_authority == 2, "default thrust max 50, I-term 2");
+  double hp, hi, hd;
+  d.headingGains(3, hp, hi, hd);   CHECK(hp == 0.28 && hi == 0 && hd == 0.07, "default heading gains below 5 kn");
+  d.headingGains(7, hp, hi, hd);   CHECK(hp == 0.22 && hd == 0.06, "default heading gains 5..10 kn");
+  d.headingGains(27, hp, hi, hd);  CHECK(hp == 0.07 && hd == 0.03, "default heading gains 25..30 kn");
+  d.headingGains(40, hp, hi, hd);  CHECK(hp == 0.05 && hd == 0.025, "default heading gains above 30 kn");
 
   // The Mercury profile spells out the same values: no behaviour change
   Profile m;
@@ -778,8 +783,12 @@ static void testAutoTuning()
     double a, b, c, e;
     d.gains(v, a, b);
     mt.gains(v, c, e);
+    double p1, i1, d1, p2, i2, d2;
+    d.headingGains(v, p1, i1, d1);
+    mt.headingGains(v, p2, i2, d2);
     CHECK(fabs(mt.feedForward(v) - d.feedForward(v)) < 1e-9 && a == c && b == e &&
-          fabs(mt.rudderLimit(v) - d.rudderLimit(v)) < 1e-9, "mercury = old tuning at " << v);
+          fabs(mt.rudderLimit(v) - d.rudderLimit(v)) < 1e-9 &&
+          p1 == p2 && i1 == i2 && d1 == d2, "mercury = old tuning at " << v);
   }
 
   // USV-722: measured curve, wider rudder limits
@@ -791,6 +800,10 @@ static void testAutoTuning()
   CHECK(fabs(ut.feedForward(5) - 40) < 1e-9, "usv722 ff 5 kn -> lever 40 %");
   CHECK(ut.rudderLimit(2) == 40 && ut.rudderLimit(20) == 10, "usv722 rudder 40 % slow, 10 % planing");
   CHECK(ut.thrust_max == 100 && ut.i_authority == 10, "usv722 thrust max 100, I-term 10");
+  ut.headingGains(6, hp, hi, hd);
+  CHECK(hp == 0.5 && hi == 0.03 && ut.heading_i_authority == 10,
+        "usv722 heading at 6 kn: kp 0.5, ki 0.03, I-term up to 10 %");
+  CHECK(20 * hp >= 10, "usv722: 20 deg error gives at least 10 % rudder at 6 kn");
 
   // Validation
   CHECK(rejects("auto_speed_ff = 0:0|5:20|4:30\n", "speeds must increase"), "ff speeds must increase");
@@ -798,6 +811,9 @@ static void testAutoTuning()
   CHECK(rejects("auto_speed_gains = 2:0.3\n", "up_to:kp:ki"), "gain step needs three values");
   CHECK(rejects("auto_rudder_min_pct = 50\n", "above auto_rudder_max_pct"), "rudder min above max");
   CHECK(rejects("auto_thrust_max_pct = 150\n", "must be 0..100"), "thrust max above 100");
+  CHECK(rejects("auto_heading_gains = 5:0.6:0.03\n", "up_to:kp:ki:kd"), "heading step needs four values");
+  CHECK(rejects("auto_heading_gains = 10:0.5:0:0.1|5:0.6:0:0.1\n", "speeds must increase"), "heading speeds must increase");
+  CHECK(rejects("auto_heading_kp = 0.3\n", "unknown setting"), "old auto_heading_kp key is gone");
 }
 
 //------------------------------------------------------------------

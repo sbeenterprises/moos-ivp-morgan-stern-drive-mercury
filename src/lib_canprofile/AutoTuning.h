@@ -5,7 +5,8 @@
 // Profile keys (all optional; the defaults are the values planchaPID
 // had in code / real.moos before October 2026):
 //
-//   auto_heading_kp, auto_heading_ki, auto_heading_kd   heading PID
+//   auto_heading_gains  upto:kp:ki:kd steps, heading PID gains by NAV_SPEED
+//   auto_heading_i_authority_pct  most rudder the heading I-term may add
 //   auto_heading_limit_pct      clamp of the heading PID output (+/-)
 //   auto_rudder_max_pct         rudder limit at or below auto_rudder_speed_low
 //   auto_rudder_min_pct         rudder limit at or above auto_rudder_speed_high
@@ -30,7 +31,7 @@ namespace canprofile {
 class Profile;
 
 struct SpeedPoint { double speed; double thrust; };
-struct GainStep   { double up_to; double kp; double ki; };
+struct GainStep   { double up_to; double kp; double ki; double kd; };
 
 class AutoTuning {
  public:
@@ -50,21 +51,26 @@ class AutoTuning {
   static double interpSpeed(const std::vector<SpeedPoint>& pts, double speed);
   static bool parseGains(const std::string& s, std::vector<GainStep>& out,
                          std::string& err);
+  static bool parseHeadingGains(const std::string& s, std::vector<GainStep>& out,
+                                std::string& err);
 
   double feedForward(double desired_speed) const;               // thrust %
   void   gains(double desired_speed, double& kp, double& ki) const;
+  void   headingGains(double speed, double& kp, double& ki, double& kd) const;
   double rudderLimit(double speed) const;                       // +/- rudder %
 
-  double heading_kp, heading_ki, heading_kd, heading_limit;
+  double heading_limit, heading_i_authority;
   double rudder_max, rudder_min, rudder_speed_low, rudder_speed_high;
   double thrust_max, i_authority;
   std::vector<SpeedPoint> speed_ff;
   std::vector<GainStep>   speed_gains;
+  std::vector<GainStep>   heading_gains;
 };
 
 // Default map strings, shared with the Profile defaults
 extern const char* const DEFAULT_AUTO_SPEED_FF;
 extern const char* const DEFAULT_AUTO_SPEED_GAINS;
+extern const char* const DEFAULT_AUTO_HEADING_GAINS;
 
 }  // namespace canprofile
 

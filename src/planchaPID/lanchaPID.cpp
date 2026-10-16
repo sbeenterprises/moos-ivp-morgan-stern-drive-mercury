@@ -190,18 +190,6 @@ double PIDController::Calculate(double desired, double current, double dt) {
 
     integral += error*dt; //Multiplico pelo período dt de tempo
 
-    // 25-set-2023: add Anti-WindUp
-    // Limits integral to maximum and minimum output values
-    if (integral > upper_bound) {
-      integral = upper_bound;
-    }
-    else if (integral < lower_bound) {
-      integral = lower_bound;
-    }
-
-    // Derivative on *measurement* (yaw rate), not on the error: avoids the
-    // derivative "kick" when DESIRED_HEADING steps between waypoints and
-    // provides true rate damping against the heading overshoot.
     double dmeas = current - prevMeas;
     if (dmeas >  180) dmeas -= 360;
     else if (dmeas < -180) dmeas += 360;
@@ -217,41 +205,23 @@ double PIDController::Calculate(double desired, double current, double dt) {
       eff_kd = kd;
     }
     else {
-    //Gain Scheduling
-    eff_ki      = 0;
-    eff_kd      = 0.2;
-    // Rudder bounds now come from the .moos config (HEADING_UPPER/LOWER_BOUND
-    // via setUpper/setLower, e.g. +/-20). They are no longer overwritten here,
-    // so the rudder no longer slams to +/-60/100 and over-builds yaw rate.
+      // profile auto_heading_gains: kp/ki/kd by boat speed (NAV_SPEED)
+      g_tuning.headingGains(nav_speed, eff_kp, eff_ki, eff_kd);
+    }
 
-    if (nav_speed < 5) {
-      eff_kp = 0.28;
-      eff_kd = 0.07;
+    // Anti-wind-up. With an I-term from the profile, cap its contribution
+    // at auto_heading_i_authority_pct of rudder; it trims out a steady
+    // pull or current. Otherwise keep the old clamp to the output bounds.
+    if (!service_mode && eff_ki > 1e-6 && g_tuning.heading_i_authority > 0) {
+      double i_max = g_tuning.heading_i_authority / eff_ki;
+      if (integral >  i_max) integral =  i_max;
+      if (integral < -i_max) integral = -i_max;
     }
-    else if (nav_speed < 10) {
-        eff_kp = 0.22;
-        eff_kd = 0.06;
+    else if (integral > upper_bound) {
+      integral = upper_bound;
     }
-    else if (nav_speed < 15) {
-        eff_kp = 0.16;
-        eff_kd = 0.055;
-    }
-    else if (nav_speed < 20) {
-        eff_kp = 0.12;
-        eff_kd = 0.045;
-    }
-    else if (nav_speed < 25) {
-        eff_kp = 0.09;
-        eff_kd = 0.035;
-    }
-    else if (nav_speed < 30) {
-        eff_kp = 0.07;
-        eff_kd = 0.030;
-    }
-    else {
-        eff_kp = 0.05;
-        eff_kd = 0.025;
-    }
+    else if (integral < lower_bound) {
+      integral = lower_bound;
     }
 
     output = eff_kp * error + eff_ki * integral + eff_kd * derivative;
@@ -522,7 +492,9 @@ bool lanchaPID::Iterate()
 
   // Loop de controle
 
-  desired_thrust = speedController.Calculate(desired_speed, nav_speed,dt);
+  // (The speed loop is CalculateSpeed() below. A leftover call here ran the
+  // heading algorithm on the speed controller, clamping its integral to
+  // +/-20 every tick, so the speed I-term could add only ~0.1 % thrust.)
 
   // Calcule o controle de rumo
   //Caso o rumo constante esteja ativado o setpoint vai ser esse rumo
@@ -562,6 +534,12 @@ bool lanchaPID::Iterate()
        stationing == "true" || region == "true")) {
     Notify("DESIRED_THRUST", desired_thrust);
     Notify("DESIRED_RUDDER", desired_rudder);
+  }
+  else {
+    // Not driving the boat: do not let the I-terms build up on errors
+    // the autopilot is not acting on (manual control, no active mode).
+    headingController.resetIntegral();
+    speedController.resetIntegral();
   }
 
   // Report the gains actually being applied this cycle so the UI can show the
@@ -718,9 +696,6 @@ bool lanchaPID::OnStartUp()
   // With a profile, its heading gains and rudder limits replace the .moos
   // values. Without one, the .moos values (or the built-in ones) stay.
   if(g_tuning_source != "built-in defaults") {
-    headingController.setKP(g_tuning.heading_kp);
-    headingController.setKI(g_tuning.heading_ki);
-    headingController.setKD(g_tuning.heading_kd);
     headingController.setUpper(g_tuning.heading_limit);
     headingController.setLower(-g_tuning.heading_limit);
     rudder_limit_max        = g_tuning.rudder_max;

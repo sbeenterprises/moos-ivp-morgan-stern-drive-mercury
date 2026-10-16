@@ -53,7 +53,8 @@ Positional parse (expects token 2 = `X=`, 3 = `Y=`).
 ## planchaPID
 `src/planchaPID/` (class `lanchaPID`) — low-level autopilot replacing pMarinePID.
 - **Per-boat tuning comes from the boat profile** (`auto_*` keys, see
-  [profiles/README.md](../profiles/README.md)): heading gains and output limit,
+  [profiles/README.md](../profiles/README.md)): heading gains by speed (with an
+  optional bounded I-term) and output limit,
   speed-dependent rudder limit, speed -> thrust feed-forward map, speed gain
   steps, speed I-term authority and the thrust cap. planchaPID loads its own
   `profile_file` line, or else the `profile_file` of the iCAN block. With a
@@ -61,8 +62,10 @@ Positional parse (expects token 2 = `X=`, 3 = `Y=`).
   (warned); without one the .moos values and the built-in defaults (the old
   hardcoded values) apply.
 - **Config**: `AppTick` (sets dt), `profile_file`, `SPEED_KP/KI/KD` (service mode only),
-  `SERVICE_MODE` (false); `HEADING_KP/KI/KD`, `HEADING_UPPER/LOWER_BOUND`,
-  `RUDDER_LIMIT_MAX/MIN/SPEED_LOW/SPEED_HIGH` only when there is no profile.
+  `SERVICE_MODE` (false); `HEADING_KP/KI/KD` (service mode only, as for speed);
+  `HEADING_UPPER/LOWER_BOUND`, `RUDDER_LIMIT_MAX/MIN/SPEED_LOW/SPEED_HIGH` only
+  when there is no profile. Integrals reset whenever planchaPID is not driving
+  (manual control, no active mode).
   All other numeric params go through `std::stod` — a non-numeric line crashes startup.
 - **Subs**: `NAV_HEADING`, `NAV_SPEED`, `DESIRED_HEADING`, `DESIRED_SPEED`, gains,
   `SERVICE_MODE`, `DEPLOY` (resets integrals), `MOOS_MANUAL_OVERRIDE`,

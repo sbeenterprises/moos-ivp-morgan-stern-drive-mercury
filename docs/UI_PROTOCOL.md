@@ -38,6 +38,7 @@ Notes:
 
 ### Heartbeat
 Plain text (not JSON) `HEARTBEAT=<MOOSTime>` every 30 s — clients must tolerate it.
+The server also sends a WebSocket ping every second; browsers answer it automatically, and each pong keeps `UI_LINK_OK` true even while the UI is idle or in the background.
 
 The server sends a WebSocket ping every second; browsers answer it automatically and that keeps `UI_LINK_OK=true`. If nothing is heard from any client for `link_timeout` (3 s), the link is lost and, in manual control, iCAN sets rudder and throttle to 0.
 

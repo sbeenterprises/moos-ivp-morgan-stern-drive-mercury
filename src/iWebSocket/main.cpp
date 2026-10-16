@@ -22,12 +22,23 @@ using namespace std;
 
 int port = 8000;
 std::string host("0.0.0.0"); // If you need this server to be accessible on a different machine, use "0.0.0.0"
-ix::WebSocketServer server(port, host);
 
-// Configure server heartbeat (ping interval in seconds). Browsers answer
-// pings automatically; each pong refreshes the SS UI link time used by the
-// lost-link failsafe (UI_LINK_OK), so keep this well below link_timeout.
+// Server ping interval (seconds). Browsers answer pings automatically, even
+// with the UI tab idle or in the background; each pong refreshes the SS UI
+// link time used by the lost-link failsafe (UI_LINK_OK), so keep this well
+// below link_timeout. It must be given to the server constructor: IXWebSocket
+// (11.4.x) applies it when it sets up each connection, so calling
+// setPingInterval() in the Open callback had no effect and the server never
+// pinged. The link then only stayed up while the UI itself sent something,
+// and with the UI idle it was up 3 s out of every 30 s (its keep-alive).
 const int PING_INTERVAL_SECONDS = 1;
+
+ix::WebSocketServer server(port, host,
+                           ix::SocketServer::kDefaultTcpBacklog,
+                           ix::SocketServer::kDefaultMaxConnections,
+                           ix::WebSocketServer::kDefaultHandShakeTimeoutSecs,
+                           ix::SocketServer::kDefaultAddressFamily,
+                           PING_INTERVAL_SECONDS);
 
 
 int main(int argc, char *argv[])
@@ -67,8 +78,7 @@ int main(int argc, char *argv[])
           WebSocket.AddWebSocket(&webSocket);
           std::cout << "Total connected clients: " << WebSocket.GetConnectedClientCount() << std::endl;
           
-          // Enable heartbeat for this connection
-          webSocket.setPingInterval(PING_INTERVAL_SECONDS);
+          // Pings are set on the server (PING_INTERVAL_SECONDS above)
 
       } 
       else if (msg->type == ix::WebSocketMessageType::Message)
@@ -128,7 +138,7 @@ int main(int argc, char *argv[])
       }
       else if (msg->type == ix::WebSocketMessageType::Pong)
       {
-          std::cout << "Received pong from client" << std::endl;
+          // (every second per client: no console print)
           WebSocket.UpdateConnectionTime(&webSocket);
       }
   });

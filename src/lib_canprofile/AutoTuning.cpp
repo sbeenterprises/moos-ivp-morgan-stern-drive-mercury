@@ -19,6 +19,11 @@ const char* const DEFAULT_AUTO_SPEED_FF =
   "0:0|3:8|5:14|7:22|8:27|10:35|12:36|15:37|18:41|20:44";
 const char* const DEFAULT_AUTO_SPEED_GAINS =
   "2:0.35:0.005|6:0.25:0.004|12:0.16:0.003|1000:0.10:0.002";
+// The heading gain schedule that used to be hardcoded in planchaPID's
+// Calculate(): by NAV_SPEED, no integral term.
+const char* const DEFAULT_AUTO_HEADING_GAINS =
+  "5:0.28:0:0.07|10:0.22:0:0.06|15:0.16:0:0.055|20:0.12:0:0.045|"
+  "25:0.09:0:0.035|30:0.07:0:0.03|1000:0.05:0:0.025";
 
 static vector<string> splitOn(const string& s, char c)
 {
@@ -44,10 +49,8 @@ static bool toDouble(const string& s, double& v)
 
 AutoTuning::AutoTuning()
 {
-  heading_kp        = 0.15;
-  heading_ki        = 0.0;
-  heading_kd        = 0.26;
   heading_limit     = 20;
+  heading_i_authority = 0;
   rudder_max        = 20;
   rudder_min        = 8;
   rudder_speed_low  = 5;
@@ -57,6 +60,7 @@ AutoTuning::AutoTuning()
   string err;
   parseSpeedFF(DEFAULT_AUTO_SPEED_FF, speed_ff, err);
   parseGains(DEFAULT_AUTO_SPEED_GAINS, speed_gains, err);
+  parseHeadingGains(DEFAULT_AUTO_HEADING_GAINS, heading_gains, err);
 }
 
 bool AutoTuning::parseSpeedFF(const string& s, vector<SpeedPoint>& out, string& err)
@@ -101,6 +105,7 @@ bool AutoTuning::parseGains(const string& s, vector<GainStep>& out, string& err)
   for(size_t i=0; i<items.size(); i++) {
     vector<string> f = splitOn(items[i], ':');
     GainStep g;
+    g.kd = 0;
     if(f.size() != 3 || !toDouble(f[0], g.up_to) || !toDouble(f[1], g.kp) ||
        !toDouble(f[2], g.ki)) {
       err = "auto_speed_gains must look like 2:0.35:0.005|6:0.25:0.004 (up_to:kp:ki)";
@@ -124,22 +129,52 @@ bool AutoTuning::parseGains(const string& s, vector<GainStep>& out, string& err)
   return true;
 }
 
+bool AutoTuning::parseHeadingGains(const string& s, vector<GainStep>& out, string& err)
+{
+  vector<GainStep> steps;
+  vector<string> items = splitOn(s, '|');
+  for(size_t i=0; i<items.size(); i++) {
+    vector<string> f = splitOn(items[i], ':');
+    GainStep g;
+    if(f.size() != 4 || !toDouble(f[0], g.up_to) || !toDouble(f[1], g.kp) ||
+       !toDouble(f[2], g.ki) || !toDouble(f[3], g.kd)) {
+      err = "auto_heading_gains must look like 5:0.6:0.03:0.15|10:0.5:0.03:0.12 (up_to:kp:ki:kd)";
+      return false;
+    }
+    if(g.kp < 0 || g.ki < 0 || g.kd < 0) {
+      err = "auto_heading_gains: kp, ki and kd must not be negative";
+      return false;
+    }
+    if(!steps.empty() && g.up_to <= steps.back().up_to) {
+      err = "auto_heading_gains: speeds must increase";
+      return false;
+    }
+    steps.push_back(g);
+  }
+  if(steps.empty()) {
+    err = "auto_heading_gains needs at least one step";
+    return false;
+  }
+  out = steps;
+  return true;
+}
+
 bool AutoTuning::configure(const Profile& p, string* err)
 {
   string e;
   vector<SpeedPoint> ff;
-  vector<GainStep> g;
+  vector<GainStep> g, hg;
   if(!parseSpeedFF(p.stringSetting("auto_speed_ff"), ff, e) ||
-     !parseGains(p.stringSetting("auto_speed_gains"), g, e)) {
+     !parseGains(p.stringSetting("auto_speed_gains"), g, e) ||
+     !parseHeadingGains(p.stringSetting("auto_heading_gains"), hg, e)) {
     if(err) *err = e;
     return false;
   }
   speed_ff          = ff;
   speed_gains       = g;
-  heading_kp        = p.setting("auto_heading_kp");
-  heading_ki        = p.setting("auto_heading_ki");
-  heading_kd        = p.setting("auto_heading_kd");
+  heading_gains     = hg;
   heading_limit     = p.setting("auto_heading_limit_pct");
+  heading_i_authority = p.setting("auto_heading_i_authority_pct");
   rudder_max        = p.setting("auto_rudder_max_pct");
   rudder_min        = p.setting("auto_rudder_min_pct");
   rudder_speed_low  = p.setting("auto_rudder_speed_low");
@@ -181,6 +216,18 @@ void AutoTuning::gains(double v, double& kp, double& ki) const
     kp = speed_gains[i].kp;
     ki = speed_gains[i].ki;
     if(v < speed_gains[i].up_to)
+      return;
+  }
+}
+
+void AutoTuning::headingGains(double v, double& kp, double& ki, double& kd) const
+{
+  kp = ki = kd = 0;
+  for(size_t i=0; i<heading_gains.size(); i++) {
+    kp = heading_gains[i].kp;
+    ki = heading_gains[i].ki;
+    kd = heading_gains[i].kd;
+    if(v < heading_gains[i].up_to)
       return;
   }
 }
