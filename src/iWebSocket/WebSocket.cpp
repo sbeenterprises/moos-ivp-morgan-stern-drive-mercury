@@ -126,6 +126,21 @@ WebSocket::WebSocket()
   for (size_t i = 0; i < sizeof(can_vars) / sizeof(can_vars[0]); i++)
     m_can_vars.insert(can_vars[i]);
 
+  // Same pass-through for route-tracking calibration (pRouteTuner, CAL_*)
+  // and GNSS quality (iDivisorNMEA, GPS_*): registered, kept with their type,
+  // and sent in the telemetry JSON once first posted.
+  const char* cal_vars[] = {"CAL_STATE", "CAL_SUBSTATE", "CAL_AUTH", "CAL_AUTH_BY",
+                            "CAL_LAP_ID", "CAL_SPEED_BAND", "CAL_XTE", "CAL_HDG_ERR",
+                            "CAL_RUDDER_TRIM", "CAL_SCORE_BASELINE", "CAL_SCORE_CANDIDATE",
+                            "CAL_GAINS_ACTIVE", "CAL_GAINS_CANDIDATE", "CAL_ABORT_REASON",
+                            "CAL_EVENT", "CAL_VERDICT",
+                            "GPS_AGE", "GPS_HAVE_FIX", "GPS_FIX", "GPS_FIX_LABEL",
+                            "GPS_SATS", "GPS_HDOP", "GPS_GGA_AGE"};
+  for (size_t i = 0; i < sizeof(cal_vars) / sizeof(cal_vars[0]); i++)
+    m_can_vars.insert(cal_vars[i]);
+
+  m_cal_abort_action = "none";
+
   initializeMessageHandlers();
 }
 
@@ -630,6 +645,13 @@ bool WebSocket::OnStartUp()
       m_link_timeout = atof(value.c_str());
       handled = true;
     }
+    else if(param == "cal_abort_action") {
+      string v = tolower(value);
+      if(v == "none" || v == "stop" || v == "manual") {
+        m_cal_abort_action = v;
+        handled = true;
+      }
+    }
     else if(param == "foo") {
       handled = true;
     }
@@ -796,6 +818,8 @@ void WebSocket::initializeMessageHandlers()
   m_messageHandlers["PUT_TARGET"] = &WebSocket::handlePutTarget;
   m_messageHandlers["CLEAR_TARGETS"] = &WebSocket::handleClearTargets;
   m_messageHandlers["COLAV_DIST"] = &WebSocket::handleColavDist;
+  m_messageHandlers["CAL_AUTH"] = &WebSocket::handleCalAuth;
+  m_messageHandlers["CAL_ABORT"] = &WebSocket::handleCalAbort;
 }
 
 //---------------------------------------------------------
@@ -1521,6 +1545,101 @@ void WebSocket::handleServiceMode(const std::string& value)
   } else if (value == "false") {
     Notify("SERVICE_MODE", "false");
   }
+}
+
+//---------------------------------------------------------
+// Procedure: handleCalAuth()
+//   CAL_AUTH=true#OPERATOR=<name>#SESSION=<id>
+//   CAL_AUTH=false
+//
+//   Authorisation only. pRouteTuner still runs its own PRECHECK and will not
+//   leave it unless every condition passes; this frame cannot start anything
+//   on its own.
+
+void WebSocket::handleCalAuth(const std::string& value)
+{
+  std::string head = value;
+  std::string opts;
+  size_t hash = value.find('#');
+  if (hash != std::string::npos) {
+    head = value.substr(0, hash);
+    opts = value.substr(hash + 1);
+  }
+  head = tolower(head);
+
+  if (head == "false") {
+    Notify("CAL_AUTH", "false");
+    Notify("CAL_EVENT", "operator withdrew authorisation");
+    return;
+  }
+  if (head != "true") {
+    reportRunWarning("CAL_AUTH ignored, expected true|false: " + value);
+    return;
+  }
+
+  std::string op = "unknown";
+  std::string session;
+  std::stringstream ss(opts);
+  std::string tok;
+  while (std::getline(ss, tok, '#')) {
+    size_t eq = tok.find('=');
+    if (eq == std::string::npos)
+      continue;
+    std::string k = toupper(tok.substr(0, eq));
+    std::string v = tok.substr(eq + 1);
+    if (k == "OPERATOR")
+      op = v;
+    else if (k == "SESSION")
+      session = v;
+  }
+
+  Notify("CAL_AUTH_BY", op);
+  Notify("CAL_AUTH_SESSION", session);
+  Notify("CAL_AUTH", "true");
+  Notify("CAL_EVENT", "operator " + op + " authorised calibration");
+}
+
+//---------------------------------------------------------
+// Procedure: handleCalAbort()
+//   CAL_ABORT=true#REASON=<text>
+//
+//   Acts here, not only in pRouteTuner, so an abort works even if the tuner
+//   has crashed or is not running:
+//     1. SERVICE_MODE=false  planchaPID drops the tuner's gains and goes back
+//                            to its own configured gains immediately
+//     2. CAL_AUTH=false, CAL_ABORT=true
+//                            pRouteTuner restores the behaviour parameters it
+//                            saved and goes to ABORT
+//     3. optional vessel action from cal_abort_action:
+//          none   (default) the route continues on the configured gains
+//          stop   same postings as AUTONOMOUS_STOP
+//          manual MOOS_MANUAL_OVERRIDE=true, rudder and thrust 0
+
+void WebSocket::handleCalAbort(const std::string& value)
+{
+  std::string reason = "operator";
+  size_t r = value.find("REASON=");
+  if (r != std::string::npos && r + 7 < value.size())
+    reason = value.substr(r + 7);
+
+  Notify("SERVICE_MODE", "false");
+  Notify("CAL_AUTH", "false");
+  Notify("CAL_ABORT", "true");
+  Notify("CAL_ABORT_REQUEST", reason);
+  Notify("CAL_EVENT", "operator abort: " + reason);
+
+  if (m_cal_abort_action == "stop") {
+    Notify("WAYPOINT", "false");
+    Notify("STATIONING", "false");
+    Notify("DESIRED_RUDDER", 0.0);
+    Notify("DESIRED_THRUST", 0.0);
+  }
+  else if (m_cal_abort_action == "manual") {
+    Notify("MOOS_MANUAL_OVERRIDE", "true");
+    Notify("DESIRED_RUDDER", 0.0);
+    Notify("DESIRED_THRUST", 0.0);
+  }
+  std::cout << "[CAL_ABORT] " << reason << " action=" << m_cal_abort_action << std::endl;
 }
 
 void WebSocket::handleStationKeepWaypoint(const std::string& value)

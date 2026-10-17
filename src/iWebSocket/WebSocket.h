@@ -95,7 +95,8 @@ class WebSocket : public AppCastingMOOSApp
   bool   m_link_ok_posted;
   double m_last_link_post;
 
-  // iCAN status passed through to SS UI (CAN_* variables)
+  // Status passed through to SS UI: iCAN (CAN_*), route calibration (CAL_*)
+  // and GNSS quality (GPS_*)
   std::set<std::string> m_can_vars;
   std::map<std::string, std::string> m_can_str;
   std::map<std::string, double> m_can_num;
@@ -147,6 +148,16 @@ class WebSocket : public AppCastingMOOSApp
   void handleRegionUpdates(const std::string& value);
   void handleRegion(const std::string& value);
 
+  // Route-tracking calibration (pRouteTuner), see docs/ROUTE_CALIBRATION.md
+  //   CAL_AUTH=true#OPERATOR=<name>#SESSION=<id>   operator authorises a session
+  //   CAL_AUTH=false                               authorisation withdrawn
+  //   CAL_ABORT=true#REASON=<text>                 stop calibration now
+  void handleCalAuth(const std::string& value);
+  void handleCalAbort(const std::string& value);
+
+  // What CAL_ABORT does besides reverting gains and stopping the tuner:
+  // "none" (default), "stop" or "manual". Config: cal_abort_action.
+  std::string m_cal_abort_action;
 };
 
 #endif 
