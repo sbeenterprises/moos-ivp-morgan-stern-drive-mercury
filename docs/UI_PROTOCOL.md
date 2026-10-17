@@ -43,6 +43,9 @@ The server sends a WebSocket ping every second; browsers answer it automatically
 
 Telemetry also carries iCAN state: `CAN_STATUS`, `CAN_CONTROL_OWNER`, `CAN_LOST_LINK`, `CAN_CONFLICT`, `CAN_TX_RUDDER_PCT`, `CAN_TX_THRUST_PCT`, `CAN_TX_GEAR`, `CAN_RUDDER_MISMATCH`, `CAN_PROFILE`, and on USV-722 `CAN_RUDDER_ACTUAL_PCT`, `CAN_HELM_HAS_STEERING`, `CAN_ENGINE_GEAR`, `CAN_ENGINE_THROTTLE_PCT`, `CAN_FUEL_PCT` (present once first posted).
 
+The same pass-through carries route calibration state from pRouteTuner and GNSS quality from iDivisorNMEA, each present once first posted:
+`CAL_STATE`, `CAL_SUBSTATE`, `CAL_AUTH`, `CAL_AUTH_BY`, `CAL_LAP_ID`, `CAL_SPEED_BAND`, `CAL_XTE`, `CAL_HDG_ERR`, `CAL_RUDDER_TRIM`, `CAL_SCORE_BASELINE`, `CAL_SCORE_CANDIDATE`, `CAL_GAINS_ACTIVE`, `CAL_GAINS_CANDIDATE`, `CAL_ABORT_REASON`, `CAL_EVENT`, `CAL_VERDICT`, `GPS_AGE`, `GPS_HAVE_FIX`, `GPS_FIX`, `GPS_FIX_LABEL`, `GPS_SATS`, `GPS_HDOP`, `GPS_GGA_AGE`. See [ROUTE_CALIBRATION.md](ROUTE_CALIBRATION.md).
+
 ## UI → boat
 
 Text frames `KEY=value`, split at the first `=`. Sub-fields use `#`, point
@@ -76,6 +79,8 @@ lists use `:`, coordinates are `lat,lon`. Unknown keys are ignored.
 | `PUT_TARGET` | `lat=..#lon=..#course=at_usv\|deg#speed=kn#type=..#length=..#beam=..` | `TRAFFIC_SPAWN=...` (pTrafficSim) |
 | `CLEAR_TARGETS` | `all` / `name=AIS...` | `TRAFFIC_CLEAR` |
 | `COLAV_DIST` | `pwt_outer_dist=..#pwt_inner_dist=..#completed_dist=..#max_util_cpa_dist=..#min_util_cpa_dist=..` | `CONTACT_INFO=...`, `BCM_ALERT_REQUEST=id=avdcol_,...`, `COLAV_DIST` |
+| `CAL_AUTH` | `true#OPERATOR=<name>#SESSION=<id>` / `false` | `CAL_AUTH_BY`, `CAL_AUTH_SESSION`, `CAL_AUTH=true\|false`, `CAL_EVENT`. Authorisation only; pRouteTuner still runs its own precheck |
+| `CAL_ABORT` | `true[#REASON=<text>]` | `SERVICE_MODE=false`, `CAL_AUTH=false`, `CAL_ABORT=true`, `CAL_ABORT_REQUEST`, `CAL_EVENT`; plus, per `cal_abort_action`, `stop`: `WAYPOINT=false`, `STATIONING=false`, rudder/thrust 0, or `manual`: `MOOS_MANUAL_OVERRIDE=true`, rudder/thrust 0 |
 | `HEARTBEAT_PING` | any | keep-alive only |
 
 ## Testing without the UI

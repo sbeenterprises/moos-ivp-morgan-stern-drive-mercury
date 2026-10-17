@@ -33,15 +33,20 @@ the current `main`.
 ## iDivisorNMEA
 `src/iDivisorNMEA/` — main sensor input.
 - **Config**: `udp_port` (10111), `ownship_mmsi` (710400014), `publish_nav` (true),
-  `report_interval` (1.0 s), `default_length` (30 m), `contact_stale_secs` (120);
-  requires global `LatOrigin/LongOrigin`.
+  `report_interval` (1.0 s), `default_length` (30 m), `contact_stale_secs` (120),
+  `require_valid_fix` (true: no NAV_* until the first RMC with status `A`),
+  `gps_post_interval` (1.0 s); requires global `LatOrigin/LongOrigin`.
 - **Subs**: `LINHA_NMEA`, `GYRO_*`, `NAV_COG` (registered but unhandled — dead).
 - **Pubs**: `NAV_LAT`, `NAV_LONG`, `NAV_SPEED` (**knots**), `NAV_HEADING`, `GPS_HEADING`,
   `NAV_COG`, `NAV_DEPTH`, `ANGULO_LEME`, `NAV_YAW`, `WIND_ANGLE`, `WIND_SPEED`,
   `GYRO_X/Y/Z`, `MSG_UDP` (raw sentence), `NODE_REPORT` (`NAME=AIS<mmsi>`, m/s, `MODE=AIS`).
+- **GNSS quality pubs** (timer, every `gps_post_interval`): `GPS_AGE` (s since last valid RMC,
+  -1 = never), `GPS_HAVE_FIX`; once a GGA has been seen also `GPS_FIX` (GGA quality 0..6),
+  `GPS_FIX_LABEL`, `GPS_SATS`, `GPS_HDOP`, `GPS_GGA_AGE`. Parsing is in header-only `NmeaFix.h`
+  (checksum-checked, any talker), unit tested by `tests/run_tests.sh`.
 - **I/O**: UDP in, non-blocking. Sentences: `$--RMC` (GP, GN or GA talker for
   position), `$--HDT` (any talker, e.g. `$GPHDT`, or `$IIHDT` from Signal K's
-  signalk-to-nmea0183 plugin), `$GPGGA` (ignored),
+  signalk-to-nmea0183 plugin), `$--GGA` (fix quality, sats, HDOP, any talker; Signal K must be set to send it),
   `$SDDPT`, `$AGRSA`, `$VNYMR`, `$WIMWV`, `!AIVDM/!AIVDO` (types 1/2/3/5/18/24 via `AisDecode`).
 - Libraries: `NMEAParserLib` (VisualGPS CNMEAParser), partial `libais` (only `GetNthField`).
 - Honors `USE_UTM` for contact X/Y.
@@ -80,7 +85,9 @@ Positional parse (expects token 2 = `X=`, 3 = `Y=`).
 ## iWebSocket
 `src/iWebSocket/` — WebSocket server `0.0.0.0:8000` (IXWebSocket), no TLS/auth.
 - **Config**: `colav_pwt_outer_dist` (300), `colav_pwt_inner_dist` (150),
-  `colav_completed_dist` (1500), `colav_min_util_cpa_dist` (100), `colav_max_util_cpa_dist` (300).
+  `colav_completed_dist` (1500), `colav_min_util_cpa_dist` (100), `colav_max_util_cpa_dist` (300),
+  `link_timeout` (3 s), `cal_abort_action` (`none` | `stop` | `manual`, default `none`, see
+  [ROUTE_CALIBRATION.md](ROUTE_CALIBRATION.md)).
 - Protocol (subs, pubs, JSON schema, command keys): [UI_PROTOCOL.md](UI_PROTOCOL.md).
 
 ## iRadarTargets

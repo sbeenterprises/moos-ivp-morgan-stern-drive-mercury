@@ -143,6 +143,12 @@ ProcessConfig = iDivisorNMEA
 {
    AppTick   = 20
    CommsTick = 20
+
+   // No NAV_* until the first RMC with status A (stops NAV_LAT/LONG = 0
+   // at start-up). GPS_AGE/GPS_FIX/GPS_SATS/GPS_HDOP are posted every
+   // gps_post_interval seconds; FIX/SATS/HDOP need GGA from Signal K.
+   require_valid_fix = true
+   gps_post_interval = 1
 }
 //------------------------------------------------
 
@@ -173,6 +179,11 @@ ProcessConfig = iWebSocket
    // No message or ping reply from SS UI for this long = link lost.
    // In manual control iCAN then sets rudder 0 and throttle 0.
    link_timeout = 3
+
+   // What a CAL_ABORT from SS UI does besides reverting planchaPID to its
+   // configured gains: none (route continues), stop (as AUTONOMOUS_STOP)
+   // or manual (manual override, rudder and thrust 0).
+   cal_abort_action = none
 }
 
 //------------------------------------------------

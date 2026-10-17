@@ -7,14 +7,14 @@ C++11, CMake, Ubuntu 22.04. Full docs in [docs/](docs/ARCHITECTURE.md).
 - Build: `./build.sh -j$(nproc)` → `bin/`, `lib/`. Needs moos-ivp at `../moos-ivp` or `~/moos-ivp`, IXWebSocket, jsoncpp, curl, boost, Eigen3.
 - Sim: `cd missions/s1_morgan_city_signalk && pAntler simulated.moos` (not `launch.sh` — it targets a missing `alpha.moos`).
 - Boat: `pAntler real.moos`. Monitor: `uMAC <file>.moos`.
-- Unit tests only for lib_canprofile (`tests/run_tests.sh`); otherwise verify in `simulated.moos` / `external.moos` + `tools/aissim`.
+- Unit tests only for lib_canprofile and iDivisorNMEA's NmeaFix.h (`tests/run_tests.sh`); otherwise verify in `simulated.moos` / `external.moos` + `tools/aissim`.
 
 ## Map
 - Control chain: UI → `iWebSocket` (ws :8000) → mode flags / `WPT_UPDATE` → `pHelmIvP` (`alpha.bhv`, `BHV_Waypoint_mod` in `src/lib_behaviors-test`) → `planchaPID` → `iCAN` (J1939, `slcan0`).
 - Nav: Signal K → UDP 10111 → `iDivisorNMEA` (NAV_LAT/LONG/HEADING/SPEED) → `pNodeReporter` → `pXYpublisher` (NAV_X/Y).
 - Contacts: `iDivisorNMEA` (AIS), `iRadarTargets` (UDP 8091), `pTrafficSim` (sim) → `NODE_REPORT` → `pContactMgrV20` → `BHV_AvdColregsV22`; `pColavEval` scores encounters.
 - Telemetry: `iCANRec` → `ENGINE_*` → `iWebSocket` JSON.
-- Details: docs/CODE_FLOW.md, docs/APPS.md, docs/UI_PROTOCOL.md, docs/CAN_INTERFACE.md.
+- Details: docs/CODE_FLOW.md, docs/APPS.md, docs/UI_PROTOCOL.md, docs/CAN_INTERFACE.md, docs/ROUTE_CALIBRATION.md.
 
 ## Gotchas
 - Real-boat `NAV_SPEED` is **knots**; sim is m/s. `NODE_REPORT` SPD should be m/s (radar/fusion currently send knots).
