@@ -1,6 +1,6 @@
 #!/bin/bash
 #------------------------------------------------------------------
-# Builds and runs the lib_canprofile tests with plain g++.
+# Builds and runs the lib_canprofile and NmeaFix tests with plain g++.
 # No MOOS or CAN hardware needed. Run from anywhere:
 #   tests/run_tests.sh
 #------------------------------------------------------------------
@@ -18,3 +18,14 @@ g++ -std=c++11 -Wall -Wextra -O1 \
 
 trap 'rm -f "$OUT"' EXIT
 "$OUT" "$ROOT/profiles"
+
+#------------------------------------------------------------------
+# iDivisorNMEA GNSS quality helpers (NmeaFix.h, header-only)
+#------------------------------------------------------------------
+OUT2="${TMPDIR:-/tmp}/nmeafix_test.$$"
+g++ -std=c++11 -Wall -Wextra -O1 \
+    -I"$ROOT/src/iDivisorNMEA" \
+    "$ROOT/tests/nmeafix_test.cpp" \
+    -o "$OUT2"
+trap 'rm -f "$OUT" "$OUT2"' EXIT
+"$OUT2"

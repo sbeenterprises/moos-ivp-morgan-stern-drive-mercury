@@ -222,6 +222,15 @@ DivisorNMEA::DivisorNMEA()
   m_default_length     = 30.0;
   m_contact_stale_secs = 120.0;
 
+  m_require_valid_fix   = true;
+  m_gps_post_interval   = 1.0;
+  m_last_gga_time       = 0;
+  m_last_valid_fix_time = 0;
+  m_have_fix            = false;
+  m_last_gps_post       = 0;
+  m_gga_seen            = 0;
+  m_rmc_void_seen       = 0;
+
   m_node_reports_sent  = 0;
   m_datagrams_seen     = 0;
 
@@ -317,6 +326,25 @@ bool DivisorNMEA::Iterate()
   m_ais.expireFragments(MOOSTime());
   postContactReports();
 
+  // ---- GNSS quality, for the pRouteTuner precheck and abort rules -------
+  // Posted on a timer, not per sentence, so GPS_AGE keeps growing when the
+  // receiver goes quiet. NAV_* alone cannot show that: they are re-posted
+  // with their last value on every datagram, AIS included.
+  double now = MOOSTime();
+  if((now - m_last_gps_post) >= m_gps_post_interval) {
+    m_last_gps_post = now;
+    double age = (m_last_valid_fix_time > 0) ? (now - m_last_valid_fix_time) : -1;
+    Notify("GPS_AGE", age);                 // s since last valid RMC, -1 = never
+    Notify("GPS_HAVE_FIX", m_have_fix ? "true" : "false");
+    if(m_last_gga_time > 0) {
+      Notify("GPS_FIX", (double) m_gga.quality);
+      Notify("GPS_FIX_LABEL", nmeafix::qualityLabel(m_gga.quality));
+      Notify("GPS_SATS", (double) m_gga.sats);
+      Notify("GPS_HDOP", m_gga.hdop);
+      Notify("GPS_GGA_AGE", now - m_last_gga_time);
+    }
+  }
+
   AppCastingMOOSApp::PostReport();
   return(true);
 }
@@ -329,6 +357,30 @@ bool DivisorNMEA::Iterate()
 void DivisorNMEA::processSentence(const std::string& msg_string)
 {
   Notify("MSG_UDP", msg_string); //Declarar uma variável pro MOOSDB
+
+  // ---- GNSS quality (talker-agnostic: GP/GN/GL/II all accepted) ----------
+  // Only checksum-valid sentences count, so a corrupted datagram cannot
+  // report a fix that is not there.
+  const std::string stype = nmeafix::sentenceType(msg_string);
+  if((stype == "GGA" || stype == "RMC") && nmeafix::checksumOk(msg_string)) {
+    if(stype == "GGA") {
+      nmeafix::GgaFix g = nmeafix::parseGGA(msg_string);
+      if(g.valid) {
+        m_gga = g;
+        m_last_gga_time = MOOSTime();
+        m_gga_seen++;
+      }
+    }
+    else {
+      int st = nmeafix::rmcStatus(msg_string);
+      if(st == 1) {
+        m_have_fix = true;
+        m_last_valid_fix_time = MOOSTime();
+      }
+      else if(st == 0)
+        m_rmc_void_seen++;
+    }
+  }
 
     //Parser de msg caso seja profundidade
   // Create a string stream to split the input string by commas
@@ -365,7 +417,9 @@ void DivisorNMEA::processSentence(const std::string& msg_string)
   // back on the DB. The geodesy origin is set once in OnStartUp from the
   // mission's LatOrigin / LongOrigin - it used to be re-initialised from a
   // hard-coded literal on every single sentence.
-  if(m_publish_nav) {
+  // Gate on a real fix: until the first valid RMC, lat_gps/long_gps are still
+  // their zero initialisers and must not reach the helm or the logs.
+  if(m_publish_nav && (m_have_fix || !m_require_valid_fix)) {
     //Atualizo variáveis necessárias para o movimento do navio
     Notify("NAV_LAT", lat_gps);
     Notify("NAV_LONG", long_gps);
@@ -697,6 +751,13 @@ bool DivisorNMEA::OnStartUp()
       m_contact_stale_secs = atof(value.c_str());
       handled = (m_contact_stale_secs > 0);
     }
+    else if(param == "require_valid_fix") {
+      handled = setBooleanOnString(m_require_valid_fix, value);
+    }
+    else if(param == "gps_post_interval") {
+      m_gps_post_interval = atof(value.c_str());
+      handled = (m_gps_post_interval > 0);
+    }
 
     if(!handled)
       reportUnhandledConfigWarning(orig);
@@ -809,6 +870,22 @@ bool DivisorNMEA::buildReport()
          << "   datagrams: "    << m_datagrams_seen << endl;
   m_msgs << "Ownship MMSI:    " << m_ownship_mmsi
          << "   publish NAV_*: " << (m_publish_nav ? "yes" : "no") << endl;
+  {
+    double now = MOOSTime();
+    m_msgs << "GNSS fix:        " << (m_have_fix ? "yes" : "NO (NAV_* held)")
+           << "   last valid RMC: "
+           << ((m_last_valid_fix_time > 0) ? doubleToString(now - m_last_valid_fix_time, 1) + " s ago" : "never")
+           << "   void RMC: " << m_rmc_void_seen << endl;
+    if(m_last_gga_time > 0)
+      m_msgs << "GGA:             " << nmeafix::qualityLabel(m_gga.quality)
+             << "   sats " << m_gga.sats
+             << "   HDOP " << doubleToString(m_gga.hdop, 2)
+             << "   age " << doubleToString(now - m_last_gga_time, 1) << " s"
+             << "   (" << m_gga_seen << " seen)" << endl;
+    else
+      m_msgs << "GGA:             none received. Enable GGA in Signal K"
+             << " (signalk-to-nmea0183) or on the receiver." << endl;
+  }
   m_msgs << "AIVDM sentences: " << m_ais.sentencesSeen()
          << "   decoded: "      << m_ais.messagesDecoded()
          << "   rejected: "     << m_ais.badSentences() << endl;

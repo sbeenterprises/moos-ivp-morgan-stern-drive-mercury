@@ -11,6 +11,7 @@
 #include "MOOS/libMOOS/Thirdparty/AppCasting/AppCastingMOOSApp.h"
 #include "MOOS/libMOOSGeodesy/MOOSGeodesy.h"
 #include "AisDecode.h"
+#include "NmeaFix.h"
 
 #include <boost/asio.hpp>
 #include <map>
@@ -68,6 +69,22 @@ class DivisorNMEA : public AppCastingMOOSApp
     double        m_report_interval;     // seconds between NODE_REPORTs
     double        m_default_length;      // metres, when AIS gives no dimensions
     double        m_contact_stale_secs;  // forget a contact after this silence
+
+    /** Do not publish NAV_* until at least one RMC with status 'A' has been
+     *  received. Without this, NAV_LAT/NAV_LONG = 0 go out at start-up and the
+     *  boat appears ~3,300 km away (seen in MOOSLog_16_10_2026_09_15_46). */
+    bool          m_require_valid_fix;
+    /** Seconds between GPS_* quality posts (GPS_FIX, GPS_SATS, GPS_HDOP, GPS_AGE). */
+    double        m_gps_post_interval;
+
+ private: // GNSS quality state (fed by GGA and RMC, used by pRouteTuner precheck/abort)
+    nmeafix::GgaFix m_gga;                 // last parsed GGA
+    double          m_last_gga_time;       // MOOSTime of last GGA, 0 = never
+    double          m_last_valid_fix_time; // MOOSTime of last RMC with status 'A', 0 = never
+    bool            m_have_fix;            // at least one valid RMC since start-up
+    double          m_last_gps_post;       // MOOSTime of last GPS_* post
+    unsigned int    m_gga_seen;
+    unsigned int    m_rmc_void_seen;
 
  private: // AIS contact state
     /** Position and static data accumulate separately: type 1 carries where a

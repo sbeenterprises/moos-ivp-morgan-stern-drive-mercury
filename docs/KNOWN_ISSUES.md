@@ -49,7 +49,8 @@ Items marked *(unverified)* are inferred from code, not observed on the boat.
     (lost targets stay live); `udp_host` unused (binds all interfaces).
 14. **iCANRec suspect decodes**: torque, oil temp, battery voltage (see
     [CAN_INTERFACE.md](CAN_INTERFACE.md#feedback-icanrec)).
-15. **iDivisorNMEA** publishes `NAV_LAT/LONG=0` before first fix and re-publishes stale
+15. **[Partly fixed Oct 2026: NAV_* held until the first valid RMC (`require_valid_fix`); `GPS_AGE` shows GPS loss; any talker accepted]**
+    **iDivisorNMEA** publishes `NAV_LAT/LONG=0` before first fix and re-publishes stale
     nav on every datagram (GPS loss invisible while AIS flows); only `GP` talker accepted;
     `$SDDPT`/`$AGRSA` parse can throw and kill the process; `$VNYMR` gyro fields off by one.
 16. **iWebSocket**: `m_webSockets` / `m_lastMessageTime` mutated from ws threads without a
