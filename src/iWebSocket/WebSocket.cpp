@@ -115,6 +115,9 @@ WebSocket::WebSocket()
   m_last_heartbeat_time = 0.0;
   m_last_link_rx = -1e9;
   m_link_timeout = 3.0;
+  m_origin_ok = false;
+  m_lat_origin = 0;
+  m_lon_origin = 0;
   m_link_ok_posted = false;
   m_last_link_post = 0.0;
 
@@ -378,17 +381,15 @@ bool WebSocket::OnNewMail(MOOSMSG_LIST &NewMail)
       // CMakeLists). This used the flat-earth grid plus a hand-tuned
       // "y += 100" that cancelled most - not all - of the resulting error;
       // the projection is the actual fix, so the fudge is gone.
-      double lat_origin = 29.71970895316288;
-      double lon_origin = -91.14705165281887;
-
-      CMOOSGeodesy geodesy;
-      geodesy.Initialise(lat_origin, lon_origin);
+      // Origin: the mission's LatOrigin / LongOrigin (OnStartUp).
+      if (!m_origin_ok)
+        continue;
 
       double lat, lon;
 #ifdef USE_UTM
-      geodesy.UTM2LatLong(x, y, lat, lon);
+      m_geodesy.UTM2LatLong(x, y, lat, lon);
 #else
-      geodesy.LocalGrid2LatLong(x, y, lat, lon);
+      m_geodesy.LocalGrid2LatLong(x, y, lat, lon);
 #endif
 
       // Store the values
@@ -653,6 +654,21 @@ bool WebSocket::OnStartUp()
        << ",max_util_cpa_dist=" << colav_max_cpa;
   colav_dist = echo.str();
 
+  // Geodesy origin: the mission's global LatOrigin / LongOrigin, the same
+  // origin pNodeReporter and iDivisorNMEA use, so routes, regions and
+  // contacts land on the boat's own grid. It used to be a Morgan City
+  // literal in seven places, which would have put every route and region
+  // in the wrong place at any other site.
+  m_origin_ok = false;
+  if (!m_MissionReader.GetValue("LatOrigin", m_lat_origin) ||
+      !m_MissionReader.GetValue("LongOrigin", m_lon_origin))
+    reportConfigWarning("LatOrigin / LongOrigin missing from the mission file: "
+                        "route, region, return, station and target commands are refused");
+  else if (!m_geodesy.Initialise(m_lat_origin, m_lon_origin))
+    reportConfigWarning("Geodesy initialisation failed for LatOrigin/LongOrigin");
+  else
+    m_origin_ok = true;
+
   // Registra variáveis no MOOS, se necessário
   registerVariables();	
   return(true);
@@ -894,9 +910,8 @@ void WebSocket::handleColavTest(const std::string& value)
 
 void WebSocket::handlePutTarget(const std::string& value)
 {
-  static constexpr double kLatOrigin = 29.71970895316288;
-  static constexpr double kLonOrigin = -91.14705165281887;
-  m_geodesy.Initialise(kLatOrigin, kLonOrigin);
+  if (!originReady("PUT_TARGET"))
+    return;
 
   std::string lat_s, lon_s, course_s, speed_s, type_s, length_s, beam_s;
 
@@ -1144,10 +1159,8 @@ void WebSocket::handleDesiredGear(const std::string& value)
 
 void WebSocket::handleAutonomousWaypoints(const std::string& value)
 {
-  double lat_origin = 29.71970895316288;
-  double lon_origin = -91.14705165281887;
-  
-  m_geodesy.Initialise(lat_origin, lon_origin);
+  if (!originReady("AUTONOMOUS_WAYPOINTS"))
+    return;
 
   std::vector<std::string> coordTokens;
   
@@ -1203,6 +1216,8 @@ void WebSocket::handleAutonomousWaypoints(const std::string& value)
 
 void WebSocket::handleAutonomousStart(const std::string& value)
 {
+  if (!originReady("AUTONOMOUS_START"))
+    return;
   // New format: true#SPEED#WAYPOINTS#REPEAT=true/false
   // Example: true#10#42.3601,-71.0589:42.3602,-71.0590#REPEAT=true
   
@@ -1293,10 +1308,6 @@ void WebSocket::handleAutonomousStart(const std::string& value)
         
         // Parse and convert waypoints
         if (!actualWaypointsPart.empty()) {
-          double lat_origin = 29.71970895316288;
-          double lon_origin = -91.14705165281887;
-          m_geodesy.Initialise(lat_origin, lon_origin);
-
           std::vector<std::string> coordTokens;
           std::istringstream tokenStream(actualWaypointsPart);
           std::string token;
@@ -1404,9 +1415,8 @@ void WebSocket::handleAutonomousReturnToBase(const std::string& value)
 
 void WebSocket::handleReturnUpdate(const std::string& value)
 {
-  static constexpr double kLatOrigin = 29.71970895316288;
-  static constexpr double kLonOrigin = -91.14705165281887;
-  m_geodesy.Initialise(kLatOrigin, kLonOrigin);
+  if (!originReady("RETURN_UPDATE"))
+    return;
 
   auto eqPos = value.find('=');
   if (eqPos == std::string::npos) {
@@ -1525,6 +1535,8 @@ void WebSocket::handleServiceMode(const std::string& value)
 
 void WebSocket::handleStationKeepWaypoint(const std::string& value)
 {
+  if (!originReady("STATION_KEEP_WAYPOINT"))
+    return;
   // Parse the value to check if it's TRUE or FALSE
   size_t hashPos = value.find('#');
 
@@ -1574,11 +1586,6 @@ void WebSocket::handleStationKeepWaypoint(const std::string& value)
       // Parse COORDS and convert to local
       size_t coordsPos = params.find("COORDS=");
       if (coordsPos != std::string::npos) {
-        double lat_origin = 29.71970895316288;
-        double lon_origin = -91.14705165281887;
-
-        m_geodesy.Initialise(lat_origin, lon_origin);
-
         size_t startPos = coordsPos + 7; // length of "COORDS="
         size_t endPos = params.find('#', startPos);
         std::string coordsStr = (endPos != std::string::npos) ?
@@ -1683,9 +1690,8 @@ void WebSocket::handleRegionUpdates(const std::string& value)
   reportEvent("[REGION_UPDATES] Raw input: [" + value + "]");
   reportEvent("[REGION_UPDATES] Input length: " + std::to_string(value.length()));
 
-  double lat_origin = 29.71970895316288;
-  double lon_origin = -91.14705165281887;
-  m_geodesy.Initialise(lat_origin, lon_origin);
+  if (!originReady("REGION_UPDATES"))
+    return;
 
   // Find the pts={...} block
   size_t ptsStart = value.find("pts={");
@@ -1818,4 +1824,17 @@ void WebSocket::handleRegion(const std::string& value)
       }
     }
   }
+}
+
+//---------------------------------------------------------
+// Procedure: originReady()
+//   Commands that carry lat/lon need the mission origin. Without it they
+//   are refused (with a warning) rather than converted with a guess.
+
+bool WebSocket::originReady(const std::string& what)
+{
+  if (m_origin_ok)
+    return true;
+  reportRunWarning(what + " ignored: LatOrigin / LongOrigin missing from the mission file");
+  return false;
 }

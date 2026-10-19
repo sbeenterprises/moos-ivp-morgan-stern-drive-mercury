@@ -81,7 +81,11 @@ class WebSocket : public AppCastingMOOSApp
 
   std::vector<ix::WebSocket*> m_webSockets; // Store multiple web socket connections
   std::map<ix::WebSocket*, double> m_lastMessageTime; // Track last message time for each connection
-  CMOOSGeodesy m_geodesy;
+  CMOOSGeodesy m_geodesy;     // initialised once from LatOrigin/LongOrigin
+  bool   m_origin_ok;          // false: mission has no LatOrigin/LongOrigin
+  double m_lat_origin;
+  double m_lon_origin;
+  bool   originReady(const std::string& what);
   
   // Connection monitoring
   double m_connection_timeout; // Timeout in seconds for stale connections

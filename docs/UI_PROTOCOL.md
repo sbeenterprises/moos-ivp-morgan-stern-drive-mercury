@@ -3,10 +3,12 @@
 Source: `src/iWebSocket/main.cpp`, `src/iWebSocket/WebSocket.cpp`.
 
 - Server: `ws://<boat>:8000` (`0.0.0.0`, hardcoded). No TLS, no auth, no origin check.
-- Ping interval 30 s; connections idle > 60 s are dropped from the broadcast list
+- Server ping every 1 s; connections idle > 60 s are dropped from the broadcast list
   (but not closed).
 - All lat/lon from the UI are converted to local x/y with `LatLong2LocalUTM`
-  against the **hardcoded** Morgan City origin.
+  against the mission's global `LatOrigin` / `LongOrigin` (read once at start-up).
+  If the mission has no origin, route, region, return, station-keep and
+  `PUT_TARGET` commands are refused with a run warning.
 
 ## Boat → UI
 
