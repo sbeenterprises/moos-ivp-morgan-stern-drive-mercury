@@ -96,6 +96,15 @@ class CorridorModel
   void advance(unsigned int seg, double t, double lead,
                double& rx, double& ry) const;
 
+  // Heading change at vertex i in degrees (0 = straight on, 180 = U-turn).
+  // Interior vertices only, plus the start/end vertex of a closed loop
+  // (first and last points within 1 m); 0 for any other end point.
+  double turnAngle(unsigned int i) const;
+  // True if (x,y) is within `dist` metres of a vertex turning by at least
+  // `min_deg`: the boat should slow so it can make the turn inside the
+  // corridor (a U-turn where an approach joins the route, a loop closing).
+  bool nearSharpTurn(double x, double y, double dist, double min_deg) const;
+
  private:
   double m_slow_frac;
   double m_stop_factor;

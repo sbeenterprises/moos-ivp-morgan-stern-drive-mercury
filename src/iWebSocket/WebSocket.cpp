@@ -83,6 +83,7 @@ std::string traffic_targets;  // runtime-spawned contacts currently placed
 bool corridor_active = false;
 std::string corridor_status = "none";
 double xte_now = 0;
+bool corridor_turn = false;
 
 // Engagement distances of the collision avoidance behaviour (BHV_AvdColregsV22,
 // the avdcol_ block in alpha.bhv). Seeded here with the mission values and
@@ -356,6 +357,8 @@ bool WebSocket::OnNewMail(MOOSMSG_LIST &NewMail)
       corridor_status = msg.GetString();
     else if(key == "XTE_NOW")
       xte_now = msg.GetDouble();
+    else if(key == "CORRIDOR_TURN")
+      corridor_turn = msg.IsDouble() ? (msg.GetDouble() != 0) : (msg.GetString() == "true");
     else if(key == "NODE_REPORT") {
       // Parse NODE_REPORT to extract NAME, X, Y, SPD, HDG
       std::string node_report = msg.GetString();
@@ -572,6 +575,7 @@ bool WebSocket::Iterate()
   root["CORRIDOR"] = corridor_active;
   root["CORRIDOR_STATUS"] = corridor_status;
   root["XTE_NOW"] = xte_now;
+  root["CORRIDOR_TURN"] = corridor_turn;
 
   // iCAN: what is really being sent, who owns the drive, feedback
   for (std::map<std::string, double>::iterator v = m_can_num.begin(); v != m_can_num.end(); v++)
@@ -742,6 +746,7 @@ void WebSocket::registerVariables()
   Register("CORRIDOR", 0);        //Route corridor on/off
   Register("CORRIDOR_STATUS", 0); //pCorridor zone: none|in|slow|recovering|stop
   Register("XTE_NOW", 0);         //pCorridor cross-track error, metres
+  Register("CORRIDOR_TURN", 0);   //pCorridor: slowing for a sharp corner
   for (std::set<std::string>::iterator v = m_can_vars.begin(); v != m_can_vars.end(); v++)
     Register(*v, 0);              //iCAN status and drive feedback for SS UI
 
@@ -831,6 +836,7 @@ void WebSocket::initializeMessageHandlers()
   m_messageHandlers["CLEAR_TARGETS"] = &WebSocket::handleClearTargets;
   m_messageHandlers["COLAV_DIST"] = &WebSocket::handleColavDist;
   m_messageHandlers["CORRIDOR"] = &WebSocket::handleCorridor;
+  m_messageHandlers["LOOP_START"] = &WebSocket::handleLoopStart;
 }
 
 //---------------------------------------------------------
@@ -1678,6 +1684,24 @@ void WebSocket::handleRepeat(const std::string& value)
   } catch (const std::exception& e) {
     std::cerr << "Error parsing repeat value: " << value << " - " << e.what() << std::endl;
   }
+}
+
+//---------------------------------------------------------
+// Procedure: handleLoopStart()
+//   LOOP_START=<n>  index a repeated route restarts from after its last
+//   point (BHV_Waypoint_mod loop_start). The UI sends it before
+//   AUTONOMOUS_START: points 0..n-1 are a planned approach from the boat's
+//   position, driven once; 0 restores the stock "restart at the first point".
+
+void WebSocket::handleLoopStart(const std::string& value)
+{
+  std::string v = stripBlankEnds(value);
+  if (!isNumber(v) || atof(v.c_str()) < 0 || v.find('.') != std::string::npos) {
+    reportRunWarning("LOOP_START ignored, expected an integer >= 0: " + value);
+    return;
+  }
+  Notify("WPT_UPDATE", "loop_start=" + v);
+  reportEvent("[LOOP_START] loop_start=" + v);
 }
 
 void WebSocket::handleBaseCoords(const std::string& value)

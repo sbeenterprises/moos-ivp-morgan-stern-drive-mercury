@@ -41,7 +41,8 @@ Notes:
 - Route corridor: `CORRIDOR` (bool, corridor armed), `CORRIDOR_STATUS`
   (`none` | `in` | `slow` | `recovering` | `stop`, from pCorridor; `none` unless a corridor
   is armed **and** a waypoint mission runs), `XTE_NOW` (metres from the centreline,
-  absolute; only meaningful while the status is not `none`, reset to 0 when it goes `none`).
+  absolute; only meaningful while the status is not `none`, reset to 0 when it goes `none`),
+  `CORRIDOR_TURN` (bool, pCorridor: the boat is near a sharp corridor corner and slows for it).
 
 ### Heartbeat
 Plain text (not JSON) `HEARTBEAT=<MOOSTime>` every 30 s — clients must tolerate it.
@@ -84,6 +85,7 @@ lists use `:`, coordinates are `lat,lon`. Unknown keys are ignored.
 | `PUT_TARGET` | `lat=..#lon=..#course=at_usv\|deg#speed=kn#type=..#length=..#beam=..` | `TRAFFIC_SPAWN=...` (pTrafficSim) |
 | `CLEAR_TARGETS` | `all` / `name=AIS...` | `TRAFFIC_CLEAR` |
 | `COLAV_DIST` | `pwt_outer_dist=..#pwt_inner_dist=..#completed_dist=..#max_util_cpa_dist=..#min_util_cpa_dist=..` | `CONTACT_INFO=...`, `BCM_ALERT_REQUEST=id=avdcol_,...`, `COLAV_DIST` |
+| `LOOP_START` | integer >= 0 | `WPT_UPDATE=loop_start=<n>`: a repeated route restarts at point n after its last point. The UI sends it before `AUTONOMOUS_START`: points 0..n-1 are a planned approach from the boat's position (driven once), 0 = restart at the first point (stock). Non-integers are ignored with a run warning |
 | `CORRIDOR` | `width=<m>#pts=<lat>,<lon>:<lat>,<lon>:...` / `off` | `CORRIDOR_UPDATE=width=<w>,pts={x1,y1:x2,y2:...}` (local x,y) then `CORRIDOR=true` / off: `CORRIDOR=false`. `width` is the full width (both sides), > 0; at least 2 points. Any malformed field, a non-number or an out-of-range lat/lon rejects the whole command (run warning, nothing posted). Needs the mission origin. The corridor acts only while `WAYPOINT=true`; it is cleared by `AUTONOMOUS_STOP` and when the route completes |
 | `HEARTBEAT_PING` | any | keep-alive only |
 

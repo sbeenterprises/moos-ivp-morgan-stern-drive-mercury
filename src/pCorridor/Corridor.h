@@ -46,6 +46,21 @@ class Corridor : public AppCastingMOOSApp
   double m_status_interval;   // seconds between unconditional status posts
   double m_recover_move;      // metres the recover point must move to be re-posted
 
+  // Route following while a corridor is on (posted to WPT_UPDATE on the
+  // CORRIDOR edges): tight values when it turns on, the route's normal
+  // values (must match waypt_survey in alpha.bhv) when it turns off.
+  bool   m_tighten;
+  double m_corr_capture, m_corr_slip, m_corr_lead;
+  double m_route_capture, m_route_slip, m_route_lead;
+  bool   m_tight_applied;
+
+  // Slow before sharp turns (CORRIDOR_TURN) so the turn fits in the corridor.
+  double m_turn_dist;       // metres from a sharp vertex
+  double m_turn_min_angle;  // degrees of heading change that count as sharp
+  bool   m_turn_on;
+  bool   m_turn_posted;
+  std::string followingSpec(double capture, double slip, double lead) const;
+
  private: // State
   CorridorModel m_model;
 

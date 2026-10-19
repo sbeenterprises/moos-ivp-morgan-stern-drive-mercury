@@ -82,6 +82,7 @@ BHV_Waypoint_mod::BHV_Waypoint_mod(IvPDomain gdomain) :
   m_hints.setMeasure("nextpt_vertex_size", 5);
 
   m_lead_to_start     = false;
+  m_loop_start        = 0;
 
   // The completed and perpetual vars are initialized in superclass
   // but we initialize here just to be safe and clear.
@@ -448,6 +449,16 @@ bool BHV_Waypoint_mod::setParam(string param, string param_val)
     }
     return(false);
   }
+  else if(param == "loop_start") {
+    // Where a repeated route restarts after its last point. 0 (default)
+    // is the stock behaviour; k > 0 skips points 0..k-1 (an approach path
+    // from wherever the mission started) on every repeat.
+    int ival = atoi(param_val.c_str());
+    if((ival < 0) || (!isNumber(param_val)))
+      return(false);
+    m_loop_start = (unsigned int)(ival);
+    return(true);
+  }
   else if(param == "repeat") {
     int ival = atoi(param_val.c_str());
     if((ival < 0) || (!isNumber(param_val)))
@@ -776,6 +787,17 @@ bool BHV_Waypoint_mod::setNextWaypoint()
     return(false);
   }
 
+  // A repeat restarts at m_loop_start, not at the approach path
+  bool looped_back = false;
+  if((feedback_msg == "cycled") && (m_loop_start > 0) &&
+     (m_loop_start < m_waypoint_engine.size())) {
+    m_waypoint_engine.setCurrIndex(m_loop_start);
+    looped_back = true;
+  }
+  if(!looped_back && (m_loop_start > 0) && (m_waypoint_engine.getCycleCount() > 0) &&
+     (m_waypoint_engine.getCurrIndex() == (int)(m_loop_start)))
+    looped_back = true;
+
   double next_ptx = m_waypoint_engine.getPointX();
   double next_pty = m_waypoint_engine.getPointY();
   m_nextpt.set_vertex(next_ptx, next_pty);
@@ -792,7 +814,14 @@ bool BHV_Waypoint_mod::setNextWaypoint()
     int current_waypt = m_waypoint_engine.getCurrIndex();
     bool track_anchor = false;
     double tx, ty;
-    if(current_waypt > 0) {
+    if(looped_back) {
+      // the leg back into the loop runs from the route's last point
+      unsigned int pt_count = m_waypoint_engine.size();
+      tx = m_waypoint_engine.getPointX(pt_count-1);
+      ty = m_waypoint_engine.getPointY(pt_count-1);
+      track_anchor = true;
+    }
+    else if(current_waypt > 0) {
       tx = m_waypoint_engine.getPointX(current_waypt-1);
       ty = m_waypoint_engine.getPointY(current_waypt-1);
       track_anchor = true;

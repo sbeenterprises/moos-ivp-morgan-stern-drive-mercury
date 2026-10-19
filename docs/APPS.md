@@ -132,7 +132,10 @@ Positional parse (expects token 2 = `X=`, 3 = `Y=`).
 `src/pCorridor/` — route corridor monitor. Geometry and zone logic live in
 `CorridorModel.{h,cpp}` (plain C++, no MOOS; unit tests in `tests/corridor_test.cpp`).
 - **Config**: `slow_frac` (0.5), `stop_factor` (2.0), `hysteresis` (2 m),
-  `recover_lead` (20 m), `status_interval` (1 s), `recover_move` (1 m).
+  `recover_lead` (20 m), `status_interval` (1 s), `recover_move` (1 m),
+  `turn_slow_dist` (60 m), `turn_min_angle` (60°), `tighten_following` (true),
+  `corridor_capture_radius`/`corridor_slip_radius`/`corridor_lead` (15/30/60 m),
+  `route_capture_radius`/`route_slip_radius`/`route_lead` (60/90/400 m, must match `waypt_survey`).
 - **Subs**: `NAV_X`, `NAV_Y`, `CORRIDOR` (true/false), `CORRIDOR_UPDATE`
   (`width=<w>,pts={x1,y1:x2,y2:...}`, full width, local metres, from iWebSocket), `WAYPOINT`.
 - **Active** only while `CORRIDOR=true`, `WAYPOINT=true`, the geometry is valid and NAV_X/Y are known.
@@ -143,9 +146,14 @@ Positional parse (expects token 2 = `X=`, 3 = `Y=`).
 - **Pubs**: `CORRIDOR_STATUS` (on change and every `status_interval`), `XTE_NOW`
   (every iteration while active; one 0 on deactivation), `CORRIDOR_RECOVER_UPDATES =
   points=x,y` while `recovering` (centreline point `recover_lead` m past the closest
-  point, clamped to the end; posted before the status). With no corridor it posts
-  only `CORRIDOR_STATUS=none`.
-- Acted on by `corridor_slow` / `corridor_recover` / `corridor_stop` in `alpha.bhv`
+  point, clamped to the end; posted before the status), `CORRIDOR_TURN` (true within
+  `turn_slow_dist` of a corridor vertex turning by `turn_min_angle` or more: a U-turn where
+  an approach joins the route, the ends of a there-and-back route, a loop closing).
+  `WPT_UPDATE` for `waypt_survey` on the `CORRIDOR` edges: `capture_radius=15 # slip_radius=30
+  # lead=60` when a corridor goes on (the route's 60 m capture radius skips legs shorter
+  than that and its 400 m lead cuts corners by more than a corridor half width), the
+  `route_*` values when it goes off. With no corridor it posts only `CORRIDOR_STATUS=none`.
+- Acted on by `corridor_slow` / `corridor_recover` / `corridor_turn` / `corridor_stop` in `alpha.bhv`
   (see [MISSIONS.md](MISSIONS.md#alphabhv-behaviors)). A boat in `stop` stays stopped
   until the operator acts (CORRIDOR=off, a wider corridor, manual control or AUTONOMOUS_STOP).
 
@@ -179,7 +187,9 @@ Only run by the legacy `s1_morgan_city/alpha_simulated.moos`.
 `src/lib_behaviors-test/` — two shared libraries loaded by pHelmIvP via
 `IVP_BEHAVIOR_DIRS` / `ivp_behavior_dir`:
 - **`BHV_Waypoint_mod`** — stock BHV_Waypoint plus `xpoints=` (live route replace),
-  `WPT_CAPTURE_RADIUS`/`WPT_SLIP_RADIUS` info vars, `WPT_PCT_COMPLETE`, `WPT_RADII`, `WPT_ODO`.
+  `WPT_CAPTURE_RADIUS`/`WPT_SLIP_RADIUS` info vars, `WPT_PCT_COMPLETE`, `WPT_RADII`, `WPT_ODO`,
+  and `loop_start=<n>` (a repeated route restarts at point n, so an approach path at
+  points 0..n-1 is driven only once; default 0 = stock).
   Main mission behavior.
 - **`BHV_SimpleWaypoint`** — MIT teaching example (alder mission only).
 

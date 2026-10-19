@@ -8,6 +8,7 @@ initialize   REGION = false
 initialize   TRAILING = false
 initialize   CORRIDOR = false
 initialize   CORRIDOR_STATUS = none
+initialize   CORRIDOR_TURN = false
 	
 //----------------------------------------------
 Behavior = BHV_Waypoint_mod
@@ -85,9 +86,30 @@ Behavior = BHV_Waypoint
   // No target until pCorridor posts one; "empty" says that is intentional
   // (the behaviour produces nothing while its list is empty).
   points         = empty
+
+  // Its reports would otherwise go to WPT_STAT / WPT_INDEX and overwrite
+  // waypt_survey's (the UI saw the mission index jump to 0 while recovering).
+  wpt_status      = silent
+  wpt_index       = silent
+  cycle_index_var = silent
   speed          = 2          // helm units: knots on the real boat, m/s in sim
   capture_radius = 5
   slip_radius    = 10
+}
+
+// Slow before a sharp corner of the corridor (a U-turn where the approach
+// joins the route, the ends of a there-and-back route, a loop closing) so
+// the boat makes the turn inside the corridor instead of overshooting it.
+Behavior = BHV_ConstantSpeed
+{
+  name       = corridor_turn
+  pwt        = 200
+  condition  = CORRIDOR_TURN = true
+  condition  = WAYPOINT = true
+  perpetual  = true
+
+  speed      = 2              // helm units: knots on the real boat, m/s in sim
+  duration   = no-time-limit
 }
 
 Behavior = BHV_ConstantSpeed

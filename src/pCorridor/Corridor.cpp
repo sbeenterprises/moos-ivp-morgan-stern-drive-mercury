@@ -33,6 +33,29 @@ Corridor::Corridor()
   m_recover_posted = false;
   m_recover_x = 0; m_recover_y = 0;
   m_recover_posts = 0;
+
+  m_tighten       = true;
+  m_corr_capture  = 15;  m_corr_slip  = 30;  m_corr_lead  = 60;
+  m_route_capture = 60;  m_route_slip = 90;  m_route_lead = 400;
+  m_tight_applied = false;
+
+  m_turn_dist      = 60;
+  m_turn_min_angle = 60;
+  m_turn_on        = false;
+  m_turn_posted    = false;
+}
+
+//---------------------------------------------------------
+// Procedure: followingSpec()
+//   One WPT_UPDATE for waypt_survey ("param=value # param=value ...").
+
+string Corridor::followingSpec(double capture, double slip, double lead) const
+{
+  ostringstream os;
+  os << "capture_radius=" << doubleToStringX(capture, 1)
+     << " # slip_radius=" << doubleToStringX(slip, 1)
+     << " # lead=" << doubleToStringX(lead, 1);
+  return(os.str());
 }
 
 //---------------------------------------------------------
@@ -113,6 +136,23 @@ bool Corridor::Iterate()
   AppCastingMOOSApp::Iterate();
 
   double now = MOOSTime();
+
+  // A corridor needs the route followed closely: with the route's normal
+  // 60 m capture radius and 400 m lead the boat skips short legs and cuts
+  // corners by more than a corridor's half width. Tighten while it is on,
+  // restore the normal values when it goes off. Nothing is posted while no
+  // corridor has been sent, so missions without one are unchanged.
+  if(m_tighten && m_corridor_on && !m_tight_applied) {
+    Notify("WPT_UPDATE", followingSpec(m_corr_capture, m_corr_slip, m_corr_lead));
+    m_tight_applied = true;
+    reportEvent("Route following tightened for the corridor");
+  }
+  else if(m_tight_applied && !m_corridor_on) {
+    Notify("WPT_UPDATE", followingSpec(m_route_capture, m_route_slip, m_route_lead));
+    m_tight_applied = false;
+    reportEvent("Route following restored");
+  }
+
   bool active = m_corridor_on && m_waypoint_on && m_model.geometryValid() &&
                 m_nav_x_known && m_nav_y_known;
 
@@ -146,6 +186,20 @@ bool Corridor::Iterate()
     // Leaving the corridor (mission over, corridor off): zero the readout
     // once so the UI does not keep showing a stale distance.
     Notify("XTE_NOW", 0.0);
+  }
+
+  // Sharp turn ahead (or being made): corridor_turn slows the boat so the
+  // turn stays inside the corridor. Only while the corridor is active.
+  bool turn = (zone != CorridorModel::ZONE_NONE) &&
+    m_model.nearSharpTurn(m_nav_x, m_nav_y, m_turn_dist, m_turn_min_angle);
+  if(!m_turn_posted || turn != m_turn_on) {
+    if(m_turn_posted || turn) {
+      Notify("CORRIDOR_TURN", turn ? "true" : "false");
+      if(turn != m_turn_on)
+        reportEvent(string("CORRIDOR_TURN ") + (turn ? "true" : "false"));
+    }
+    m_turn_on = turn;
+    m_turn_posted = true;
   }
   m_was_active = (zone != CorridorModel::ZONE_NONE);
 
@@ -197,6 +251,28 @@ bool Corridor::OnStartUp()
     }
     else if(param == "recover_move" && isNumber(value) && dval >= 0) {
       m_recover_move = dval;
+      handled = true;
+    }
+    else if(param == "turn_slow_dist" && isNumber(value) && dval >= 0) {
+      m_turn_dist = dval;
+      handled = true;
+    }
+    else if(param == "turn_min_angle" && isNumber(value) && dval > 0 && dval <= 180) {
+      m_turn_min_angle = dval;
+      handled = true;
+    }
+    else if(param == "tighten_following")
+      handled = setBooleanOnString(m_tighten, value);
+    else if(isNumber(value) && dval > 0 &&
+            (param == "corridor_capture_radius" || param == "corridor_slip_radius" ||
+             param == "corridor_lead" || param == "route_capture_radius" ||
+             param == "route_slip_radius" || param == "route_lead")) {
+      double *dst = (param == "corridor_capture_radius") ? &m_corr_capture :
+                    (param == "corridor_slip_radius")    ? &m_corr_slip :
+                    (param == "corridor_lead")           ? &m_corr_lead :
+                    (param == "route_capture_radius")    ? &m_route_capture :
+                    (param == "route_slip_radius")       ? &m_route_slip : &m_route_lead;
+      *dst = dval;
       handled = true;
     }
 
@@ -253,6 +329,8 @@ bool Corridor::buildReport()
   actab << "Recover point" << (m_recover_posted ?
      doubleToStringX(m_recover_x, 1) + ", " + doubleToStringX(m_recover_y, 1) : string("-"));
   actab << "Recover posts" << uintToString(m_recover_posts);
+  actab << "Route following" << (m_tight_applied ? string("tight (corridor)") : string("normal"));
+  actab << "Sharp turn ahead" << boolToString(m_turn_on);
   m_msgs << actab.getFormattedString();
 
   return(true);

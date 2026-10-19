@@ -231,6 +231,49 @@ static void testTuning()
   CHECK(m.rawZone(61)  == CorridorModel::ZONE_STOP, "stop_factor 3: 61 stop");
 }
 
+static void testSharpTurns()
+{
+  string err;
+  CorridorModel l = makeL();                     // one 90 deg turn at (100,0)
+  CHECK(near(l.turnAngle(1), 90, 1e-6), "L corner turns 90 deg");
+  CHECK(near(l.turnAngle(0), 0) && near(l.turnAngle(2), 0), "open ends do not turn");
+  CHECK(l.nearSharpTurn(80, 0, 30, 60), "20 m before the corner: slow");
+  CHECK(!l.nearSharpTurn(50, 0, 30, 60), "50 m before the corner: not yet");
+  CHECK(!l.nearSharpTurn(80, 0, 30, 100), "90 deg is not sharp at a 100 deg limit");
+
+  // there and back: approach east to the route start, route back west
+  CorridorModel u;
+  vector<double> xs, ys;
+  xs.push_back(0);   ys.push_back(0);
+  xs.push_back(200); ys.push_back(0);
+  xs.push_back(0);   ys.push_back(1);
+  CHECK(u.setGeometry(60, xs, ys, err), "U-turn geometry: " + err);
+  CHECK(u.turnAngle(1) > 170, "U-turn is close to 180 deg");
+  CHECK(u.nearSharpTurn(170, 0, 40, 60), "slow 30 m before a U-turn");
+
+  // closed loop: the start/end joint is a turn too
+  CorridorModel c;
+  vector<double> cx, cy;
+  cx.push_back(0);   cy.push_back(0);
+  cx.push_back(100); cy.push_back(0);
+  cx.push_back(100); cy.push_back(100);
+  cx.push_back(0);   cy.push_back(0.5);
+  CHECK(c.setGeometry(40, cx, cy, err), "closed loop geometry: " + err);
+  CHECK(c.turnAngle(0) > 100, "closed-loop joint turns sharply");
+  CHECK(c.nearSharpTurn(5, 5, 20, 60), "near the loop joint: slow");
+
+  // straight line never slows
+  CorridorModel s;
+  vector<double> sx, sy;
+  sx.push_back(0); sy.push_back(0);
+  sx.push_back(100); sy.push_back(0);
+  sx.push_back(200); sy.push_back(0);
+  CHECK(s.setGeometry(40, sx, sy, err), "straight geometry: " + err);
+  CHECK(near(s.turnAngle(1), 0, 1e-6) && !s.nearSharpTurn(100, 0, 50, 10), "no turn on a straight line");
+  s.clearGeometry();
+  CHECK(!s.nearSharpTurn(100, 0, 50, 10), "no geometry, no turn");
+}
+
 int main()
 {
   testGeometryValidation();
@@ -241,6 +284,7 @@ int main()
   testInactive();
   testRecoverPoint();
   testTuning();
+  testSharpTurns();
 
   cout << g_checks << " checks, " << g_failures << " failed" << endl;
   return g_failures ? 1 : 0;

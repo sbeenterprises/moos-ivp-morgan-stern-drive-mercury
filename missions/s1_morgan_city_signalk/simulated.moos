@@ -322,6 +322,20 @@ ProcessConfig = pCorridor
   stop_factor  = 2.0   // "stop" beyond this many half widths
   hysteresis   = 2     // metres the xte must clear a boundary by to return
   recover_lead = 20    // metres ahead along the centreline to steer back to
+
+  // While a corridor is on, waypt_survey follows the route tightly so it
+  // neither skips short legs nor cuts corners; route_* restores alpha.bhv's
+  // waypt_survey values when the corridor goes off (keep them in step).
+  turn_slow_dist          = 60   // slow (CORRIDOR_TURN) this close to a sharp corner
+  turn_min_angle          = 60   // degrees of heading change that count as sharp
+
+  tighten_following       = true
+  corridor_capture_radius = 15
+  corridor_slip_radius    = 30
+  corridor_lead           = 60
+  route_capture_radius    = 60
+  route_slip_radius       = 90
+  route_lead              = 400
 }
 
 //------------------------------------------------

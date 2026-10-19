@@ -89,8 +89,9 @@ R = run, c = config block only, – = absent
 | `opr24` | BHV_OpRegionV24 | 300 | `REGION=true` | `REGION_UPDATES` |
 | `trail_contact` | BHV_Trail | 100 | `TRAILING=true` | `TRAIL_UPDATES` |
 | `corridor_slow` | BHV_ConstantSpeed (speed 2) | 200 | `CORRIDOR_STATUS=slow`, `WAYPOINT=true` | – |
-| `corridor_recover` | BHV_Waypoint (speed 2, capture 5) | 200 | `CORRIDOR_STATUS=recovering`, `WAYPOINT=true` | `CORRIDOR_RECOVER_UPDATES` |
-| `corridor_stop` | BHV_ConstantSpeed (speed 0) | 300 | `CORRIDOR_STATUS=stop`, `WAYPOINT=true` | – |
+| `corridor_recover` | BHV_Waypoint (speed 2, capture 5, reports silent) | 200 | `CORRIDOR_STATUS=recovering`, `WAYPOINT=true` | `CORRIDOR_RECOVER_UPDATES` |
+| `corridor_turn` | BHV_ConstantSpeed (speed 2) | 200 | `CORRIDOR_TURN=true`, `WAYPOINT=true` | – |
+| `corridor_stop` | BHV_ConstantSpeed (speed 0) | 240 | `CORRIDOR_STATUS=stop`, `WAYPOINT=true` | – |
 
 Initialised false: `DEPLOY`, `RETURN`, `WAYPOINT`, `STATIONING`, `REGION`, `TRAILING`, `CORRIDOR`
 (and `CORRIDOR_STATUS=none`).

@@ -204,6 +204,53 @@ bool CorridorModel::setGeometryFromSpec(const string& spec, string& err)
 //---------------------------------------------------------
 // Procedure: closest()
 
+//---------------------------------------------------------
+// Procedure: turnAngle()
+
+double CorridorModel::turnAngle(unsigned int i) const
+{
+  unsigned int n = (unsigned int)m_xs.size();
+  if(!m_valid || n < 3 || i >= n)
+    return(0);
+
+  bool closed = hypot(m_xs[0] - m_xs[n-1], m_ys[0] - m_ys[n-1]) < 1.0;
+  unsigned int ia, ib;   // vertex before and after i
+  if(i > 0 && i < n-1) { ia = i-1; ib = i+1; }
+  else if(closed)      { ia = n-2; ib = 1; }   // the joint of a closed loop
+  else
+    return(0);
+
+  double ax = m_xs[i] - m_xs[ia], ay = m_ys[i] - m_ys[ia];
+  double bx = m_xs[ib] - m_xs[i], by = m_ys[ib] - m_ys[i];
+  double la = hypot(ax, ay), lb = hypot(bx, by);
+  if(la <= 0 || lb <= 0)
+    return(0);
+  double c = (ax*bx + ay*by) / (la*lb);
+  if(c > 1)  c = 1;
+  if(c < -1) c = -1;
+  return(acos(c) * 180.0 / M_PI);
+}
+
+//---------------------------------------------------------
+// Procedure: nearSharpTurn()
+
+bool CorridorModel::nearSharpTurn(double x, double y, double dist,
+                                  double min_deg) const
+{
+  if(!m_valid || dist <= 0)
+    return(false);
+  for(unsigned int i = 0; i < m_xs.size(); i++) {
+    if(hypot(x - m_xs[i], y - m_ys[i]) > dist)
+      continue;
+    if(turnAngle(i) >= min_deg)
+      return(true);
+  }
+  return(false);
+}
+
+//---------------------------------------------------------
+// Procedure: closest()
+
 bool CorridorModel::closest(double x, double y, unsigned int& seg, double& t,
                             double& px, double& py, double& dist) const
 {

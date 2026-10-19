@@ -151,6 +151,7 @@ class WebSocket : public AppCastingMOOSApp
   void handleRegionUpdates(const std::string& value);
   void handleRegion(const std::string& value);
   void handleCorridor(const std::string& value);
+  void handleLoopStart(const std::string& value);
 
 };
 

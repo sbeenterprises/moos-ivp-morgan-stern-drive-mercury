@@ -145,7 +145,7 @@ initialised `false` in `alpha.bhv`:
 | `STATIONING` | `station-keep` BHV_StationKeep (50 → 250 via UI) | `STATION_KEEP_WAYPOINT` | **no** |
 | `REGION` | `opr24` BHV_OpRegionV24 (300) | `REGION` / `REGION_UPDATES` | **no** |
 | `TRAILING` | `trail_contact` BHV_Trail (100) | `TRAIL_FOLLOW` | yes |
-| `CORRIDOR` (+ `WAYPOINT`) | via pCorridor's `CORRIDOR_STATUS`: `corridor_slow` (200), `corridor_recover` (200), `corridor_stop` (240) | `CORRIDOR` | yes (only with `WAYPOINT=true`) |
+| `CORRIDOR` (+ `WAYPOINT`) | via pCorridor's `CORRIDOR_STATUS`: `corridor_slow` (200), `corridor_recover` (200), `corridor_turn` (200, on `CORRIDOR_TURN`), `corridor_stop` (240) | `CORRIDOR` | yes (only with `WAYPOINT=true`) |
 | `RETURN`, `DEPLOY` | *(none in the signalk alpha.bhv)* | `AUTONOMOUS_RETURN_TO_BASE`, pMarineViewer buttons | – |
 
 Collision avoidance is active **only while `WAYPOINT=true`** (not while

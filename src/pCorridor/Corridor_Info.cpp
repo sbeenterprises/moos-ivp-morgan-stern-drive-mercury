@@ -86,6 +86,15 @@ void showExampleConfigAndExit()
   blk("  status_interval = 1     // seconds between repeat STATUS posts");
   blk("  recover_move    = 1     // metres the recover point must move ");
   blk("                          // before it is posted again          ");
+  blk("  turn_slow_dist  = 60    // CORRIDOR_TURN within this of a vertex");
+  blk("  turn_min_angle  = 60    // ...turning by at least this (degrees)");
+  blk("  tighten_following       = true  // WPT_UPDATE on CORRIDOR edges");
+  blk("  corridor_capture_radius = 15    // while a corridor is on      ");
+  blk("  corridor_slip_radius    = 30                                    ");
+  blk("  corridor_lead           = 60                                    ");
+  blk("  route_capture_radius    = 60    // restored when it goes off   ");
+  blk("  route_slip_radius       = 90    // (match waypt_survey)        ");
+  blk("  route_lead              = 400                                   ");
   blk("}                                                               ");
   blk("                                                                ");
   exit(0);
@@ -121,6 +130,12 @@ void showInterfaceAndExit()
   blk("                    centreline point recover_lead metres ahead  ");
   blk("                    of the closest point (clamped to the end).  ");
   blk("                    Posted before CORRIDOR_STATUS.              ");
+  blk("  CORRIDOR_TURN     true/false - near a sharp corridor vertex;  ");
+  blk("                    corridor_turn slows the boat for the turn.  ");
+  blk("  WPT_UPDATE        capture_radius / slip_radius / lead for     ");
+  blk("                    waypt_survey: tight when CORRIDOR turns on, ");
+  blk("                    route values when it turns off (only after  ");
+  blk("                    a corridor was on; never otherwise).        ");
   blk("                                                                ");
   exit(0);
 }
