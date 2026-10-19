@@ -323,6 +323,8 @@ Profile::Profile() : m_loaded(false)
   m_settings["auto_rudder_speed_high"]     = 18;
   m_settings["auto_thrust_max_pct"]        = 50;
   m_settings["auto_speed_i_authority_pct"] = 2;
+  m_settings["auto_speed_filter"]          = 0.1;   // NAV_SPEED smoothing
+  m_settings["auto_heading_filter"]        = 0.15;  // NAV_HEADING smoothing
   m_string_settings["auto_speed_ff"]       = DEFAULT_AUTO_SPEED_FF;
   m_string_settings["auto_speed_gains"]    = DEFAULT_AUTO_SPEED_GAINS;
 }
@@ -832,6 +834,10 @@ void Profile::validate()
   for(int i=0; i<6; i++)
     if(setting(auto_pct[i]) < 0 || setting(auto_pct[i]) > 100)
       addError(0, string(auto_pct[i]) + " must be 0..100");
+  const char* filt[] = {"auto_speed_filter", "auto_heading_filter"};
+  for(int i=0; i<2; i++)
+    if(setting(filt[i]) <= 0 || setting(filt[i]) > 1)
+      addError(0, string(filt[i]) + " must be more than 0 and at most 1");
   if(setting("auto_rudder_min_pct") > setting("auto_rudder_max_pct"))
     addError(0, "auto_rudder_min_pct is above auto_rudder_max_pct");
   if(setting("auto_rudder_speed_low") >= setting("auto_rudder_speed_high"))

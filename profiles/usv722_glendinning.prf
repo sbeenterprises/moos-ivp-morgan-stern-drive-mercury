@@ -117,6 +117,8 @@ tx_field = msg=trim, src=trim, byte=0, bits=8, map=enum, values=up:F1|down:F4|id
 auto_speed_ff              = 0:0|1.5:9|4:25|5:40|7:70|24:100
 auto_speed_gains           = 2:0.35:0.005|6:0.25:0.004|12:0.16:0.003|1000:0.10:0.002
 auto_speed_i_authority_pct = 10                // [P] was 2: could not leave the dead zone
+auto_speed_filter          = 0.1
+auto_heading_filter        = 0.15
 auto_thrust_max_pct        = 100               // lever 100 % = engine 50 %
 //
 // Steering, from the same logs: + rudder turns to starboard. Turn rate

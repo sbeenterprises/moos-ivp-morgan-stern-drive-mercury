@@ -702,6 +702,8 @@ bool lanchaPID::OnStartUp()
     rudder_limit_min        = g_tuning.rudder_min;
     rudder_limit_speed_low  = g_tuning.rudder_speed_low;
     rudder_limit_speed_high = g_tuning.rudder_speed_high;
+    speed_alpha             = g_tuning.speed_filter;
+    heading_alpha           = g_tuning.heading_filter;
   }
 
   registerVariables();	

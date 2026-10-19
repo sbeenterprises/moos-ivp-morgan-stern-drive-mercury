@@ -768,28 +768,32 @@ static void testAutoTuning()
   d.gains(30, kp, ki);  CHECK(kp == 0.10 && ki == 0.002, "default gains above 12");
   CHECK(fabs(d.rudderLimit(10) - (20 + 5.0 / 13 * (8 - 20))) < 1e-9, "default rudder limit at 10");
   CHECK(d.thrust_max == 50 && d.i_authority == 2, "default thrust max 50, I-term 2");
+  CHECK(d.speed_filter == 0.1 && d.heading_filter == 0.15, "default filters 0.1 / 0.15");
   double hp, hi, hd;
   d.headingGains(3, hp, hi, hd);   CHECK(hp == 0.28 && hi == 0 && hd == 0.07, "default heading gains below 5 kn");
   d.headingGains(7, hp, hi, hd);   CHECK(hp == 0.22 && hd == 0.06, "default heading gains 5..10 kn");
   d.headingGains(27, hp, hi, hd);  CHECK(hp == 0.07 && hd == 0.03, "default heading gains 25..30 kn");
   d.headingGains(40, hp, hi, hd);  CHECK(hp == 0.05 && hd == 0.025, "default heading gains above 30 kn");
 
-  // The Mercury profile spells out the same values: no behaviour change
+  // Mercury (USV-725): speed side = old values; steering retuned (15 Oct log)
   Profile m;
   CHECK(m.load(g_profile_dir + "/mercury_sterndrive.prf"), "mercury loads with auto_* keys");
+  printErrors(m);
   AutoTuning mt;
   CHECK(mt.configure(m), "mercury tuning configures");
   for(double v=0; v<=25; v+=0.5) {
     double a, b, c, e;
     d.gains(v, a, b);
     mt.gains(v, c, e);
-    double p1, i1, d1, p2, i2, d2;
-    d.headingGains(v, p1, i1, d1);
-    mt.headingGains(v, p2, i2, d2);
-    CHECK(fabs(mt.feedForward(v) - d.feedForward(v)) < 1e-9 && a == c && b == e &&
-          fabs(mt.rudderLimit(v) - d.rudderLimit(v)) < 1e-9 &&
-          p1 == p2 && i1 == i2 && d1 == d2, "mercury = old tuning at " << v);
+    CHECK(fabs(mt.feedForward(v) - d.feedForward(v)) < 1e-9 && a == c && b == e,
+          "mercury speed side = old tuning at " << v);
   }
+  double mp, mi, md;
+  mt.headingGains(6, mp, mi, md);
+  CHECK(mp == 0.5 && mi == 0.03 && mt.heading_i_authority == 15,
+        "mercury heading at 6 kn: kp 0.5, ki 0.03, I-term up to 15 %");
+  CHECK(mt.rudderLimit(2) == 40 && mt.rudderLimit(20) == 10 && mt.heading_limit == 40,
+        "mercury autopilot rudder 40 % slow, 10 % planing, heading limit 40");
 
   // USV-722: measured curve, wider rudder limits
   Profile u;
@@ -811,6 +815,7 @@ static void testAutoTuning()
   CHECK(rejects("auto_speed_gains = 2:0.3\n", "up_to:kp:ki"), "gain step needs three values");
   CHECK(rejects("auto_rudder_min_pct = 50\n", "above auto_rudder_max_pct"), "rudder min above max");
   CHECK(rejects("auto_thrust_max_pct = 150\n", "must be 0..100"), "thrust max above 100");
+  CHECK(rejects("auto_speed_filter = 0\n", "at most 1"), "speed filter 0 rejected");
   CHECK(rejects("auto_heading_gains = 5:0.6:0.03\n", "up_to:kp:ki:kd"), "heading step needs four values");
   CHECK(rejects("auto_heading_gains = 10:0.5:0:0.1|5:0.6:0:0.1\n", "speeds must increase"), "heading speeds must increase");
   CHECK(rejects("auto_heading_kp = 0.3\n", "unknown setting"), "old auto_heading_kp key is gone");
@@ -862,12 +867,33 @@ static void testRudderSpeedLimit()
   CHECK(core.update(t += 0.05).rudder_pct == 12, "autonomy at 18 kn: 12 %");
 
   // Without the key nothing changes
+  Profile n;
+  n.loadFromString(
+    "profile = t\ncan_interface = vcan0\ncapabilities = steer\n"
+    "tx_msg = name=steer, cap=steer, id=18FF11D0, dlc=8, period_ms=100\n"
+    "tx_field = msg=steer, src=rudder_pct, byte=0, bits=16, map=points, points=-100:0|0:511|100:1012\n",
+    g_profile_dir);
+  DriveCore nc;
+  nc.configure(n);
+  nc.setRudder(100);
+  CHECK(!nc.speedLimitActive() && nc.update(1.0).rudder_pct == 100, "no rudder_limit_speed: no speed limit");
+
+  // Mercury (USV-725) now has a speed table too
   Profile m;
-  m.load(g_profile_dir + "/mercury_sterndrive.prf");
+  CHECK(m.load(g_profile_dir + "/mercury_sterndrive.prf"), "mercury loads with rudder_limit_speed");
   DriveCore mc;
   mc.configure(m);
+  mc.setOwner(OWNER_MANUAL);
   mc.setRudder(100);
-  CHECK(!mc.speedLimitActive() && mc.update(1.0).rudder_pct == 100, "no rudder_limit_speed: no speed limit");
+  double mt0 = 1.0;
+  DriveCommand mcmd;
+  for(int i=0; i<20; i++) {           // 1 s: slew 50 %/s lets it reach 12 %
+    mc.setSpeed(20, mt0);
+    mcmd = mc.update(mt0 += 0.05);
+  }
+  CHECK(mc.speedLimitActive() && fabs(mcmd.rudder_pct - 12) < 1e-9,
+        "mercury at 20 kn: rudder 12 %, got " << mcmd.rudder_pct);
+  CHECK(m.setting("rudder_rate_pct_s") == 50, "mercury rudder slew 50 %/s");
 
   // USV-722 profile has the table and a slew limit
   Profile u;

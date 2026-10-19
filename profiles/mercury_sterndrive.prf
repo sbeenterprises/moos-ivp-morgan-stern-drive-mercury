@@ -40,6 +40,15 @@ shift_settle_secs    = 0                      // [P]
 // neutral and lost link act at once.                              [P]
 thrust_rate_up_pct_s = 10
 
+// Rudder vs speed, manual and autopilot alike (iCAN): the same rudder
+// turns the hull harder as speed rises; full lock while planing could
+// roll the boat. speed (kn, NAV_SPEED):max rudder %. With no NAV_SPEED
+// for speed_stale_secs the smallest value (8 %) applies.            [P]
+rudder_limit_speed   = 0:100|5:100|10:40|20:12|27:8
+speed_stale_secs     = 3
+// Rudder slew: at most 50 % of travel per second.                 [P]
+rudder_rate_pct_s    = 50
+
 // Lost link to SS UI while in manual: rudder 0, throttle 0 (neutral)
 lost_link_rudder_pct = 0
 lost_link_thrust_pct = 0
@@ -81,21 +90,28 @@ tx_msg   = name=trim, cap=trim, id=18FF08D0, dlc=8, period_ms=50, fill=FF, guard
 tx_field = msg=trim, src=trim, byte=0, bits=8, map=enum, values=up:F1|down:F4|idle:F0
 
 //--- Autopilot (planchaPID) -----------------------------------------
-// planchaPID reads these from this profile (see AutoTuning.h). These are
-// the values that were hardcoded in planchaPID / set in real.moos before
-// October 2026, so behaviour is unchanged. The 15 Oct log showed the
-// boat pulling to port with only +/-20 % rudder: raise the rudder
-// limits once the steering centre is checked.                     [P]
+// planchaPID reads these from this profile (see AutoTuning.h). The speed
+// side is still the old planchaPID values (not enough 725 data yet).
 auto_speed_ff              = 0:0|3:8|5:14|7:22|8:27|10:35|12:36|15:37|18:41|20:44
 auto_speed_gains           = 2:0.35:0.005|6:0.25:0.004|12:0.16:0.003|1000:0.10:0.002
 auto_speed_i_authority_pct = 2
+auto_speed_filter          = 0.1
+auto_heading_filter        = 0.15
 auto_thrust_max_pct        = 50
-// Heading gains by NAV_SPEED, up_to:kp:ki:kd (the old hardcoded table)
-auto_heading_gains         = 5:0.28:0:0.07|10:0.22:0:0.06|15:0.16:0:0.055|20:0.12:0:0.045|25:0.09:0:0.035|30:0.07:0:0.03|1000:0.05:0:0.025
-auto_heading_i_authority_pct = 0
-auto_heading_limit_pct     = 20
-auto_rudder_max_pct        = 20
-auto_rudder_min_pct        = 8
+//
+// Steering. 15 Oct log (MOOSLog_15_10_2026_____23_04_30): with 0 %
+// rudder the boat turned to port at ~1-1.5 deg/s, +20 % only held it
+// straight, and the old limits (+/-20 %, kp 0.22 at 6 kn, no I-term)
+// left it unable to turn to starboard in autonomy. Higher limits and
+// kp, plus an I-term (up to 15 % rudder) to trim out the pull. Check
+// the steering centre on the hard first: the 18FF11D0 scale above is
+// borrowed from usv-722.                                           [P]
+// Heading gains by NAV_SPEED (kn), up_to:kp:ki:kd; rudder % per deg error.
+auto_heading_gains         = 5:0.6:0.03:0.10|10:0.5:0.03:0.10|15:0.35:0.02:0.08|20:0.25:0.015:0.06|1000:0.15:0.01:0.04
+auto_heading_i_authority_pct = 15
+auto_heading_limit_pct     = 40
+auto_rudder_max_pct        = 40                // at or below 5 kn
+auto_rudder_min_pct        = 10                // at or above 18 kn
 auto_rudder_speed_low      = 5
 auto_rudder_speed_high     = 18
 

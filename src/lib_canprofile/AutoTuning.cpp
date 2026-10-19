@@ -57,6 +57,8 @@ AutoTuning::AutoTuning()
   rudder_speed_high = 18;
   thrust_max        = 50;
   i_authority       = 2;
+  speed_filter      = 0.1;
+  heading_filter    = 0.15;
   string err;
   parseSpeedFF(DEFAULT_AUTO_SPEED_FF, speed_ff, err);
   parseGains(DEFAULT_AUTO_SPEED_GAINS, speed_gains, err);
@@ -181,6 +183,8 @@ bool AutoTuning::configure(const Profile& p, string* err)
   rudder_speed_high = p.setting("auto_rudder_speed_high");
   thrust_max        = p.setting("auto_thrust_max_pct");
   i_authority       = p.setting("auto_speed_i_authority_pct");
+  speed_filter      = p.setting("auto_speed_filter");
+  heading_filter    = p.setting("auto_heading_filter");
   return true;
 }
 

@@ -14,6 +14,8 @@
 //   auto_thrust_max_pct         highest DESIRED_THRUST planchaPID sends
 //   auto_speed_i_authority_pct  most thrust the speed I-term may add
 //   auto_speed_ff     speed:thrust% points, the thrust that holds a speed
+//   auto_speed_filter, auto_heading_filter   NAV_SPEED / NAV_HEADING
+//                     smoothing, 0 < alpha <= 1 (1 = no smoothing)
 //   auto_speed_gains  upto:kp:ki steps, speed PID gains by desired speed
 //
 // Speeds are in NAV_SPEED units (knots on the real boats). Thrust is
@@ -62,6 +64,7 @@ class AutoTuning {
   double heading_limit, heading_i_authority;
   double rudder_max, rudder_min, rudder_speed_low, rudder_speed_high;
   double thrust_max, i_authority;
+  double speed_filter, heading_filter;
   std::vector<SpeedPoint> speed_ff;
   std::vector<GainStep>   speed_gains;
   std::vector<GainStep>   heading_gains;

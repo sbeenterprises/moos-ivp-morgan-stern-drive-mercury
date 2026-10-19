@@ -71,6 +71,7 @@ throttle `tx_field` map.
 | `auto_speed_ff` | `0:0\|3:8\|5:14\|...\|20:44` | speed:thrust% points, the thrust that holds each speed (feed-forward) |
 | `auto_speed_gains` | `2:0.35:0.005\|6:0.25:0.004\|12:0.16:0.003\|1000:0.10:0.002` | up_to:kp:ki steps by desired speed |
 | `auto_speed_i_authority_pct` | 2 | Most thrust the speed I-term may add, % |
+| `auto_speed_filter`, `auto_heading_filter` | 0.1, 0.15 | Smoothing of NAV_SPEED / NAV_HEADING before the PIDs, 0 < alpha <= 1 (1 = none; smaller = smoother but later) |
 | `auto_thrust_max_pct` | 50 | Highest `DESIRED_THRUST` the autopilot sends |
 | `auto_heading_gains` | `5:0.28:0:0.07\|10:0.22:0:0.06\|...\|1000:0.05:0:0.025` | up_to:kp:ki:kd steps by `NAV_SPEED`; kp in rudder % per degree of heading error |
 | `auto_heading_i_authority_pct` | 0 | Most rudder the heading I-term may add, %; trims out a steady pull or current |
