@@ -1,0 +1,425 @@
+
+//-------------------------------------------------
+// NAME: D. Lima
+// FILE: real_usv722.moos
+//
+// Real-boat mission for USV-722: Yamaha F115B outboard, Glendinning helm (profiles/usv722_glendinning.prf)
+// Run on that boat:  pAntler real_usv722.moos
+// Everything boat-specific (CAN IDs, throttle curve, rudder limits,
+// autopilot tuning) is in the profile; this file only selects it and
+// sets the boat's identity. Keep it in step with real_usv725.moos.
+//-------------------------------------------------
+
+ServerHost   = localhost
+ServerPort   = 9000
+Community    = alpha
+MOOSTimeWarp = 1
+
+//Morgan City
+LatOrigin  = 29.71970895316288
+LongOrigin = -91.14705165281887
+
+//------------------------------------------
+// Antler configuration  block
+ProcessConfig = ANTLER
+{
+  MSBetweenLaunches = 200
+
+  Run = MOOSDB        @ NewConsole = false
+  Run = pLogger       @ NewConsole = false
+  //Run = uSimMarineV22 @ NewConsole = false
+  //Run = pMarinePIDV22 @ NewConsole = false
+  Run = planchaPID @ NewConsole = false
+  Run = iDivisorNMEA	@ NewConsole = false
+  Run = pHelmIvP      @ NewConsole = false
+  Run = pMarineViewer	@ NewConsole = false
+  Run = uProcessWatch	@ NewConsole = false
+  Run = pNodeReporter	@ NewConsole = false
+  Run = pRealm	      @ NewConsole = false
+  Run = iCAN	      @ NewConsole = false
+  Run = iCANRec	      @ NewConsole = false
+  //Run = iNMEA	      @ NewConsole = false
+  //Run = iSignalK	      @ NewConsole = false
+  Run = iWebSocket	      @ NewConsole = false
+  Run = pXYpublisher      @ NewConsole = false
+  Run = pContactSpawn	      @ NewConsole = false
+  Run = pContactMgrV20 @ NewConsole = false
+  Run = iRadarTargets @ NewConsole = false
+  Run = grafana_bridge  @ NewConsole = false
+}
+
+// iRadarTargets Config Block
+
+ProcessConfig = iRadarTargets
+{
+  AppTick   = 10
+  CommsTick = 10
+
+  // UDP Configuration
+  udp_port = 8091       // Port to receive NMEA $RATTM sentences
+  udp_host = 127.0.0.1  // Host interface (localhost by default)
+}
+
+// pContactSpawn Config Block
+
+ProcessConfig = pContactSpawn
+{
+  AppTick 	= 1
+  CommsTick = 1 
+}
+
+//--------------------------------------------------------
+// pContactMgrV20 Config Block
+
+ProcessConfig = pContactMgrV20
+{
+  AppTick   = 2
+  CommsTick = 2
+
+  decay = 5,10
+
+	app_logging = true
+	
+  alert_verbose = true
+
+	contact_local_coords = force_lat_lon
+	
+  contact_max_age   = 5
+  display_radii     = true
+	display_radii_id  = avd
+  alert_range_color = gray70
+  cpa_range_color   = gray30
+
+	alert = id=avdcol_, var=CONTACT_INFO, val="name=$[VNAME] # contact=$[VNAME]"
+  alert = id=avdcol_, alert_range=1000, cpa_range=500
+	
+	//match_region = pts = {60,-40 : 60,-160 : 150,-160 : 180,-100 : 150,-40}
+	//match_type = kayak, uuv
+
+  disable_var = XYZ_DISABLE_TARGET
+  enable_var  = XYZ_REENABLE_TARGET
+	
+	post_closest_range   = true
+  hold_alerts_for_helm = true
+}
+
+
+// iCANRec config block
+
+ProcessConfig = iCANRec
+{
+   AppTick   = 20
+   CommsTick = 20
+}
+
+// pXYpublisher config block
+
+ProcessConfig = pXYpublisher
+{
+   AppTick   = 4
+   CommsTick = 4
+}
+//------------------------------------------------
+
+
+// iCAN config block
+
+ProcessConfig = iCAN
+{
+   AppTick   = 50
+   CommsTick = 50
+
+   // Manual control, one lever: DESIRED_THRUST -100..+100 sets gear and
+   // throttle together (+ ahead, - astern, 0 neutral); DESIRED_GEAR is
+   // ignored. The profile's shift interlock still passes through neutral.
+   // Set to "command" for separate gear buttons (A/N/R) + throttle.
+   manual_gear = thrust_sign
+
+   // The boat's CAN IDs, scaling, limits, lost-link values and autopilot
+   // tuning live in this profile (planchaPID reads the same line).
+   profile_file = ../../profiles/usv722_glendinning.prf
+}
+//------------------------------------------------
+
+//------------------------------------------------
+// iDivisorNMEA config block
+
+ProcessConfig = iDivisorNMEA
+{
+   AppTick   = 20
+   CommsTick = 20
+
+   // This boat's own AIS MMSI, so its transponder echo is not taken as a
+   // contact. Unset = code default 710400014. Set it for this boat:
+   // ownship_mmsi = <MMSI>
+}
+//------------------------------------------------
+
+
+//-------------------------------------------
+// planchaPID bloco de config
+
+ProcessConfig = planchaPID
+{
+   AppTick   = 20
+   CommsTick = 20
+
+   // Heading gains, rudder and thrust limits and the speed -> thrust map
+   // are per boat: auto_* keys in the boat profile. planchaPID uses the
+   // profile_file of the iCAN block below (or its own profile_file line).
+}
+
+
+//------------------------------------------------
+// iWebSocket config block
+
+ProcessConfig = iWebSocket
+{
+   AppTick   = 20
+   CommsTick = 20
+
+   // No message or ping reply from SS UI for this long = link lost.
+   // In manual control iCAN then sets rudder 0 and throttle 0.
+   link_timeout = 3
+}
+
+//------------------------------------------------
+// iNMEA config block
+
+ProcessConfig = iNMEA
+{
+   AppTick   = 4
+   CommsTick = 4
+}
+
+//------------------------------------------------
+// iSignalK config block
+
+ProcessConfig = iSignalK
+{
+   AppTick   = 4
+   CommsTick = 4
+}
+
+//------------------------------------------
+// pLogger config block
+
+ProcessConfig = pLogger
+{
+  AppTick   = 8
+  CommsTick = 8
+
+  AsyncLog = true
+
+  // For variables that are published in a bundle on their 
+  // first post, explicitly declare their logging request
+  Log = IVPHELM_LIFE_EVENT @ 0 NOSYNC
+  Log = REPORT @ 0 NOSYNC
+  Log = BHV_SETTINGS @ 0 NOSYNC
+  Log = SUMMARY @ 0 NOSYNC
+
+  LogAuxSrc = true
+  WildCardLogging = true
+  WildCardOmitPattern = *_STATUS
+  WildCardOmitPattern = DB_VARSUMMARY
+  WildCardOmitPattern = DB_RWSUMMARY
+  WildCardExclusionLog = true
+}
+
+//------------------------------------------
+// uProcessWatch config block
+
+ProcessConfig = uProcessWatch
+{
+  AppTick   = 4
+  CommsTick = 4
+
+  watch_all = true
+	nowatch   = uPokeDB*
+	nowatch   = uQueryDB*
+	nowatch   = uXMS*
+	nowatch   = uMAC*
+}
+
+//------------------------------------------
+// uSimMarineV22 config block
+
+ProcessConfig = uSimMarineV22
+{
+  AppTick  	= 4
+  CommsTick	= 4
+
+  start_pos     = x=0, y=0, heading=0, speed=0
+  prefix        = NAV
+  turn_rate     = 95
+  thrust_map    = 0:0, 20:3, 40:6, 60:9, 80:12, 100:15
+	turn_spd_loss = 0.4
+}
+
+//------------------------------------------
+// pHelmIvP config block
+
+ProcessConfig = pHelmIvP
+{
+  AppTick    = 4
+  CommsTick  = 4
+
+  behaviors  = alpha.bhv
+  domain     = course:0:359:360
+  domain     = speed:0:35:351
+
+  ok_skew = any
+  start_in_drive = false
+  hold_on_apps = pContactMgrV20
+  ivp_behavior_dir = ../../lib
+}
+
+//------------------------------------------
+// pMarinePID config block
+
+ProcessConfig = pMarinePIDV22
+{
+  AppTick    = 20
+  CommsTick  = 20
+
+  verbose       = true
+  depth_control = false
+
+  // SIM_INSTABILITY = 20
+
+  // Yaw PID controller
+  yaw_pid_kp		 = 0.9
+  yaw_pid_kd		 = 0.3
+  yaw_pid_ki		 = 0.3
+  yaw_pid_integral_limit = 0.07
+
+  // Speed PID controller
+  speed_pid_kp		 = 1.0
+  speed_pid_kd		 = 0.0
+  speed_pid_ki		 = 0.0
+  speed_pid_integral_limit = 0.07
+
+  //MAXIMUMS
+  maxrudder    = 100
+  maxthrust    = 100
+
+  // A non-zero SPEED_FACTOR overrides use of SPEED_PID
+  // Will set DESIRED_THRUST = DESIRED_SPEED * SPEED_FACTOR
+  speed_factor = 1
+}
+
+//------------------------------------------
+// pMarineViewer config block
+
+ProcessConfig = pMarineViewer
+{
+  AppTick    = 4
+  CommsTick  = 4
+
+  tiff_file            = morgan_city.tif
+	//tiff_file            = MIT_SP.tif
+
+  set_pan_x            = -90
+  set_pan_y            = -280
+  zoom                 = 0.65
+  vehicle_shape_scale  = 1.5
+  hash_delta           = 50
+  hash_shade           = 0.22
+  hash_viewable        = false
+
+  trails_point_size   = 1
+
+	//op_vertex = x=-83, y=-47,    lwidth=1,lcolor=yellow,looped=true,group=moa
+  //op_vertex = x=-46.4, y=-129.2, lwidth=1,lcolor=yellow,looped=true,group=moa
+  //op_vertex = x=94.6, y=-62.2,   lwidth=1,lcolor=yellow,looped=true,group=moa
+  //op_vertex = x=58,   y=20,    lwidth=1,lcolor=yellow,looped=true,group=moa
+
+  // Appcast configuration
+  appcast_height       = 75
+  appcast_width        = 30
+  appcast_viewable     = true
+  appcast_color_scheme = indigo
+  nodes_font_size      = xlarge
+  procs_font_size      = xlarge
+  appcast_font_size    = large
+  
+  // datum_viewable = true
+  // datum_size     = 18
+  // gui_size = small
+
+  // left_context[survey-point] = DEPLOY=true
+  // left_context[survey-point] = MOOS_MANUAL_OVERRIDE=false
+  // left_context[survey-point] = RETURN=false
+
+  right_context[return] = DEPLOY=true
+  right_context[return] = MOOS_MANUAL_OVERRIDE=false
+  right_context[return] = RETURN=false
+
+  scope  = SUMMARY
+  scope  = RETURN
+  scope  = WPT_STAT
+  scope  = VIEW_SEGLIST
+  scope  = VIEW_POINT
+  scope  = VIEW_POLYGON
+  scope  = MVIEWER_LCLICK
+  scope  = MVIEWER_RCLICK
+
+  button_one = DEPLOY # DEPLOY=true
+  button_one = MOOS_MANUAL_OVERRIDE=false # RETURN=false
+  button_two = RETURN # RETURN=true
+  button_three = SLOWER # WPT_UPDATE=speed=1.5
+  button_four = FASTER # WPT_UPDATE=speed=3.5
+
+  action  = MENU_KEY=deploy # DEPLOY = true # RETURN = false
+  action+ = MENU_KEY=deploy # MOOS_MANUAL_OVERRIDE=false
+  action  = RETURN=true
+  action  = UPDATES_RETURN=speed=1.4
+  
+  stale_report_thresh  = 5     // Exibe "Stale Report:" após 10s
+  stale_remove_thresh  = 8 
+  
+}
+
+//------------------------------------------
+// pNodeReporter config block
+
+ProcessConfig = pNodeReporter
+{
+  AppTick    = 2
+  CommsTick	 = 2
+
+  cross_fill_policy = global
+  platform_type   = ship
+  platform_color  = red
+  platform_length = 100
+}
+
+// grafana_bridge: MOOS -> InfluxDB (SA-1 Dashboard)
+ProcessConfig = grafana_bridge
+{
+  AppTick   = 10
+  CommsTick = 20
+ 
+  influx_url    = localhost:8086   // no scheme: // starts a MOOS comment
+  influx_tls    = false
+  influx_token  = e5fe113991d2c3d97be9de264a8ebbc9537eccb73d9d540e491ed3604b560656
+  influx_org    = usv
+  influx_bucket = telemetry
+  events_bucket = events
+  vessel_id     = usv-722
+ 
+  mission_name   = alpha
+  max_rate_hz    = 5
+  engine_rate_hz = 2
+  ignore_vars    = NAV_YAW         // iDivisorNMEA posts rudder angle as NAV_YAW
+  radar_cpa_alert_m = 500
+  tcpa_alert_s   = 300
+  contact_ttl_s  = 10
+  signalk_http   = localhost:3000
+ 
+  readiness_profile  = vessel
+  readiness_period_s = 5
+  optional_apps = pMarineViewer,pContactSpawn
+  enc_fitted = false          // no ENC yet: row reads N/A
+  console_checklist = false   // UI keeps its checklist local
+}

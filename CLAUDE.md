@@ -6,7 +6,7 @@ C++11, CMake, Ubuntu 22.04. Full docs in [docs/](docs/ARCHITECTURE.md).
 ## Build & run
 - Build: `./build.sh -j$(nproc)` → `bin/`, `lib/`. Needs moos-ivp at `../moos-ivp` or `~/moos-ivp`, IXWebSocket, jsoncpp, curl, boost, Eigen3.
 - Sim: `cd missions/s1_morgan_city_signalk && pAntler simulated.moos` (not `launch.sh` — it targets a missing `alpha.moos`).
-- Boat: `pAntler real.moos`. Monitor: `uMAC <file>.moos`.
+- Boat: `pAntler real_usv722.moos` or `pAntler real_usv725.moos` (one file per boat; `real.moos` is the generic template). Monitor: `uMAC <file>.moos`.
 - Unit tests only for lib_canprofile (`tests/run_tests.sh`); otherwise verify in `simulated.moos` / `external.moos` + `tools/aissim`.
 
 ## Map
