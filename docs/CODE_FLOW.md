@@ -45,6 +45,9 @@ UI ─ws:8000 "KEY=value"─▶ iWebSocket ─▶ mode flags + WPT_UPDATE ─▶
   posts `WAYPOINT=true`, `MOOS_MANUAL_OVERRIDE=false`, `WPT_UPDATE=speed=..`,
   `WPT_UPDATE=polygon=x,y:...` (lat/lon → local UTM against hardcoded origin),
   then `WPT_UPDATE=repeat=..`.
+- Route corridor (`CORRIDOR=width=..#pts=lat,lon:...`): posts `CORRIDOR_UPDATE`
+  (local x,y) then `CORRIDOR=true`; pCorridor turns NAV_X/Y into `XTE_NOW` and
+  `CORRIDOR_STATUS`, which the `corridor_*` behaviours act on (see Helm modes).
 - Full key list: [UI_PROTOCOL.md](UI_PROTOCOL.md).
 
 ### 2.2 pHelmIvP + behaviors (`missions/s1_morgan_city_signalk/alpha.bhv`)
@@ -142,6 +145,7 @@ initialised `false` in `alpha.bhv`:
 | `STATIONING` | `station-keep` BHV_StationKeep (50 → 250 via UI) | `STATION_KEEP_WAYPOINT` | **no** |
 | `REGION` | `opr24` BHV_OpRegionV24 (300) | `REGION` / `REGION_UPDATES` | **no** |
 | `TRAILING` | `trail_contact` BHV_Trail (100) | `TRAIL_FOLLOW` | yes |
+| `CORRIDOR` (+ `WAYPOINT`) | via pCorridor's `CORRIDOR_STATUS`: `corridor_slow` (200), `corridor_recover` (200), `corridor_stop` (240) | `CORRIDOR` | yes (only with `WAYPOINT=true`) |
 | `RETURN`, `DEPLOY` | *(none in the signalk alpha.bhv)* | `AUTONOMOUS_RETURN_TO_BASE`, pMarineViewer buttons | – |
 
 Collision avoidance is active **only while `WAYPOINT=true`** (not while

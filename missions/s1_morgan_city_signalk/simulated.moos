@@ -33,6 +33,7 @@ ProcessConfig = ANTLER
   //Run = iRaspberryServer	      @ NewConsole = false
   Run = iNMEA	      @ NewConsole = false
   Run = iWebSocket	      @ NewConsole = false
+  Run = pCorridor     @ NewConsole = false
   Run = iCANRec	      @ NewConsole = false
   Run = pContactSpawn	      @ NewConsole = false
   Run = pTrafficSim   @ NewConsole = false
@@ -305,6 +306,25 @@ ProcessConfig = iWebSocket
 }
 
 //------------------------------------------------
+// pCorridor config block
+//
+// Route corridor monitor: cross-track error against the corridor the UI
+// sends (CORRIDOR=...), zone in CORRIDOR_STATUS for the corridor_* behaviours
+// in alpha.bhv. Thresholds, with half = width/2:
+//   in <= slow_frac*half < slow <= half < recovering <= stop_factor*half < stop
+
+ProcessConfig = pCorridor
+{
+  AppTick   = 4
+  CommsTick = 4
+
+  slow_frac    = 0.5   // "slow" beyond this share of the half width
+  stop_factor  = 2.0   // "stop" beyond this many half widths
+  hysteresis   = 2     // metres the xte must clear a boundary by to return
+  recover_lead = 20    // metres ahead along the centreline to steer back to
+}
+
+//------------------------------------------------
 // iNMEA config block
 
 ProcessConfig = iNMEA
@@ -348,6 +368,8 @@ ProcessConfig = pLogger
 
   WildCardLogging = true
   WildCardOmitPattern = *_STATUS
+  // ...but keep pCorridor's zone: the omit above would drop it.
+  Log = CORRIDOR_STATUS @ 0 NOSYNC
   WildCardOmitPattern = DB_VARSUMMARY
   WildCardOmitPattern = DB_RWSUMMARY
   // The live feed and the 4 Hz behaviour trace are for the panel, not the log -

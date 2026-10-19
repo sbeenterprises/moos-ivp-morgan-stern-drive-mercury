@@ -16,6 +16,7 @@ the current `main`.
 | [pContactSpawn](#pcontactspawn) | ✔ | real, simulated, realvision | single synthetic contact |
 | [pTrafficSim](#ptrafficsim) | ✔ | simulated | simulated AIS traffic |
 | [pColavEval](#pcolaveval) | ✔ | simulated | COLAV metrics |
+| [pCorridor](#pcorridor) | ✔ | real, real_usv722/725, simulated, external | route corridor (XTE + zone) |
 | [pSensorFusionTracker_ref](#psensorfusiontracker_ref) | ✔ | realvision | radar+vision fusion |
 | [iNMEA](#inmea) | ✔ | simulated | NAV → NMEA to Signal K |
 | [iSignalK](#isignalk) | ✔ | legacy only | Signal K course → WPT |
@@ -126,6 +127,27 @@ Positional parse (expects token 2 = `X=`, 3 = `Y=`).
 - **Subs**: `NAV_*`, `DESIRED_HEADING`, `WPT_INDEX`, `WAYPOINT`, `NODE_REPORT`, `TRAFFIC_SPAWNED`,
   `COLAV_TEST`, `COLAV_BHV_SPAWN/ACTIVE/INACTIVE/CPA/END/TRACE`, `IVPHELM_LIFE_EVENT`, `UCD_REPORT`.
 - **Pubs**: `COLAV_TEST_ACK`, `COLAV_ENCOUNTER`, `ENCOUNTER_SUMMARY`, `COLAV_METRICS` (JSON array).
+
+## pCorridor
+`src/pCorridor/` — route corridor monitor. Geometry and zone logic live in
+`CorridorModel.{h,cpp}` (plain C++, no MOOS; unit tests in `tests/corridor_test.cpp`).
+- **Config**: `slow_frac` (0.5), `stop_factor` (2.0), `hysteresis` (2 m),
+  `recover_lead` (20 m), `status_interval` (1 s), `recover_move` (1 m).
+- **Subs**: `NAV_X`, `NAV_Y`, `CORRIDOR` (true/false), `CORRIDOR_UPDATE`
+  (`width=<w>,pts={x1,y1:x2,y2:...}`, full width, local metres, from iWebSocket), `WAYPOINT`.
+- **Active** only while `CORRIDOR=true`, `WAYPOINT=true`, the geometry is valid and NAV_X/Y are known.
+- **Zones** (xte = distance to the nearest centreline segment, half = width/2):
+  `in` ≤ slow_frac·half < `slow` ≤ half < `recovering` ≤ stop_factor·half < `stop`;
+  `none` when inactive. Worse zones are entered at once; better zones only once
+  the xte clears the boundary by `hysteresis`.
+- **Pubs**: `CORRIDOR_STATUS` (on change and every `status_interval`), `XTE_NOW`
+  (every iteration while active; one 0 on deactivation), `CORRIDOR_RECOVER_UPDATES =
+  points=x,y` while `recovering` (centreline point `recover_lead` m past the closest
+  point, clamped to the end; posted before the status). With no corridor it posts
+  only `CORRIDOR_STATUS=none`.
+- Acted on by `corridor_slow` / `corridor_recover` / `corridor_stop` in `alpha.bhv`
+  (see [MISSIONS.md](MISSIONS.md#alphabhv-behaviors)). A boat in `stop` stays stopped
+  until the operator acts (CORRIDOR=off, a wider corridor, manual control or AUTONOMOUS_STOP).
 
 ## pSensorFusionTracker_ref
 `src/pSensorFusionTracker_ref/` — needs Eigen3.

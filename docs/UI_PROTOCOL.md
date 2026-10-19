@@ -28,6 +28,7 @@ Source: `src/iWebSocket/main.cpp`, `src/iWebSocket/WebSocket.cpp`.
   "ENGINE_INTAKE_MANIFOLD_PRESSURE": 0, "ENGINE_BATTERY_VOLTAGE": 0,
   "COLAV_TEST": false, "COLAV_TEST_ACK": false, "COLAV_METRICS": "[...json array...]",
   "TRAFFIC_SPAWNED": "str", "TRAFFIC_TARGETS": "str", "COLAV_DIST": "str",
+  "CORRIDOR": false, "CORRIDOR_STATUS": "none", "XTE_NOW": 0,
   "CONTACT_INFO": { "NAME": "str", "LAT": 0, "LON": 0, "SPD": 0, "HDG": 0 }
 }
 ```
@@ -37,6 +38,10 @@ Notes:
 - `CONTACT_INFO` holds only the **last** `NODE_REPORT` received before the tick.
 - `ID_ROUTE` / `REPEAT_MISSION` echo what the UI last sent.
 - `ENGINE_OIL_TEMP` is always 0 (registered as `OIL_TEMP`, handled as `ENGINE_OIL_TEMP`).
+- Route corridor: `CORRIDOR` (bool, corridor armed), `CORRIDOR_STATUS`
+  (`none` | `in` | `slow` | `recovering` | `stop`, from pCorridor; `none` unless a corridor
+  is armed **and** a waypoint mission runs), `XTE_NOW` (metres from the centreline,
+  absolute; only meaningful while the status is not `none`, reset to 0 when it goes `none`).
 
 ### Heartbeat
 Plain text (not JSON) `HEARTBEAT=<MOOSTime>` every 30 s — clients must tolerate it.
@@ -55,7 +60,7 @@ lists use `:`, coordinates are `lat,lon`. Unknown keys are ignored.
 |---|---|---|
 | `AUTONOMOUS_START` | `true[#SPEED[#lat,lon:...[#REPEAT=true\|false][#ID_ROUTE=id]]]` | `WAYPOINT=true`, `MOOS_MANUAL_OVERRIDE=false`, `REPEAT_MISSION`, `ID_ROUTE`, `WPT_UPDATE=speed=`, `WPT_UPDATE=polygon=x,y:...`, then `WPT_UPDATE=repeat=1000\|0` |
 | `AUTONOMOUS_WAYPOINTS` | `lat,lon:lat,lon:...` | `WPT_UPDATE=xpoints=...` (live route edit) |
-| `AUTONOMOUS_STOP` | `true` | `WAYPOINT=false`, `STATIONING=false`, `DESIRED_RUDDER=0`, `DESIRED_THRUST=0` |
+| `AUTONOMOUS_STOP` | `true` | `WAYPOINT=false`, `STATIONING=false`, `DESIRED_RUDDER=0`, `DESIRED_THRUST=0`, then `CORRIDOR=false` |
 | `AUTONOMOUS_RETURN_TO_BASE` | `true\|false` | `RETURN` (no behavior consumes it in current alpha.bhv) |
 | `RETURN_UPDATE` | `<x>=lat,lon` | `RETURN_UPDATE=points=x,y` (legacy bhv only) |
 | `BASE_COORDS` | string | `BASE_COORDS` (stored + echoed) |
@@ -79,6 +84,7 @@ lists use `:`, coordinates are `lat,lon`. Unknown keys are ignored.
 | `PUT_TARGET` | `lat=..#lon=..#course=at_usv\|deg#speed=kn#type=..#length=..#beam=..` | `TRAFFIC_SPAWN=...` (pTrafficSim) |
 | `CLEAR_TARGETS` | `all` / `name=AIS...` | `TRAFFIC_CLEAR` |
 | `COLAV_DIST` | `pwt_outer_dist=..#pwt_inner_dist=..#completed_dist=..#max_util_cpa_dist=..#min_util_cpa_dist=..` | `CONTACT_INFO=...`, `BCM_ALERT_REQUEST=id=avdcol_,...`, `COLAV_DIST` |
+| `CORRIDOR` | `width=<m>#pts=<lat>,<lon>:<lat>,<lon>:...` / `off` | `CORRIDOR_UPDATE=width=<w>,pts={x1,y1:x2,y2:...}` (local x,y) then `CORRIDOR=true` / off: `CORRIDOR=false`. `width` is the full width (both sides), > 0; at least 2 points. Any malformed field, a non-number or an out-of-range lat/lon rejects the whole command (run warning, nothing posted). Needs the mission origin. The corridor acts only while `WAYPOINT=true`; it is cleared by `AUTONOMOUS_STOP` and when the route completes |
 | `HEARTBEAT_PING` | any | keep-alive only |
 
 ## Testing without the UI

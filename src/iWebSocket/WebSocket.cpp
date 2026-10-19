@@ -78,6 +78,12 @@ std::string colav_metrics;    // JSON array of encounters, latest value only
 std::string traffic_spawned;  // last pTrafficSim ack, ok=true/false
 std::string traffic_targets;  // runtime-spawned contacts currently placed
 
+// Route corridor (pCorridor), echoed to the UI. CORRIDOR is the on/off flag
+// as posted to the MOOSDB, CORRIDOR_STATUS / XTE_NOW come from pCorridor.
+bool corridor_active = false;
+std::string corridor_status = "none";
+double xte_now = 0;
+
 // Engagement distances of the collision avoidance behaviour (BHV_AvdColregsV22,
 // the avdcol_ block in alpha.bhv). Seeded here with the mission values and
 // overridable from the iWebSocket config block, then owned by this app: the UI
@@ -344,6 +350,12 @@ bool WebSocket::OnNewMail(MOOSMSG_LIST &NewMail)
       traffic_targets = msg.GetString();
     else if(key == "COLAV_BHV_SPAWN")
       colav_respawn_seen = true;
+    else if(key == "CORRIDOR")
+      corridor_active = msg.IsDouble() ? (msg.GetDouble() != 0) : (msg.GetString() == "true");
+    else if(key == "CORRIDOR_STATUS")
+      corridor_status = msg.GetString();
+    else if(key == "XTE_NOW")
+      xte_now = msg.GetDouble();
     else if(key == "NODE_REPORT") {
       // Parse NODE_REPORT to extract NAME, X, Y, SPD, HDG
       std::string node_report = msg.GetString();
@@ -557,6 +569,9 @@ bool WebSocket::Iterate()
   root["TRAFFIC_SPAWNED"] = traffic_spawned;
   root["TRAFFIC_TARGETS"] = traffic_targets;
   root["COLAV_DIST"] = colav_dist;
+  root["CORRIDOR"] = corridor_active;
+  root["CORRIDOR_STATUS"] = corridor_status;
+  root["XTE_NOW"] = xte_now;
 
   // iCAN: what is really being sent, who owns the drive, feedback
   for (std::map<std::string, double>::iterator v = m_can_num.begin(); v != m_can_num.end(); v++)
@@ -724,6 +739,9 @@ void WebSocket::registerVariables()
   Register("TRAFFIC_SPAWNED", 0); //pTrafficSim ack for a placed target
   Register("TRAFFIC_TARGETS", 0); //Runtime-spawned contacts currently placed
   Register("COLAV_BHV_SPAWN", 0); //An avdcol_ instance was just spawned
+  Register("CORRIDOR", 0);        //Route corridor on/off
+  Register("CORRIDOR_STATUS", 0); //pCorridor zone: none|in|slow|recovering|stop
+  Register("XTE_NOW", 0);         //pCorridor cross-track error, metres
   for (std::set<std::string>::iterator v = m_can_vars.begin(); v != m_can_vars.end(); v++)
     Register(*v, 0);              //iCAN status and drive feedback for SS UI
 
@@ -812,6 +830,7 @@ void WebSocket::initializeMessageHandlers()
   m_messageHandlers["PUT_TARGET"] = &WebSocket::handlePutTarget;
   m_messageHandlers["CLEAR_TARGETS"] = &WebSocket::handleClearTargets;
   m_messageHandlers["COLAV_DIST"] = &WebSocket::handleColavDist;
+  m_messageHandlers["CORRIDOR"] = &WebSocket::handleCorridor;
 }
 
 //---------------------------------------------------------
@@ -1401,6 +1420,11 @@ void WebSocket::handleAutonomousStop(const std::string& value)
     //Stop the engine and put rudder in zero just for safety
     Notify("DESIRED_RUDDER", 0.0);
     Notify("DESIRED_THRUST", 0.0);
+
+    // A corridor belongs to the mission it was drawn for; do not leave it
+    // armed for whatever route is started next. Posted last so the existing
+    // stop sequence above is unchanged.
+    Notify("CORRIDOR", "false");
   }
 }
 
@@ -1824,6 +1848,107 @@ void WebSocket::handleRegion(const std::string& value)
       }
     }
   }
+}
+
+//---------------------------------------------------------
+// Procedure: handleCorridor()
+//   CORRIDOR=width=<metres>#pts=<lat>,<lon>:<lat>,<lon>:...
+//   CORRIDOR=off
+//
+//   width is the full corridor width (both sides of the centreline). The
+//   centreline points are converted to local x,y the same way as routes and
+//   regions, then handed to pCorridor as
+//     CORRIDOR_UPDATE = width=<w>,pts={x1,y1:x2,y2:...}
+//   followed by CORRIDOR = true. Anything malformed rejects the whole
+//   command with a run warning: a corridor with a point silently dropped
+//   would not be the shape the operator drew.
+
+void WebSocket::handleCorridor(const std::string& value)
+{
+  std::string v = stripBlankEnds(value);
+  if (v == "off" || v == "false") {
+    Notify("CORRIDOR", "false");
+    reportEvent("[CORRIDOR] off");
+    return;
+  }
+
+  if (!originReady("CORRIDOR"))
+    return;
+
+  std::string width_str, pts_str;
+  bool have_width = false, have_pts = false;
+  std::vector<std::string> fields = parseString(v, '#');
+  for (unsigned int i = 0; i < fields.size(); i++) {
+    std::string field = fields[i];
+    std::string fkey = tolower(stripBlankEnds(biteString(field, '=')));
+    if (fkey == "width") {
+      width_str = stripBlankEnds(field);
+      have_width = true;
+    }
+    else if (fkey == "pts") {
+      pts_str = stripBlankEnds(field);
+      have_pts = true;
+    }
+  }
+
+  if (!have_width || !have_pts) {
+    reportRunWarning("CORRIDOR ignored, expected width=<m>#pts=lat,lon:...: " + value);
+    return;
+  }
+  if (!isNumber(width_str) || !(atof(width_str.c_str()) > 0)) {
+    reportRunWarning("CORRIDOR ignored, width must be a number > 0: " + width_str);
+    return;
+  }
+  double width = atof(width_str.c_str());
+
+  std::vector<std::string> coordTokens = parseString(pts_str, ':');
+  std::vector<std::string> convertedCoords;
+  for (unsigned int i = 0; i < coordTokens.size(); i++) {
+    std::string coord = stripBlankEnds(coordTokens[i]);
+    if (coord.empty())
+      continue;
+    std::string lonPart = coord;
+    std::string latPart = stripBlankEnds(biteString(lonPart, ','));
+    lonPart = stripBlankEnds(lonPart);
+    if (!isNumber(latPart) || !isNumber(lonPart)) {
+      reportRunWarning("CORRIDOR ignored, bad point '" + coord + "'");
+      return;
+    }
+    double orig_lat = atof(latPart.c_str());
+    double orig_lon = atof(lonPart.c_str());
+    if (orig_lat < -90 || orig_lat > 90 || orig_lon < -180 || orig_lon > 180) {
+      reportRunWarning("CORRIDOR ignored, point out of range '" + coord + "'");
+      return;
+    }
+
+    double local_y = 0.0, local_x = 0.0;
+    m_geodesy.LatLong2LocalUTM(orig_lat, orig_lon, local_y, local_x);
+
+    std::ostringstream oss;
+    oss << std::fixed << std::setprecision(1) << local_x << "," << local_y;
+    convertedCoords.push_back(oss.str());
+  }
+
+  if (convertedCoords.size() < 2) {
+    reportRunWarning("CORRIDOR ignored, need at least 2 centreline points, got " +
+                     std::to_string(convertedCoords.size()));
+    return;
+  }
+
+  std::ostringstream spec;
+  spec << std::fixed << std::setprecision(1) << "width=" << width << ",pts={";
+  for (unsigned int i = 0; i < convertedCoords.size(); i++) {
+    if (i > 0)
+      spec << ":";
+    spec << convertedCoords[i];
+  }
+  spec << "}";
+
+  // Geometry first, then the flag, so pCorridor never sees CORRIDOR=true
+  // paired with a previous corridor's shape.
+  Notify("CORRIDOR_UPDATE", spec.str());
+  Notify("CORRIDOR", "true");
+  reportEvent("[CORRIDOR] Published: " + spec.str());
 }
 
 //---------------------------------------------------------

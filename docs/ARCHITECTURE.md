@@ -82,7 +82,7 @@ docs/                 this documentation
 
 `src/CMakeLists.txt` builds: `lib_behaviors-test`, `pXRelayTest`, `iDivisorNMEA`,
 `planchaPID`, `iNMEA`, `iSignalK`, `iWebSocket`, `pXYpublisher`, `iCAN`,
-`iCANRec`, `pContactSpawn`, `pTrafficSim`, `pColavEval`, `iRadarTargets`,
+`iCANRec`, `pContactSpawn`, `pTrafficSim`, `pColavEval`, `pCorridor`, `iRadarTargets`,
 `pSensorFusionTracker_ref`. Top-level also builds `tools/aissim`.
 
 **Not built** (in tree only): `pVisionDetector_ref` (commented out; needs

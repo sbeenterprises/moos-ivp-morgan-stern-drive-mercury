@@ -6,6 +6,8 @@ initialize   WAYPOINT = false
 initialize   STATIONING = false
 initialize   REGION = false
 initialize   TRAILING = false
+initialize   CORRIDOR = false
+initialize   CORRIDOR_STATUS = none
 	
 //----------------------------------------------
 Behavior = BHV_Waypoint_mod
@@ -17,6 +19,7 @@ Behavior = BHV_Waypoint_mod
   //endflag   = MOOS_MANUAL_OVERRIDE = true
   endflag   = DESIRED_THRUST = 0 //zero thrust e rudder por segurança
   endflag   = DESIRED_RUDDER = 0
+  endflag   = CORRIDOR = false   // a finished route takes its corridor with it
 
   updates    = WPT_UPDATE
   perpetual  = true
@@ -37,6 +40,66 @@ Behavior = BHV_Waypoint_mod
     visual_hints = nextpt_lcolor=gray70
     visual_hints = vertex_color=dodger_blue, edge_color=white
     visual_hints = vertex_size=5, edge_size=1
+}
+
+//----------------------------------------------
+// Route corridor.
+//
+// The UI draws a corridor round the route (CORRIDOR=width=..#pts=..);
+// iWebSocket turns it into CORRIDOR_UPDATE + CORRIDOR=true and pCorridor
+// reports where the boat is relative to it in CORRIDOR_STATUS:
+//   in < slow < recovering < stop   (see pCorridor --interface)
+// Only while a waypoint mission runs (pCorridor posts "none" otherwise, and
+// every block below also requires WAYPOINT = true).
+//
+// Priorities: above waypt_survey (100) so the corridor wins over the route,
+// below avdcol_ (250) for slow/recover so collision avoidance still steers
+// the boat. corridor_stop (240) is above the route and the other corridor
+// blocks but still below avdcol_: collision avoidance always wins.
+//
+// Speeds are in helm units, i.e. NAV_SPEED units: m/s in simulation but
+// KNOTS on the real boat (iDivisorNMEA posts NAV_SPEED in knots), so
+// speed = 2 is ~2 kn on the water.
+
+Behavior = BHV_ConstantSpeed
+{
+  name       = corridor_slow
+  pwt        = 200
+  condition  = CORRIDOR_STATUS = slow
+  condition  = WAYPOINT = true
+  perpetual  = true
+
+  speed      = 2              // helm units: knots on the real boat, m/s in sim
+  duration   = no-time-limit
+}
+
+Behavior = BHV_Waypoint
+{
+  name       = corridor_recover
+  pwt        = 200
+  condition  = CORRIDOR_STATUS = recovering
+  condition  = WAYPOINT = true
+  updates    = CORRIDOR_RECOVER_UPDATES   // points=x,y on the centreline, from pCorridor
+  perpetual  = true
+
+  // No target until pCorridor posts one; "empty" says that is intentional
+  // (the behaviour produces nothing while its list is empty).
+  points         = empty
+  speed          = 2          // helm units: knots on the real boat, m/s in sim
+  capture_radius = 5
+  slip_radius    = 10
+}
+
+Behavior = BHV_ConstantSpeed
+{
+  name       = corridor_stop
+  pwt        = 240
+  condition  = CORRIDOR_STATUS = stop
+  condition  = WAYPOINT = true
+  perpetual  = true
+
+  speed      = 0
+  duration   = no-time-limit
 }
 
 //----------------------------------------------

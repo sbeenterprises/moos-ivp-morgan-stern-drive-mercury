@@ -62,6 +62,7 @@ R = run, c = config block only, – = absent
 | iRadarTargets | R | R | R | R | R | – |
 | pTrafficSim | – | **R** | – | – | – | – |
 | pColavEval | – | **R** | – | – | – | – |
+| pCorridor | R | R | R | – | – | – |
 | iMOOSGateway | – | R (tcp 9501) | – | – | – | – |
 | pVisionDetector_ref / pSensorFusionTracker_ref | – | – | – | **R** | – | – |
 
@@ -87,8 +88,19 @@ R = run, c = config block only, – = absent
 | `avdcol_` (templated per contact) | BHV_AvdColregsV22 | 250 | `WAYPOINT=true` | `CONTACT_INFO` |
 | `opr24` | BHV_OpRegionV24 | 300 | `REGION=true` | `REGION_UPDATES` |
 | `trail_contact` | BHV_Trail | 100 | `TRAILING=true` | `TRAIL_UPDATES` |
+| `corridor_slow` | BHV_ConstantSpeed (speed 2) | 200 | `CORRIDOR_STATUS=slow`, `WAYPOINT=true` | – |
+| `corridor_recover` | BHV_Waypoint (speed 2, capture 5) | 200 | `CORRIDOR_STATUS=recovering`, `WAYPOINT=true` | `CORRIDOR_RECOVER_UPDATES` |
+| `corridor_stop` | BHV_ConstantSpeed (speed 0) | 300 | `CORRIDOR_STATUS=stop`, `WAYPOINT=true` | – |
 
-Initialised false: `DEPLOY`, `RETURN`, `WAYPOINT`, `STATIONING`, `REGION`, `TRAILING`.
+Initialised false: `DEPLOY`, `RETURN`, `WAYPOINT`, `STATIONING`, `REGION`, `TRAILING`, `CORRIDOR`
+(and `CORRIDOR_STATUS=none`).
+
+The `corridor_*` blocks only run when pCorridor reports a zone, i.e. a corridor
+was sent from the UI and a waypoint mission is running; without one they stay
+idle. Their speeds are helm units (knots on the boat, m/s in sim). Slow and
+recover (200) sit between `waypt_survey` (100) and `avdcol_` (250); stop (240)
+is above them but still below `avdcol_`, so collision avoidance always wins. `waypt_survey`'s endflag and `AUTONOMOUS_STOP` post
+`CORRIDOR=false`, so a corridor does not carry over to the next route.
 
 ## Network ports
 
