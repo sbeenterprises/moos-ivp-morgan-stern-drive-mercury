@@ -66,11 +66,21 @@ class DriveCore {
   double rudderSetpoint() const { return m_rudder_sp; }
   double thrustSetpoint() const { return m_thrust_sp; }
 
-  // Lost link only acts while the owner is MANUAL. The lost-link values
-  // replace the setpoints, so the boat stays there when the link comes
-  // back until the operator sends a new command.
-  void setLinkOk(bool ok)     { m_link_ok = ok; }
-  bool lostLink() const       { return m_owner == OWNER_MANUAL && !m_link_ok; }
+  // Lost link acts while the owner is MANUAL (setLinkOk), and also in
+  // AUTONOMY when setLostLinkInAutonomy(true) (iCAN lost_link_autonomy =
+  // stop), judged by its own flag (setAutonomyLinkOk) so autonomy can
+  // allow a longer outage than manual. The lost-link values replace the
+  // setpoints, so the boat stays there when the link comes back until a
+  // new command arrives.
+  void setLinkOk(bool ok)         { m_link_ok = ok; }
+  void setAutonomyLinkOk(bool ok) { m_auto_link_ok = ok; }
+  void setLostLinkInAutonomy(bool on) { m_lost_link_autonomy = on; }
+  bool lostLinkInAutonomy() const     { return m_lost_link_autonomy; }
+  bool lostLink() const {
+    if(m_owner == OWNER_MANUAL)
+      return !m_link_ok;
+    return m_lost_link_autonomy && !m_auto_link_ok;
+  }
 
   // Clears setpoints and returns the gear to neutral (used when CAN
   // sending is switched on again, so it never resumes an old command).
@@ -96,6 +106,8 @@ class DriveCore {
  private:
   Owner  m_owner;
   bool   m_link_ok;
+  bool   m_lost_link_autonomy;
+  bool   m_auto_link_ok;
   double m_rudder_sp;
   double m_thrust_sp;
 

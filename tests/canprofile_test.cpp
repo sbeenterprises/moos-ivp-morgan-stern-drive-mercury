@@ -468,6 +468,32 @@ static void testDriveCore()
   CHECK(!core.lostLink() && cmd.rudder_pct == 10, "lost link ignored in autonomy");
   core.setLinkOk(true);
 
+  // ... unless lost_link_autonomy = stop: then lost-link values in autonomy too
+  core.setLostLinkInAutonomy(true);
+  core.setRudder(10);
+  core.setThrust(20);
+  for(int i=0; i<40; i++)
+    cmd = core.update(t += 0.05);
+  CHECK(cmd.gear == GEAR_FWD && cmd.thrust_pct > 0, "autonomy drives with the link up");
+  core.setLinkOk(false);              // manual timeout passed ...
+  cmd = core.update(t += 0.05);
+  CHECK(!core.lostLink() && cmd.thrust_pct > 0, "autonomy ignores the manual link timeout");
+  core.setAutonomyLinkOk(false);      // ... then the autonomy one
+  core.setRudder(12);                 // the autopilot keeps posting ...
+  core.setThrust(25);
+  cmd = core.update(t += 0.05);
+  CHECK(core.lostLink() && cmd.rudder_pct == 0 && cmd.thrust_pct == 0 &&
+        cmd.gear == GEAR_NEUTRAL, "lost link in autonomy -> rudder 0, throttle 0, neutral");
+  core.setLinkOk(true);
+  core.setAutonomyLinkOk(true);
+  for(int i=0; i<10; i++)
+    cmd = core.update(t += 0.05);
+  CHECK(cmd.thrust_pct == 0 && cmd.gear == GEAR_NEUTRAL, "stays neutral after the link returns");
+  core.setLostLinkInAutonomy(false);
+  core.setRudder(0);
+  core.setThrust(0);
+  cmd = core.update(t += 0.05);
+
   // Limits
   Profile lim;
   lim.loadFromString(

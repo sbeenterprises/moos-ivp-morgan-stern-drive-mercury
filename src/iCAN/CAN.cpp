@@ -45,6 +45,8 @@ CAN::CAN()
   m_can_send          = false;   // nothing is sent until CAN_SEND=true
   m_ui_link_ok        = false;
   m_ui_link_time      = -1e9;
+  m_ui_auto_ok        = false;
+  m_ui_auto_time      = -1e9;
   m_tx_errors         = 0;
   m_rx_frames         = 0;
   m_last_iterate      = 0;
@@ -95,6 +97,11 @@ bool CAN::OnNewMail(MOOSMSG_LIST &NewMail)
       string v = msg.IsString() ? tolower(stripBlankEnds(msg.GetString())) : "";
       m_ui_link_ok   = msg.IsString() ? (v == "true") : (msg.GetDouble() != 0);
       m_ui_link_time = MOOSTime();
+    }
+    else if(key == "UI_LINK_OK_AUTO") {
+      string v = msg.IsString() ? tolower(stripBlankEnds(msg.GetString())) : "";
+      m_ui_auto_ok   = msg.IsString() ? (v == "true") : (msg.GetDouble() != 0);
+      m_ui_auto_time = MOOSTime();
     }
     else if(key == "CAN_SEND") {
       string v = msg.IsString() ? tolower(stripBlankEnds(msg.GetString())) : "";
@@ -251,6 +258,12 @@ bool CAN::Iterate()
 
   bool link_ok = m_ui_link_ok && (now - m_ui_link_time <= m_link_stale_secs);
   m_core.setLinkOk(link_ok);
+  // Autonomy's own (longer) link timeout from iWebSocket; an iWebSocket
+  // that does not post UI_LINK_OK_AUTO leaves autonomy on UI_LINK_OK.
+  bool auto_ok = link_ok;
+  if(m_ui_auto_time > -1e8)
+    auto_ok = m_ui_auto_ok && (now - m_ui_auto_time <= m_link_stale_secs);
+  m_core.setAutonomyLinkOk(auto_ok);
   DriveCommand cmd = m_core.update(now);
 
   if(m_profile_ok && m_can_socket != -1 && m_can_send) {
@@ -314,6 +327,15 @@ bool CAN::OnStartUp()
         handled = true;
       }
     }
+    else if(param == "lost_link_autonomy") {
+      // stop: the lost-link values also apply while autonomy drives;
+      // continue (default): autonomy carries on without the UI.
+      string v = tolower(value);
+      if(v == "stop" || v == "continue") {
+        m_core.setLostLinkInAutonomy(v == "stop");
+        handled = true;
+      }
+    }
     else if(param == "link_stale_secs" && isNumber(value)) {
       m_link_stale_secs = atof(value.c_str());
       handled = (m_link_stale_secs > 0);
@@ -359,6 +381,7 @@ void CAN::registerVariables()
   Register("DESIRED_THRUST", 0);
   Register("MOOS_MANUAL_OVERRIDE", 0);
   Register("UI_LINK_OK", 0);
+  Register("UI_LINK_OK_AUTO", 0);
   Register("CAN_SEND", 0);
   Register("TRIM", 0);
   Register("DESIRED_GEAR", 0);
@@ -712,7 +735,10 @@ bool CAN::buildReport()
          << (m_core.lostLink() ? "   LOST LINK -> rudder/throttle set to lost-link values" : "")
          << endl;
   m_msgs << "UI link:      " << (m_ui_link_ok ? "ok" : "down")
-         << "  (last UI_LINK_OK " << doubleToString(now - m_ui_link_time, 1) << " s ago)" << endl;
+         << "  (last UI_LINK_OK " << doubleToString(now - m_ui_link_time, 1) << " s ago)"
+         << "   lost link in autonomy: "
+         << (m_core.lostLinkInAutonomy() ? "stop" : "continue")
+         << " (UI_LINK_OK_AUTO " << (m_ui_auto_ok ? "ok" : "down") << ")" << endl;
   m_msgs << "Setpoints:    rudder " << doubleToString(m_core.rudderSetpoint(), 1)
          << "%  thrust " << doubleToString(m_core.thrustSetpoint(), 1) << "%";
   if(m_core.gearFromCommand())

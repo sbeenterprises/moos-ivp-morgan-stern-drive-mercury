@@ -67,6 +67,7 @@ std::string pid_gains; // Gains planchaPID is actually applying (see PID_GAINS)
 // Trail (follow-a-contact) state, mirrored back to the UI so it can show what
 // the helm is really doing rather than what the UI asked for.
 bool trailing = false;
+bool stationing = false; // station-keep active (lost-link stop)
 std::string trail_updates;
 
 // Collision avoidance test state. COLAV_TEST is the request echo; the ack comes
@@ -127,6 +128,9 @@ WebSocket::WebSocket()
   m_lon_origin = 0;
   m_link_ok_posted = false;
   m_last_link_post = 0.0;
+  m_lost_link_stop = false;
+  m_auto_link_timeout = -1;   // unset: same as link_timeout
+  m_auto_link_ok_posted = false;
 
   const char* can_vars[] = {"CAN_STATUS", "CAN_CONTROL_OWNER", "CAN_LOST_LINK",
                             "CAN_CONFLICT", "CAN_TX_RUDDER_PCT", "CAN_TX_THRUST_PCT",
@@ -337,6 +341,8 @@ bool WebSocket::OnNewMail(MOOSMSG_LIST &NewMail)
       pid_gains = msg.GetString();
     else if(key == "TRAILING")
       trailing = (msg.GetString() == "true");
+    else if(key == "STATIONING")
+      stationing = (msg.GetString() == "true");
     else if(key == "TRAIL_UPDATES")
       trail_updates = msg.GetString();
     else if(key == "COLAV_TEST")
@@ -475,11 +481,22 @@ bool WebSocket::Iterate()
   // also tell when iWebSocket itself has stopped.
   bool link_ok = HasConnectedClients() &&
                  (current_time - m_last_link_rx <= m_link_timeout);
-  if (link_ok != m_link_ok_posted || current_time - m_last_link_post >= 1.0) {
+  // Autonomy's link, with its own timeout: iCAN (lost_link_autonomy = stop)
+  // and the mission stop below act on this one. Time since the UI was last
+  // heard only, so a dropped connection that comes back within the timeout
+  // (Wi-Fi blip, page reload) does not stop the mission.
+  double auto_timeout = (m_auto_link_timeout > 0) ? m_auto_link_timeout : m_link_timeout;
+  bool auto_ok = (current_time - m_last_link_rx <= auto_timeout);
+  bool changed = (link_ok != m_link_ok_posted) || (auto_ok != m_auto_link_ok_posted);
+  if (changed || current_time - m_last_link_post >= 1.0) {
     if (link_ok != m_link_ok_posted)
       reportEvent(std::string("SS UI link ") + (link_ok ? "up" : "LOST"));
+    if (!auto_ok && m_auto_link_ok_posted && m_lost_link_stop)
+      stopAutonomyOnLostLink();
     Notify("UI_LINK_OK", link_ok ? "true" : "false");
+    Notify("UI_LINK_OK_AUTO", auto_ok ? "true" : "false");
     m_link_ok_posted = link_ok;
+    m_auto_link_ok_posted = auto_ok;
     m_last_link_post = current_time;
   }
 
@@ -650,6 +667,15 @@ bool WebSocket::OnStartUp()
       m_link_timeout = atof(value.c_str());
       handled = true;
     }
+    else if(param == "autonomy_link_timeout" && isNumber(value) && atof(value.c_str()) > 0) {
+      m_auto_link_timeout = atof(value.c_str());
+      handled = true;
+    }
+    else if(param == "lost_link_autonomy" &&
+            (tolower(value) == "stop" || tolower(value) == "continue")) {
+      m_lost_link_stop = (tolower(value) == "stop");
+      handled = true;
+    }
     else if(param == "foo") {
       handled = true;
     }
@@ -736,6 +762,7 @@ void WebSocket::registerVariables()
   Register("SERVICE_MODE", 0); //PID calibration mode (manual gains)
   Register("PID_GAINS", 0); //Gains planchaPID is currently applying
   Register("TRAILING", 0); //Follow-a-contact behaviour active
+  Register("STATIONING", 0); //Station-keep active (lost-link stop)
   Register("TRAIL_UPDATES", 0); //Contact/range/angle the trail behaviour is using
   Register("COLAV_TEST", 0);      //Collision avoidance test mode, request echo
   Register("COLAV_TEST_ACK", 0);  //...confirmed by pColavEval
@@ -1432,6 +1459,26 @@ void WebSocket::handleAutonomousStop(const std::string& value)
     // stop sequence above is unchanged.
     Notify("CORRIDOR", "false");
   }
+}
+
+//---------------------------------------------------------
+// Procedure: stopAutonomyOnLostLink()
+//   lost_link_autonomy = stop: the SS UI link was lost while a mission,
+//   station-keep or follow was running. End it as the UI's Stop does, so
+//   the boat goes to neutral (iCAN holds the lost-link values while the
+//   link is down) and does not set off again when the link returns.
+
+void WebSocket::stopAutonomyOnLostLink()
+{
+  if (waypoint != "true" && !stationing && !trailing)
+    return;
+  std::string modes = std::string(waypoint == "true" ? "WAYPOINT " : "") +
+    (stationing ? "STATIONING " : "") + (trailing ? "TRAILING" : "");
+  reportRunWarning("SS UI link lost: autonomy stopped (" + modes + ")");
+  Notify("LOST_LINK_STOP", modes);
+  if (trailing)
+    Notify("TRAILING", "false");
+  handleAutonomousStop("true");
 }
 
 void WebSocket::handleAutonomousReturnToBase(const std::string& value)

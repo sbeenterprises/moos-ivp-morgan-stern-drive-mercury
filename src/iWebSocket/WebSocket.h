@@ -98,6 +98,14 @@ class WebSocket : public AppCastingMOOSApp
   double m_link_timeout;                // seconds of silence = link lost
   bool   m_link_ok_posted;
   double m_last_link_post;
+  // lost_link_autonomy = stop: a lost link ends the autonomous mode
+  // (as AUTONOMOUS_STOP does), so the boat stays stopped when it returns.
+  bool   m_lost_link_stop;
+  // Autonomy may allow a longer outage than manual: UI_LINK_OK_AUTO uses
+  // autonomy_link_timeout (default: link_timeout).
+  double m_auto_link_timeout;
+  bool   m_auto_link_ok_posted;
+  void   stopAutonomyOnLostLink();
 
   // iCAN status passed through to SS UI (CAN_* variables)
   std::set<std::string> m_can_vars;

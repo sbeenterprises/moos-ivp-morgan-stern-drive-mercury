@@ -31,7 +31,13 @@ Behaviour common to every boat (`src/lib_canprofile/DriveCore.cpp`):
   browsers answer automatically). In manual, a lost link (or `UI_LINK_OK`
   older than `link_stale_secs`) sets rudder and throttle to the profile's
   `lost_link_*` values (0), and they stay there after the link returns until
-  the operator sends a new command.
+  the operator sends a new command. With `lost_link_autonomy = stop` (iCAN
+  and iWebSocket, set in the real-boat missions) the same happens while
+  autonomy drives, judged by `UI_LINK_OK_AUTO` (iWebSocket
+  `autonomy_link_timeout`, 5 s in the real-boat missions, vs 3 s for manual):
+  iCAN sends the lost-link values for as long as the link is down, and iWebSocket ends the mission / station-keep / follow (as the
+  UI's Stop does, posting `LOST_LINK_STOP=<modes>`), so the boat stays
+  stopped when the link returns. Default `continue`: autonomy carries on.
 - **Manual gear.** In manual control the gear comes from SS UI's gear
   buttons (`DESIRED_GEAR` = A/N/R) and `DESIRED_THRUST` is throttle only
   (sign ignored). Forward or reverse with 0 thrust = in gear at idle;

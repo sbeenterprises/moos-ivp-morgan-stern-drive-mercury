@@ -48,7 +48,7 @@ Notes:
 Plain text (not JSON) `HEARTBEAT=<MOOSTime>` every 30 s — clients must tolerate it.
 The server also sends a WebSocket ping every second; browsers answer it automatically, and each pong keeps `UI_LINK_OK` true even while the UI is idle or in the background.
 
-The server sends a WebSocket ping every second; browsers answer it automatically and that keeps `UI_LINK_OK=true`. If nothing is heard from any client for `link_timeout` (3 s), the link is lost and, in manual control, iCAN sets rudder and throttle to 0.
+The server sends a WebSocket ping every second; browsers answer it automatically and that keeps `UI_LINK_OK=true`. If nothing is heard from any client for `link_timeout` (3 s), the link is lost and, in manual control, iCAN sets rudder and throttle to 0. iWebSocket also posts `UI_LINK_OK_AUTO`, the same test with `autonomy_link_timeout` (default = `link_timeout`; 5 s in the real-boat missions). With `lost_link_autonomy = stop` (real-boat missions) losing that one ends a running mission, station-keep or follow (`WAYPOINT`/`STATIONING`/`TRAILING=false`, `CORRIDOR=false`, `LOST_LINK_STOP=<modes>`) and iCAN holds rudder/throttle 0 while it is down; after reconnecting the UI sees the mission stopped and must Start again. Both timeouts are MOOS time: scale it by `MOOSTimeWarp` in a time-warped sim.
 
 Telemetry also carries iCAN state: `CAN_STATUS`, `CAN_CONTROL_OWNER`, `CAN_LOST_LINK`, `CAN_CONFLICT`, `CAN_TX_RUDDER_PCT`, `CAN_TX_THRUST_PCT`, `CAN_TX_GEAR`, `CAN_RUDDER_MISMATCH`, `CAN_PROFILE`, and on USV-722 `CAN_RUDDER_ACTUAL_PCT`, `CAN_HELM_HAS_STEERING`, `CAN_ENGINE_GEAR`, `CAN_ENGINE_THROTTLE_PCT`, `CAN_FUEL_PCT` (present once first posted).
 

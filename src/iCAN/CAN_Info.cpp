@@ -84,6 +84,7 @@ void showExampleConfigAndExit()
   blk("  trim_sources     = iWebSocket                                   ");
   blk("  manual_gear      = command   // or thrust_sign                  ");
   blk("  link_stale_secs  = 3        // UI_LINK_OK older than this = lost");
+  blk("  lost_link_autonomy = continue // stop: lost-link values in autonomy too");
   blk("}                                                               ");
   blk("                                                                ");
   exit(0);

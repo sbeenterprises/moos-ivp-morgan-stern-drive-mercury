@@ -136,6 +136,10 @@ ProcessConfig = iCAN
    // Set to "command" for separate gear buttons (A/N/R) + throttle.
    manual_gear = thrust_sign
 
+   // Lost link in autonomy too: rudder/throttle to the profile's lost_link_*
+   // values (0 = neutral) while the link is down (iWebSocket ends the mission).
+   lost_link_autonomy = stop
+
    // The boat's CAN IDs, scaling, limits, lost-link values and autopilot
    // tuning live in this profile (planchaPID reads the same line).
    profile_file = ../../profiles/usv722_glendinning.prf
@@ -182,6 +186,14 @@ ProcessConfig = iWebSocket
    // No message or ping reply from SS UI for this long = link lost.
    // In manual control iCAN then sets rudder 0 and throttle 0.
    link_timeout = 3
+   // The same, for autonomy (used with lost_link_autonomy = stop).
+   autonomy_link_timeout = 5
+
+   // Lost link while autonomy drives (mission, station-keep, follow):
+   // stop = end it as the UI's Stop does, so the boat stays stopped when
+   // the link returns (keep in step with lost_link_autonomy in iCAN).
+   // continue = carry on without the UI.
+   lost_link_autonomy = stop
 }
 
 //------------------------------------------------

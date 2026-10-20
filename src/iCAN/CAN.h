@@ -72,6 +72,8 @@ class CAN : public AppCastingMOOSApp
    bool        m_can_send;
    bool        m_ui_link_ok;
    double      m_ui_link_time;
+   bool        m_ui_auto_ok;     // UI_LINK_OK_AUTO (autonomy timeout)
+   double      m_ui_auto_time;
 
    std::vector<double> m_last_sent;      // per tx message
    std::vector<double> m_foreign_seen;   // per tx message: last time another node sent its ID

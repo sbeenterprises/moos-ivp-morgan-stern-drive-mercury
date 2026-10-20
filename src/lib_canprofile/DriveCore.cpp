@@ -29,6 +29,8 @@ DriveCore::DriveCore()
 {
   m_owner      = OWNER_AUTONOMY;
   m_link_ok    = true;
+  m_lost_link_autonomy = false;
+  m_auto_link_ok = true;
   m_rudder_sp  = 0;
   m_thrust_sp  = 0;
   m_rudder_out = 0;
