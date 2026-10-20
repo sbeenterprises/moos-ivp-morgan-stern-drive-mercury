@@ -208,6 +208,17 @@ ProcessConfig = pCorridor
   turn_slow_dist          = 60   // slow (CORRIDOR_TURN) this close to a sharp corner
   turn_min_angle          = 60   // degrees of heading change that count as sharp
 
+  // USV-722 (19 Oct 13:50 log): at ~4 kn / 10 % lever, full rudder turned
+  // only ~3.6 deg/s (~30 m radius) and a U-turn went 61 m off a 60 m
+  // corridor. Steering improves with thrust (profile: 1.5 deg/s at 1.6 kn,
+  // 3.8 deg/s at 6.7 kn), so turns keep ~5 kn, and the zones get 35 m of
+  // turning room at sharp corners.                                   [P]
+  slow_speed              = 4    // knots, capped at the mission speed
+  turn_speed              = 5
+  recover_speed           = 4
+  turn_allowance          = 35   // metres
+  stop_action             = recover   // keep steerage instead of drifting
+
   tighten_following       = true
   corridor_capture_radius = 15
   corridor_slip_radius    = 30

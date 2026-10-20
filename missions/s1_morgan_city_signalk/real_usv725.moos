@@ -208,6 +208,12 @@ ProcessConfig = pCorridor
   turn_slow_dist          = 60   // slow (CORRIDOR_TURN) this close to a sharp corner
   turn_min_angle          = 60   // degrees of heading change that count as sharp
 
+  // No corridor speeds measured for this boat yet: the alpha.bhv speeds
+  // apply (slow_speed / turn_speed / recover_speed unset). Steer back
+  // rather than stop far outside, so the boat keeps steerage.
+  turn_allowance          = 0
+  stop_action             = recover
+
   tighten_following       = true
   corridor_capture_radius = 15
   corridor_slip_radius    = 30

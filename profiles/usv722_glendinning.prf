@@ -114,9 +114,21 @@ tx_field = msg=trim, src=trim, byte=0, bits=8, map=enum, values=up:F1|down:F4|id
 // Speed feed-forward: lever % that holds a speed, from the table above.
 // 8-24 kn has no steady state (the hull either ploughs or planes); the
 // speed PID trims around it.                                       [P]
-auto_speed_ff              = 0:0|1.5:9|4:25|5:40|7:70|24:100
-auto_speed_gains           = 2:0.35:0.005|6:0.25:0.004|12:0.16:0.003|1000:0.10:0.002
-auto_speed_i_authority_pct = 10                // [P] was 2: could not leave the dead zone
+// 19 Oct 13:50 log: the old 7:70|24:100 gave 75 % for 10 kn and the boat
+// planed up to 17 kn at that lever (75 % -> 17 kn and still climbing),
+// while the speed PID (kp 0.16 %/kn, I-term 10 %) could only take ~11 %
+// off. Steady points from the 16/19 Oct logs: 40 % -> 5.6 kn, 45 % ->
+// 6.7 kn, 55 % -> 7.4 kn; 75 % ploughs at ~6.6 kn or planes at ~17 kn.
+auto_speed_ff              = 0:0|1.5:9|4:25|5:40|7:55|10:65|17:75|24:100
+// Feedback with the authority to pull thrust back from an overshoot:
+// 2 %/kn above 6 kn (7 kn over -> -14 %) plus up to 20 % from the I-term.
+auto_speed_gains           = 2:0.35:0.005|6:1.0:0.02|12:2.0:0.04|1000:2.0:0.04
+auto_speed_i_authority_pct = 20                // [P] was 10: could not stop a planing overshoot
+// Speed setpoint ramps (kn/s): thrust rises in step with what the speed
+// loop can correct, and a big drop (operator, corridor slowing) is
+// spread over a few seconds instead of one jump.                    [P]
+auto_speed_ramp_up         = 0.5
+auto_speed_ramp_down       = 1.5
 auto_speed_filter          = 0.1
 auto_heading_filter        = 0.15
 auto_thrust_max_pct        = 100               // lever 100 % = engine 50 %

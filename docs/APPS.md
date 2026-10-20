@@ -57,7 +57,7 @@ Positional parse (expects token 2 = `X=`, 3 = `Y=`).
   [profiles/README.md](../profiles/README.md)): heading gains by speed (with an
   optional bounded I-term) and output limit,
   speed-dependent rudder limit, speed -> thrust feed-forward map, speed gain
-  steps, speed I-term authority and the thrust cap. planchaPID loads its own
+  steps, speed I-term authority, speed setpoint ramp rates and the thrust cap. planchaPID loads its own
   `profile_file` line, or else the `profile_file` of the iCAN block. With a
   profile, `HEADING_*` / `RUDDER_LIMIT_*` lines in the .moos file are ignored
   (warned); without one the .moos values and the built-in defaults (the old
@@ -67,6 +67,9 @@ Positional parse (expects token 2 = `X=`, 3 = `Y=`).
   `HEADING_UPPER/LOWER_BOUND`, `RUDDER_LIMIT_MAX/MIN/SPEED_LOW/SPEED_HIGH` only
   when there is no profile. Integrals reset whenever planchaPID is not driving
   (manual control, no active mode).
+- **Speed ramp**: with `auto_speed_ramp_up/down` > 0 the speed PID chases a setpoint
+  that starts at the current `NAV_SPEED` when planchaPID starts driving and moves
+  toward `DESIRED_SPEED` at those rates; 0 (the default) steps straight to it.
   All other numeric params go through `std::stod` — a non-numeric line crashes startup.
 - **Subs**: `NAV_HEADING`, `NAV_SPEED`, `DESIRED_HEADING`, `DESIRED_SPEED`, gains,
   `SERVICE_MODE`, `DEPLOY` (resets integrals), `MOOS_MANUAL_OVERRIDE`,
@@ -133,16 +136,31 @@ Positional parse (expects token 2 = `X=`, 3 = `Y=`).
 `CorridorModel.{h,cpp}` (plain C++, no MOOS; unit tests in `tests/corridor_test.cpp`).
 - **Config**: `slow_frac` (0.5), `stop_factor` (2.0), `hysteresis` (2 m),
   `recover_lead` (20 m), `status_interval` (1 s), `recover_move` (1 m),
-  `turn_slow_dist` (60 m), `turn_min_angle` (60°), `tighten_following` (true),
+  `turn_slow_dist` (60 m), `turn_min_angle` (60°), `turn_allowance` (0 m),
+  `slow_speed` / `turn_speed` / `recover_speed` (unset), `stop_action` (`stop`),
+  `tighten_following` (true),
   `corridor_capture_radius`/`corridor_slip_radius`/`corridor_lead` (15/30/60 m),
   `route_capture_radius`/`route_slip_radius`/`route_lead` (60/90/400 m, must match `waypt_survey`).
 - **Subs**: `NAV_X`, `NAV_Y`, `CORRIDOR` (true/false), `CORRIDOR_UPDATE`
-  (`width=<w>,pts={x1,y1:x2,y2:...}`, full width, local metres, from iWebSocket), `WAYPOINT`.
+  (`width=<w>,pts={x1,y1:x2,y2:...}`, full width, local metres, from iWebSocket), `WAYPOINT`,
+  `WPT_UPDATE` (only its `speed=` field: the mission speed).
 - **Active** only while `CORRIDOR=true`, `WAYPOINT=true`, the geometry is valid and NAV_X/Y are known.
 - **Zones** (xte = distance to the nearest centreline segment, half = width/2):
   `in` ≤ slow_frac·half < `slow` ≤ half < `recovering` ≤ stop_factor·half < `stop`;
   `none` when inactive. Worse zones are entered at once; better zones only once
   the xte clears the boundary by `hysteresis`.
+- **Turn allowance**: within `turn_slow_dist` of a sharp corner (`turn_min_angle`)
+  the xte is reduced by `turn_allowance` before the zones are worked out, so the
+  boat's turning circle around a U-turn does not trip `slow` / `recovering`.
+  0 = off. Set it from the boat's turning radius at corridor speeds.
+- **Speeds**: `slow_speed`, `turn_speed`, `recover_speed` (helm speed units) are
+  posted as `CORRIDOR_SLOW_UPDATES` / `CORRIDOR_TURN_UPDATES` /
+  `CORRIDOR_RECOVER_UPDATES = speed=<v>`, capped at the mission speed from
+  `WPT_UPDATE` (a corridor never speeds the boat up), on change only. Unset =
+  the speed in `alpha.bhv` applies. They exist so each boat keeps the speed it
+  needs to steer (USV-722 hardly turns below ~4 kn).
+- **`stop_action`**: `stop` (default) holds the boat stopped when it is far outside;
+  `recover` steers it back to the centreline instead (reported as `recovering`).
 - **Pubs**: `CORRIDOR_STATUS` (on change and every `status_interval`), `XTE_NOW`
   (every iteration while active; one 0 on deactivation), `CORRIDOR_RECOVER_UPDATES =
   points=x,y` while `recovering` (centreline point `recover_lead` m past the closest
@@ -155,7 +173,8 @@ Positional parse (expects token 2 = `X=`, 3 = `Y=`).
   `route_*` values when it goes off. With no corridor it posts only `CORRIDOR_STATUS=none`.
 - Acted on by `corridor_slow` / `corridor_recover` / `corridor_turn` / `corridor_stop` in `alpha.bhv`
   (see [MISSIONS.md](MISSIONS.md#alphabhv-behaviors)). A boat in `stop` stays stopped
-  until the operator acts (CORRIDOR=off, a wider corridor, manual control or AUTONOMOUS_STOP).
+  until the operator acts (CORRIDOR=off, a wider corridor, manual control or AUTONOMOUS_STOP);
+  with `stop_action = recover` the `stop` zone is never posted.
 
 ## pSensorFusionTracker_ref
 `src/pSensorFusionTracker_ref/` — needs Eigen3.

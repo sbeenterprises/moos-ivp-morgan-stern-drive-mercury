@@ -43,6 +43,56 @@ Corridor::Corridor()
   m_turn_min_angle = 60;
   m_turn_on        = false;
   m_turn_posted    = false;
+  m_turn_allowance = 0;
+
+  m_slow_speed = -1;  m_turn_speed = -1;  m_recover_speed = -1;
+  m_mission_speed = -1;
+  m_posted_slow = -1; m_posted_turn = -1; m_posted_recover = -1;
+  m_stop_recovers = false;
+}
+
+//---------------------------------------------------------
+// Procedure: missionSpeedFrom()
+//   The mission speed rides on WPT_UPDATE as "speed=<v>" (alone or among
+//   other "param=value # ..." pairs).
+
+bool Corridor::missionSpeedFrom(const string& wpt_update, double& spd)
+{
+  vector<string> parts = parseString(wpt_update, '#');
+  for(unsigned int i=0; i<parts.size(); i++) {
+    string val = stripBlankEnds(parts[i]);
+    string key = tolower(stripBlankEnds(biteString(val, '=')));
+    val = stripBlankEnds(val);
+    if(key == "speed" && isNumber(val) && atof(val.c_str()) >= 0) {
+      spd = atof(val.c_str());
+      return(true);
+    }
+  }
+  return(false);
+}
+
+//---------------------------------------------------------
+// Procedure: postSpeeds()
+//   Speeds for corridor_slow / corridor_turn / corridor_recover: the
+//   configured value, never above the mission speed. Posted on change only.
+
+void Corridor::postSpeeds()
+{
+  struct Item { double cfg; double* posted; const char* var; };
+  Item items[] = {{m_slow_speed,    &m_posted_slow,    "CORRIDOR_SLOW_UPDATES"},
+                  {m_turn_speed,    &m_posted_turn,    "CORRIDOR_TURN_UPDATES"},
+                  {m_recover_speed, &m_posted_recover, "CORRIDOR_RECOVER_UPDATES"}};
+  for(unsigned int i=0; i<3; i++) {
+    if(items[i].cfg < 0)
+      continue;                              // not configured: .bhv value
+    double v = items[i].cfg;
+    if(m_mission_speed >= 0 && m_mission_speed < v)
+      v = m_mission_speed;                   // a cap, never a speed-up
+    if(*items[i].posted >= 0 && fabs(v - *items[i].posted) < 0.01)
+      continue;
+    Notify(items[i].var, "speed=" + doubleToStringX(v, 2));
+    *items[i].posted = v;
+  }
 }
 
 //---------------------------------------------------------
@@ -87,6 +137,11 @@ bool Corridor::OnNewMail(MOOSMSG_LIST &NewMail)
     else if(key == "CORRIDOR")  m_corridor_on = parseFlag(msg);
     else if(key == "WAYPOINT")  m_waypoint_on = parseFlag(msg);
     else if(key == "CORRIDOR_UPDATE") handleCorridorUpdate(msg.GetString());
+    else if(key == "WPT_UPDATE") {
+      double spd = 0;
+      if(missionSpeedFrom(msg.GetString(), spd))
+        m_mission_speed = spd;
+    }
     else if(key != "APPCAST_REQ")
       reportRunWarning("Unhandled Mail: " + key);
   }
@@ -153,10 +208,16 @@ bool Corridor::Iterate()
     reportEvent("Route following restored");
   }
 
+  postSpeeds();
+
   bool active = m_corridor_on && m_waypoint_on && m_model.geometryValid() &&
                 m_nav_x_known && m_nav_y_known;
 
   CorridorModel::Zone zone = m_model.update(m_nav_x, m_nav_y, active);
+  // stop_action = recover: far outside is driven like "recovering" (steer
+  // back at the recover speed) instead of stopping without steerage.
+  if(zone == CorridorModel::ZONE_STOP && m_stop_recovers)
+    zone = CorridorModel::ZONE_RECOVERING;
   string status = CorridorModel::zoneName(zone);
 
   if(zone != CorridorModel::ZONE_NONE) {
@@ -261,6 +322,24 @@ bool Corridor::OnStartUp()
       m_turn_min_angle = dval;
       handled = true;
     }
+    else if(param == "turn_allowance" && isNumber(value) && dval >= 0) {
+      m_turn_allowance = dval;
+      handled = true;
+    }
+    else if((param == "slow_speed" || param == "turn_speed" || param == "recover_speed") &&
+            isNumber(value) && dval >= 0) {
+      double *dst = (param == "slow_speed") ? &m_slow_speed :
+                    (param == "turn_speed") ? &m_turn_speed : &m_recover_speed;
+      *dst = dval;
+      handled = true;
+    }
+    else if(param == "stop_action") {
+      string v = tolower(value);
+      if(v == "stop" || v == "recover") {
+        m_stop_recovers = (v == "recover");
+        handled = true;
+      }
+    }
     else if(param == "tighten_following")
       handled = setBooleanOnString(m_tighten, value);
     else if(isNumber(value) && dval > 0 &&
@@ -280,6 +359,9 @@ bool Corridor::OnStartUp()
       reportUnhandledConfigWarning(orig);
   }
 
+  if(!m_model.setTurnAllowance(m_turn_dist, m_turn_min_angle, m_turn_allowance))
+    reportConfigWarning("turn_allowance / turn_slow_dist / turn_min_angle out of range");
+
   registerVariables();
   return(true);
 }
@@ -295,6 +377,7 @@ void Corridor::registerVariables()
   Register("CORRIDOR", 0);
   Register("CORRIDOR_UPDATE", 0);
   Register("WAYPOINT", 0);
+  Register("WPT_UPDATE", 0);   // mission speed, to cap the corridor speeds
 }
 
 //---------------------------------------------------------
@@ -331,6 +414,14 @@ bool Corridor::buildReport()
   actab << "Recover posts" << uintToString(m_recover_posts);
   actab << "Route following" << (m_tight_applied ? string("tight (corridor)") : string("normal"));
   actab << "Sharp turn ahead" << boolToString(m_turn_on);
+  actab << "Turn allowance (m)" << doubleToStringX(m_model.turnAllowance(), 1) +
+           " (now " + doubleToStringX(m_model.allowanceApplied(), 1) + ")";
+  actab << "Speeds slow/turn/recover" <<
+    (m_posted_slow < 0 ? string("bhv") : doubleToStringX(m_posted_slow, 2)) + " / " +
+    (m_posted_turn < 0 ? string("bhv") : doubleToStringX(m_posted_turn, 2)) + " / " +
+    (m_posted_recover < 0 ? string("bhv") : doubleToStringX(m_posted_recover, 2)) +
+    "  (mission " + (m_mission_speed < 0 ? string("?") : doubleToStringX(m_mission_speed, 2)) + ")";
+  actab << "Far outside" << string(m_stop_recovers ? "steer back (recover)" : "stop");
   m_msgs << actab.getFormattedString();
 
   return(true);

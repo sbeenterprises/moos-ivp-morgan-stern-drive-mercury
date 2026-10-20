@@ -59,6 +59,8 @@ AutoTuning::AutoTuning()
   i_authority       = 2;
   speed_filter      = 0.1;
   heading_filter    = 0.15;
+  speed_ramp_up     = 0;   // off: as before profiles had ramps
+  speed_ramp_down   = 0;
   string err;
   parseSpeedFF(DEFAULT_AUTO_SPEED_FF, speed_ff, err);
   parseGains(DEFAULT_AUTO_SPEED_GAINS, speed_gains, err);
@@ -185,6 +187,8 @@ bool AutoTuning::configure(const Profile& p, string* err)
   i_authority       = p.setting("auto_speed_i_authority_pct");
   speed_filter      = p.setting("auto_speed_filter");
   heading_filter    = p.setting("auto_heading_filter");
+  speed_ramp_up     = p.setting("auto_speed_ramp_up");
+  speed_ramp_down   = p.setting("auto_speed_ramp_down");
   return true;
 }
 

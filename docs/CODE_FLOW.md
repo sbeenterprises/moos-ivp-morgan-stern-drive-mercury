@@ -68,7 +68,9 @@ Per tick (`dt = 1/AppTick`, 20 Hz on the boat):
    `.moos` `HEADING_K*` only apply in `SERVICE_MODE`.
    If `CONSTANT_HEADING=true` the setpoint is `SETPOINT_HEADING`.
 3. **Rudder limit by speed**: 20 at ≤5 kt tapering linearly to 8 at ≥18 kt.
-4. **Speed loop** → `desired_thrust` (`CalculateSpeed`): piecewise feed-forward
+4. **Speed loop** → `desired_thrust` (`CalculateSpeed`). The PID's setpoint walks
+   from the current speed toward `DESIRED_SPEED` at the profile's
+   `auto_speed_ramp_up/down` (speed units/s; 0 = step, the default). Piecewise feed-forward
    map (kt→%: 0→0, 3→8, 5→14, 7→22, 8→27, 10→35, 12→36, 15→37, 18→41, 20→44)
    plus scheduled PI with anti-windup (I authority ±2 %).
 5. Thrust capped at **50 %**.

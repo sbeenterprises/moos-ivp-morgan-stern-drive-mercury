@@ -42,6 +42,10 @@ CorridorModel::CorridorModel()
   m_stop_factor  = 2.0;
   m_hysteresis   = 2.0;
   m_recover_lead = 20.0;
+  m_turn_dist         = 0;
+  m_turn_min_deg      = 180;
+  m_turn_allowance    = 0;
+  m_allowance_applied = 0;
 
   m_valid = false;
   m_width = 0;
@@ -361,7 +365,16 @@ CorridorModel::Zone CorridorModel::update(double x, double y, bool active)
   m_t   = t;
   m_have_closest = true;
 
-  Zone raw = rawZone(d);
+  // At a sharp corner the boat needs its turning circle: judge the zone
+  // on the xte less the allowance (xte() still reports the true distance).
+  m_allowance_applied = 0;
+  if(m_turn_allowance > 0 && nearSharpTurn(x, y, m_turn_dist, m_turn_min_deg))
+    m_allowance_applied = m_turn_allowance;
+  double dz = d - m_allowance_applied;
+  if(dz < 0)
+    dz = 0;
+
+  Zone raw = rawZone(dz);
   if(m_zone == ZONE_NONE || raw >= m_zone) {
     // Fresh start, or getting worse: take it straight away.
     m_zone = raw;
@@ -369,10 +382,23 @@ CorridorModel::Zone CorridorModel::update(double x, double y, bool active)
   else {
     // Getting better: only as far as the xte clears each boundary by the
     // hysteresis margin, and never worse than where we already are.
-    Zone relaxed = rawZone(d + m_hysteresis);
+    Zone relaxed = rawZone(dz + m_hysteresis);
     m_zone = (relaxed < m_zone) ? relaxed : m_zone;
   }
   return(m_zone);
+}
+
+//---------------------------------------------------------
+// Procedure: setTurnAllowance()
+
+bool CorridorModel::setTurnAllowance(double dist, double min_deg, double allowance)
+{
+  if(dist < 0 || min_deg <= 0 || min_deg > 180 || allowance < 0)
+    return(false);
+  m_turn_dist      = dist;
+  m_turn_min_deg   = min_deg;
+  m_turn_allowance = allowance;
+  return(true);
 }
 
 //---------------------------------------------------------

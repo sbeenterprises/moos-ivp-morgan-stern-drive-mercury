@@ -726,14 +726,19 @@ bool BHV_Waypoint_mod::updateInfoIn()
     m_waypoint_engine.setSegList(shtour_segl);
   }
 
-  bool ok_cr, ok_sr;
-  double new_cr = getBufferDoubleVal("WPT_CAPTURE_RADIUS", ok_cr);
-  if(ok_cr && new_cr != m_waypoint_engine.getCaptureRadius()) {
-    m_waypoint_engine.setCaptureRadius(new_cr);
+  // Optional live radius overrides. Only read once something has posted
+  // them: getBufferDoubleVal() posts a BHV_WARNING for an unknown variable,
+  // which flooded the log every helm iteration on missions that never set them.
+  bool ok_cr = false, ok_sr = false;
+  if(getBufferIsKnown("WPT_CAPTURE_RADIUS")) {
+    double new_cr = getBufferDoubleVal("WPT_CAPTURE_RADIUS", ok_cr);
+    if(ok_cr && new_cr != m_waypoint_engine.getCaptureRadius())
+      m_waypoint_engine.setCaptureRadius(new_cr);
   }
-  double new_sr = getBufferDoubleVal("WPT_SLIP_RADIUS", ok_sr);
-  if(ok_sr && new_sr != m_waypoint_engine.getSlipRadius()) {
-    m_waypoint_engine.setNonmonotonicRadius(new_sr);
+  if(getBufferIsKnown("WPT_SLIP_RADIUS")) {
+    double new_sr = getBufferDoubleVal("WPT_SLIP_RADIUS", ok_sr);
+    if(ok_sr && new_sr != m_waypoint_engine.getSlipRadius())
+      m_waypoint_engine.setNonmonotonicRadius(new_sr);
   }
 
   return(true);

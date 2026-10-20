@@ -17,6 +17,9 @@
 //   auto_speed_filter, auto_heading_filter   NAV_SPEED / NAV_HEADING
 //                     smoothing, 0 < alpha <= 1 (1 = no smoothing)
 //   auto_speed_gains  upto:kp:ki steps, speed PID gains by desired speed
+//   auto_speed_ramp_up, auto_speed_ramp_down   most the speed setpoint the
+//                     speed loop works to may rise / fall per second
+//                     (NAV_SPEED units/s); 0 = follow DESIRED_SPEED at once
 //
 // Speeds are in NAV_SPEED units (knots on the real boats). Thrust is
 // DESIRED_THRUST %, i.e. before the profile's throttle tx_field map.
@@ -65,6 +68,7 @@ class AutoTuning {
   double rudder_max, rudder_min, rudder_speed_low, rudder_speed_high;
   double thrust_max, i_authority;
   double speed_filter, heading_filter;
+  double speed_ramp_up, speed_ramp_down;
   std::vector<SpeedPoint> speed_ff;
   std::vector<GainStep>   speed_gains;
   std::vector<GainStep>   heading_gains;

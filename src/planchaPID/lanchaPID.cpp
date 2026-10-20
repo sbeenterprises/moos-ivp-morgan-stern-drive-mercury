@@ -33,6 +33,9 @@ bool   nav_heading_init  = false;  // first-sample flag
 
 
 double desired_thrust;  // Saída do controle de velocidade
+// Speed setpoint the speed loop works to: DESIRED_SPEED, rate limited by the
+// profile's auto_speed_ramp_up/down (no limit when 0). Negative = not set.
+double speed_setpoint = -1;
 double desired_rudder;  // Saída do controle de rumo
 
 // Manual speed gains: only used in service mode (normal operation is gain
@@ -509,8 +512,20 @@ bool lanchaPID::Iterate()
   if(desired_rudder >  rudder_limit_active) desired_rudder =  rudder_limit_active;
   if(desired_rudder < -rudder_limit_active) desired_rudder = -rudder_limit_active;
 
+  // Speed setpoint, rate limited by the profile (auto_speed_ramp_up/down).
+  // A big step in DESIRED_SPEED (operator, or the corridor slowing the boat)
+  // then changes thrust progressively instead of in one jump.
+  if(speed_setpoint < 0)
+    speed_setpoint = nav_speed;
+  if(desired_speed > speed_setpoint)
+    speed_setpoint = (g_tuning.speed_ramp_up > 0) ?
+      min(desired_speed, speed_setpoint + g_tuning.speed_ramp_up * dt) : desired_speed;
+  else
+    speed_setpoint = (g_tuning.speed_ramp_down > 0) ?
+      max(desired_speed, speed_setpoint - g_tuning.speed_ramp_down * dt) : desired_speed;
+
   //Speed controller - New function
-  desired_thrust = speedController.CalculateSpeed(desired_speed, nav_speed,dt);
+  desired_thrust = speedController.CalculateSpeed(speed_setpoint, nav_speed,dt);
 
   // Highest thrust the autopilot may ask for (profile auto_thrust_max_pct)
   if(desired_thrust > g_tuning.thrust_max)
@@ -540,6 +555,8 @@ bool lanchaPID::Iterate()
     // the autopilot is not acting on (manual control, no active mode).
     headingController.resetIntegral();
     speedController.resetIntegral();
+    // next time the autopilot drives, ramp from the speed the boat has
+    speed_setpoint = -1;
   }
 
   // Report the gains actually being applied this cycle so the UI can show the
@@ -761,8 +778,10 @@ bool lanchaPID::buildReport()
          << ") .. " << rudder_limit_min << "% (>= " << rudder_limit_speed_high
          << ")   thrust max " << g_tuning.thrust_max << "%   speed I-term max "
          << g_tuning.i_authority << "%" << endl;
-  m_msgs << "  speed feed-forward: " << g_tuning.feedForward(desired_speed)
-         << "% for desired speed " << desired_speed << endl;
+  m_msgs << "  speed feed-forward: " << g_tuning.feedForward(speed_setpoint)
+         << "% for speed setpoint " << speed_setpoint << " (DESIRED_SPEED "
+         << desired_speed << ", ramp up " << g_tuning.speed_ramp_up << "/s down "
+         << g_tuning.speed_ramp_down << "/s)" << endl;
   m_msgs << "---------------------------------------------------" << endl;
 
   m_msgs << "SERVICE MODE (manual gains): "

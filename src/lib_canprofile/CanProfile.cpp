@@ -325,6 +325,8 @@ Profile::Profile() : m_loaded(false)
   m_settings["auto_speed_i_authority_pct"] = 2;
   m_settings["auto_speed_filter"]          = 0.1;   // NAV_SPEED smoothing
   m_settings["auto_heading_filter"]        = 0.15;  // NAV_HEADING smoothing
+  m_settings["auto_speed_ramp_up"]         = 0;     // speed units/s, 0 = no ramp
+  m_settings["auto_speed_ramp_down"]       = 0;     // speed units/s, 0 = no ramp
   m_string_settings["auto_speed_ff"]       = DEFAULT_AUTO_SPEED_FF;
   m_string_settings["auto_speed_gains"]    = DEFAULT_AUTO_SPEED_GAINS;
 }
@@ -838,6 +840,10 @@ void Profile::validate()
   for(int i=0; i<2; i++)
     if(setting(filt[i]) <= 0 || setting(filt[i]) > 1)
       addError(0, string(filt[i]) + " must be more than 0 and at most 1");
+  const char* ramp[] = {"auto_speed_ramp_up", "auto_speed_ramp_down"};
+  for(int i=0; i<2; i++)
+    if(setting(ramp[i]) < 0)
+      addError(0, string(ramp[i]) + " must be 0 (no ramp) or more");
   if(setting("auto_rudder_min_pct") > setting("auto_rudder_max_pct"))
     addError(0, "auto_rudder_min_pct is above auto_rudder_max_pct");
   if(setting("auto_rudder_speed_low") >= setting("auto_rudder_speed_high"))

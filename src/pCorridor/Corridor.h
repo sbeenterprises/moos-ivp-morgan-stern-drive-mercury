@@ -59,6 +59,20 @@ class Corridor : public AppCastingMOOSApp
   double m_turn_min_angle;  // degrees of heading change that count as sharp
   bool   m_turn_on;
   bool   m_turn_posted;
+  double m_turn_allowance;  // metres of turning room at sharp corners (0 = off)
+
+  // Per-boat corridor speeds from the .moos block (helm speed units). Each
+  // is capped at the mission speed; a negative value = not configured, and
+  // the behaviour keeps the speed in alpha.bhv.
+  double m_slow_speed, m_turn_speed, m_recover_speed;
+  double m_mission_speed;   // last speed= seen on WPT_UPDATE, -1 = unknown
+  double m_posted_slow, m_posted_turn, m_posted_recover;
+  void   postSpeeds();
+  static bool missionSpeedFrom(const std::string& wpt_update, double& spd);
+
+  // Far outside the corridor: "stop" (speed 0) or "recover" (steer back at
+  // the recover speed, so the boat keeps steerage). Default stop.
+  bool   m_stop_recovers;
   std::string followingSpec(double capture, double slip, double lead) const;
 
  private: // State

@@ -88,6 +88,11 @@ void showExampleConfigAndExit()
   blk("                          // before it is posted again          ");
   blk("  turn_slow_dist  = 60    // CORRIDOR_TURN within this of a vertex");
   blk("  turn_min_angle  = 60    // ...turning by at least this (degrees)");
+  blk("  turn_allowance  = 0     // metres of turning room at sharp corners");
+  blk("  slow_speed      = (unset) // corridor speeds in helm units, each  ");
+  blk("  turn_speed      = (unset) // capped at the mission speed; unset =  ");
+  blk("  recover_speed   = (unset) // keep the speed in alpha.bhv         ");
+  blk("  stop_action     = stop  // or recover: steer back instead of stop");
   blk("  tighten_following       = true  // WPT_UPDATE on CORRIDOR edges");
   blk("  corridor_capture_radius = 15    // while a corridor is on      ");
   blk("  corridor_slip_radius    = 30                                    ");
@@ -130,6 +135,9 @@ void showInterfaceAndExit()
   blk("                    centreline point recover_lead metres ahead  ");
   blk("                    of the closest point (clamped to the end).  ");
   blk("                    Posted before CORRIDOR_STATUS.              ");
+  blk("  CORRIDOR_SLOW_UPDATES / CORRIDOR_TURN_UPDATES  speed=<v>      ");
+  blk("                    (and speed=<v> on CORRIDOR_RECOVER_UPDATES) ");
+  blk("                    when configured, capped at the mission speed");
   blk("  CORRIDOR_TURN     true/false - near a sharp corridor vertex;  ");
   blk("                    corridor_turn slows the boat for the turn.  ");
   blk("  WPT_UPDATE        capture_radius / slip_radius / lead for     ");

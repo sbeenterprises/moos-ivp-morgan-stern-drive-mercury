@@ -199,6 +199,11 @@ ProcessConfig = pCorridor
   turn_slow_dist          = 60   // slow (CORRIDOR_TURN) this close to a sharp corner
   turn_min_angle          = 60   // degrees of heading change that count as sharp
 
+  // Per boat (see real_usv722.moos): slow_speed, turn_speed, recover_speed
+  // (helm units, capped at the mission speed), turn_allowance (m).
+  turn_allowance          = 0
+  stop_action             = recover
+
   tighten_following       = true
   corridor_capture_radius = 15
   corridor_slip_radius    = 30

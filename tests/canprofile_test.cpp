@@ -769,6 +769,7 @@ static void testAutoTuning()
   CHECK(fabs(d.rudderLimit(10) - (20 + 5.0 / 13 * (8 - 20))) < 1e-9, "default rudder limit at 10");
   CHECK(d.thrust_max == 50 && d.i_authority == 2, "default thrust max 50, I-term 2");
   CHECK(d.speed_filter == 0.1 && d.heading_filter == 0.15, "default filters 0.1 / 0.15");
+  CHECK(d.speed_ramp_up == 0 && d.speed_ramp_down == 0, "default: no speed ramp (old behaviour)");
   double hp, hi, hd;
   d.headingGains(3, hp, hi, hd);   CHECK(hp == 0.28 && hi == 0 && hd == 0.07, "default heading gains below 5 kn");
   d.headingGains(7, hp, hi, hd);   CHECK(hp == 0.22 && hd == 0.06, "default heading gains 5..10 kn");
@@ -788,6 +789,7 @@ static void testAutoTuning()
     CHECK(fabs(mt.feedForward(v) - d.feedForward(v)) < 1e-9 && a == c && b == e,
           "mercury speed side = old tuning at " << v);
   }
+  CHECK(mt.speed_ramp_up == 0 && mt.speed_ramp_down == 0, "mercury: no speed ramp (unchanged)");
   double mp, mi, md;
   mt.headingGains(6, mp, mi, md);
   CHECK(mp == 0.5 && mi == 0.03 && mt.heading_i_authority == 15,
@@ -803,7 +805,12 @@ static void testAutoTuning()
   CHECK(ut.configure(u), "usv722 tuning configures");
   CHECK(fabs(ut.feedForward(5) - 40) < 1e-9, "usv722 ff 5 kn -> lever 40 %");
   CHECK(ut.rudderLimit(2) == 40 && ut.rudderLimit(20) == 10, "usv722 rudder 40 % slow, 10 % planing");
-  CHECK(ut.thrust_max == 100 && ut.i_authority == 10, "usv722 thrust max 100, I-term 10");
+  CHECK(ut.thrust_max == 100 && ut.i_authority == 20, "usv722 thrust max 100, I-term 20");
+  CHECK(fabs(ut.feedForward(10) - 65) < 1e-9, "usv722 ff 10 kn -> 65 % (was 75 %, planed to 17 kn)");
+  CHECK(fabs(ut.feedForward(17) - 75) < 1e-9, "usv722 ff 17 kn -> 75 %");
+  ut.gains(10, kp, ki);
+  CHECK(kp == 2.0 && ki == 0.04, "usv722 speed gains 6..12 kn: kp 2 %/kn, ki 0.04");
+  CHECK(ut.speed_ramp_up == 0.5 && ut.speed_ramp_down == 1.5, "usv722 speed ramps 0.5 up / 1.5 down");
   ut.headingGains(6, hp, hi, hd);
   CHECK(hp == 0.5 && hi == 0.03 && ut.heading_i_authority == 10,
         "usv722 heading at 6 kn: kp 0.5, ki 0.03, I-term up to 10 %");
@@ -819,6 +826,8 @@ static void testAutoTuning()
   CHECK(rejects("auto_heading_gains = 5:0.6:0.03\n", "up_to:kp:ki:kd"), "heading step needs four values");
   CHECK(rejects("auto_heading_gains = 10:0.5:0:0.1|5:0.6:0:0.1\n", "speeds must increase"), "heading speeds must increase");
   CHECK(rejects("auto_heading_kp = 0.3\n", "unknown setting"), "old auto_heading_kp key is gone");
+  CHECK(rejects("auto_speed_ramp_up = -1\n", "0 (no ramp) or more"), "negative ramp up rejected");
+  CHECK(rejects("auto_speed_ramp_down = -0.5\n", "0 (no ramp) or more"), "negative ramp down rejected");
 }
 
 //------------------------------------------------------------------

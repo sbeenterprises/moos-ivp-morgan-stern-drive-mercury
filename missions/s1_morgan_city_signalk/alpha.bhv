@@ -68,6 +68,7 @@ Behavior = BHV_ConstantSpeed
   pwt        = 200
   condition  = CORRIDOR_STATUS = slow
   condition  = WAYPOINT = true
+  updates    = CORRIDOR_SLOW_UPDATES   // speed=<v> from pCorridor (per-boat .moos)
   perpetual  = true
 
   speed      = 2              // helm units: knots on the real boat, m/s in sim
@@ -106,6 +107,7 @@ Behavior = BHV_ConstantSpeed
   pwt        = 200
   condition  = CORRIDOR_TURN = true
   condition  = WAYPOINT = true
+  updates    = CORRIDOR_TURN_UPDATES   // speed=<v> from pCorridor (per-boat .moos)
   perpetual  = true
 
   speed      = 2              // helm units: knots on the real boat, m/s in sim

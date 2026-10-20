@@ -274,6 +274,30 @@ static void testSharpTurns()
   CHECK(!s.nearSharpTurn(100, 0, 50, 10), "no geometry, no turn");
 }
 
+static void testTurnAllowance()
+{
+  string err;
+  // there and back: east to (200,0), then back west
+  CorridorModel u;
+  vector<double> xs, ys;
+  xs.push_back(0);   ys.push_back(0);
+  xs.push_back(200); ys.push_back(0);
+  xs.push_back(0);   ys.push_back(1);
+  CHECK(u.setGeometry(60, xs, ys, err), "U geometry: " + err);
+  CHECK(u.update(215, 40, true) == CorridorModel::ZONE_RECOVERING, "40 m out at the U-turn, no allowance: recovering");
+  CHECK(!u.setTurnAllowance(-1, 60, 30), "negative distance rejected");
+  CHECK(!u.setTurnAllowance(60, 0, 30), "zero angle rejected");
+  CHECK(!u.setTurnAllowance(60, 60, -1), "negative allowance rejected");
+  CorridorModel v;
+  CHECK(v.setGeometry(60, xs, ys, err), "U geometry 2: " + err);
+  CHECK(v.setTurnAllowance(60, 60, 30), "allowance set");
+  CHECK(v.update(215, 40, true) == CorridorModel::ZONE_IN, "same spot with a 30 m allowance: in");
+  CHECK(near(v.xte(), sqrt(15.0*15.0 + 40.0*40.0), 1e-6) || v.xte() > 39, "xte still the true distance");
+  CHECK(near(v.allowanceApplied(), 30), "allowance applied at the corner");
+  CHECK(v.update(100, 40, true) == CorridorModel::ZONE_RECOVERING, "mid-leg, far from the corner: no allowance");
+  CHECK(near(v.allowanceApplied(), 0), "no allowance mid-leg");
+}
+
 int main()
 {
   testGeometryValidation();
@@ -285,6 +309,7 @@ int main()
   testRecoverPoint();
   testTuning();
   testSharpTurns();
+  testTurnAllowance();
 
   cout << g_checks << " checks, " << g_failures << " failed" << endl;
   return g_failures ? 1 : 0;

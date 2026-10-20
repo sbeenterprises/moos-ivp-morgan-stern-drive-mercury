@@ -48,6 +48,14 @@ class CorridorModel
   double hysteresis() const  { return m_hysteresis; }
   double recoverLead() const { return m_recover_lead; }
 
+  // Room for the boat's turning circle at sharp corners: within `dist`
+  // metres of a vertex turning by at least `min_deg`, the zones are judged
+  // on (xte - allowance) instead of xte. allowance 0 (default) = off.
+  bool setTurnAllowance(double dist, double min_deg, double allowance);
+  double turnAllowance() const { return m_turn_allowance; }
+  // Allowance in force at the last update() (0 or turnAllowance()).
+  double allowanceApplied() const { return m_allowance_applied; }
+
   // Geometry. Needs width > 0, at least 2 points and a non-zero length.
   // On failure the previous geometry is cleared, `err` says why, and the
   // model reports ZONE_NONE until a valid geometry is set.
@@ -110,6 +118,10 @@ class CorridorModel
   double m_stop_factor;
   double m_hysteresis;
   double m_recover_lead;
+  double m_turn_dist;
+  double m_turn_min_deg;
+  double m_turn_allowance;
+  double m_allowance_applied;
 
   bool   m_valid;
   double m_width;

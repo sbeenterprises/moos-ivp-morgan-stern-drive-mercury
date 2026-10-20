@@ -246,6 +246,13 @@ ProcessConfig = pCorridor
   turn_slow_dist          = 60   // slow (CORRIDOR_TURN) this close to a sharp corner
   turn_min_angle          = 60   // degrees of heading change that count as sharp
 
+  // aissim uses the uSimMarine hull model: same values as simulated.moos.
+  slow_speed              = 3
+  turn_speed              = 10
+  recover_speed           = 3
+  turn_allowance          = 30
+  stop_action             = recover
+
   tighten_following       = true
   corridor_capture_radius = 15
   corridor_slip_radius    = 30
