@@ -77,6 +77,9 @@ double setpoint_heading; //Variável em que eu coloco o setpoint de rumo
 std::string waypoint; //Variável para verificar se o controle autônomo é verdadeiro
 std::string return_var; //
 std::string region; // Variável para verificar se o OpRegion está ativo
+// Helm all-stop status: "clear" while the helm has a decision; anything
+// else (NothingToDo, ManualOverride, BehaviorError...) means stop.
+std::string helm_allstop = "unknown";
 
 //Cria os objetos para o controle PID com valores iniciais de kp, ki e kd lidos do arquivo
 //PIDController speedController("/home/dueiras/vsnt/moos-ivp-vsnt/src/planchaPID/speed_pid_parameters.txt");
@@ -453,6 +456,8 @@ bool lanchaPID::OnNewMail(MOOSMSG_LIST &NewMail)
         trailing = msg.GetString();
       else if(key == "REGION")
         region = msg.GetString();
+      else if(key == "IVPHELM_ALLSTOP")
+        helm_allstop = msg.GetString();
      else if(key != "APPCAST_REQ") // handled by AppCastingMOOSApp
        reportRunWarning("Unhandled Mail: " + key);
    }
@@ -530,6 +535,20 @@ bool lanchaPID::Iterate()
   // Highest thrust the autopilot may ask for (profile auto_thrust_max_pct)
   if(desired_thrust > g_tuning.thrust_max)
     desired_thrust = g_tuning.thrust_max;
+
+  // The helm asks for no speed (station-keep inside its inner radius), or
+  // has no decision at all (mission over with REGION still on, all-stop):
+  // neutral, rudder centred. On "NothingToDo" the helm often never posts
+  // DESIRED_SPEED=0, so the last mission speed would stay in force; and a
+  // leftover speed I-term sends a little thrust, which puts the gear in
+  // forward, so the boat idled along in gear. No ramp: neutral at once.
+  if(desired_speed <= 0 || helm_allstop != "clear") {
+    desired_thrust = 0;
+    desired_rudder = 0;
+    headingController.resetIntegral();
+    speedController.resetIntegral();
+    speed_setpoint = -1;
+  }
 
   // Imprima as saídas dos controladores
 
@@ -753,6 +772,7 @@ void lanchaPID::registerVariables()
   Register("STATIONING",0);
   Register("TRAILING",0);
   Register("REGION",0);
+  Register("IVPHELM_ALLSTOP",0);
   Register("SERVICE_MODE",0);
 }
 

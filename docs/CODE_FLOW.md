@@ -73,7 +73,8 @@ Per tick (`dt = 1/AppTick`, 20 Hz on the boat):
    `auto_speed_ramp_up/down` (speed units/s; 0 = step, the default). Piecewise feed-forward
    map (kt→%: 0→0, 3→8, 5→14, 7→22, 8→27, 10→35, 12→36, 15→37, 18→41, 20→44)
    plus scheduled PI with anti-windup (I authority ±2 %).
-5. Thrust capped at **50 %**.
+5. Thrust capped at **50 %**. If `IVPHELM_ALLSTOP` is not `clear` or
+   `DESIRED_SPEED` <= 0: thrust 0 (neutral), rudder 0, integrals reset.
 6. **Publish gate** (L578–583): `DESIRED_THRUST`/`DESIRED_RUDDER` are posted only if
    `(WAYPOINT && OVERRIDE=="false") || (TRAILING && OVERRIDE=="false") || STATIONING || REGION`.
 7. Posts `PID_GAINS` (effective gains) for the UI.

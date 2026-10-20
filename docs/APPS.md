@@ -67,11 +67,16 @@ Positional parse (expects token 2 = `X=`, 3 = `Y=`).
   `HEADING_UPPER/LOWER_BOUND`, `RUDDER_LIMIT_MAX/MIN/SPEED_LOW/SPEED_HIGH` only
   when there is no profile. Integrals reset whenever planchaPID is not driving
   (manual control, no active mode).
+- **Stop = neutral**: while the helm has no decision (`IVPHELM_ALLSTOP` not `clear`,
+  e.g. `NothingToDo` after a route ends with `REGION` still true) or asks for
+  `DESIRED_SPEED` <= 0, thrust and rudder are 0 and the integrals reset. Before,
+  the last speed (the helm often never posts 0 on `NothingToDo`) or a leftover
+  I-term kept the gear in forward after the mission.
 - **Speed ramp**: with `auto_speed_ramp_up/down` > 0 the speed PID chases a setpoint
   that starts at the current `NAV_SPEED` when planchaPID starts driving and moves
   toward `DESIRED_SPEED` at those rates; 0 (the default) steps straight to it.
   All other numeric params go through `std::stod` — a non-numeric line crashes startup.
-- **Subs**: `NAV_HEADING`, `NAV_SPEED`, `DESIRED_HEADING`, `DESIRED_SPEED`, gains,
+- **Subs**: `NAV_HEADING`, `NAV_SPEED`, `DESIRED_HEADING`, `DESIRED_SPEED`, `IVPHELM_ALLSTOP`, gains,
   `SERVICE_MODE`, `DEPLOY` (resets integrals), `MOOS_MANUAL_OVERRIDE`,
   `CONSTANT_HEADING`, `SETPOINT_HEADING`, `WAYPOINT`, `TRAILING`, `STATIONING`, `REGION`, `RETURN`.
 - **Pubs**: `DESIRED_RUDDER`, `DESIRED_THRUST` (0 to `auto_thrust_max_pct`), `PID_GAINS`.

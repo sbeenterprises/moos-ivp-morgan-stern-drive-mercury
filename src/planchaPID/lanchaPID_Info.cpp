@@ -106,6 +106,8 @@ void showInterfaceAndExit()
   blk("------------------------------------                            ");
   blk("  NAV_HEADING, NAV_SPEED, NAV_COG                               ");
   blk("  DESIRED_HEADING, DESIRED_SPEED                                ");
+  blk("  IVPHELM_ALLSTOP: not \"clear\" (helm has nothing to do) or   ");
+  blk("      DESIRED_SPEED <= 0 = thrust 0 (neutral), rudder 0         ");
   blk("  SPEED_KP, SPEED_KI, SPEED_KD                                  ");
   blk("  HEADING_KP, HEADING_KI, HEADING_KD                            ");
   blk("  SERVICE_MODE = true/false                                     ");
