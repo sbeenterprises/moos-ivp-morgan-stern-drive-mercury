@@ -15,9 +15,9 @@ ServerPort   = 9000
 Community    = alpha
 MOOSTimeWarp = 1
 
-//Morgan City
-LatOrigin  = 29.71970895316288
-LongOrigin = -91.14705165281887
+// Lumut (where USV-725 operates; Morgan City is 29.71970895316288, -91.14705165281887)
+LatOrigin  = 4.2245
+LongOrigin = 100.5868
 
 //------------------------------------------
 // Antler configuration  block
@@ -32,7 +32,7 @@ ProcessConfig = ANTLER
   Run = planchaPID @ NewConsole = false
   Run = iDivisorNMEA	@ NewConsole = false
   Run = pHelmIvP      @ NewConsole = false
-  Run = pMarineViewer	@ NewConsole = false
+  //Run = pMarineViewer	@ NewConsole = false
   Run = uProcessWatch	@ NewConsole = false
   Run = pNodeReporter	@ NewConsole = false
   Run = pRealm	      @ NewConsole = false
@@ -358,11 +358,11 @@ ProcessConfig = pMarineViewer
   AppTick    = 4
   CommsTick  = 4
 
-  tiff_file            = morgan_city.tif
+  tiff_file            = lumut.tif
 	//tiff_file            = MIT_SP.tif
 
-  set_pan_x            = -90
-  set_pan_y            = -280
+  set_pan_x            = 0
+  set_pan_y            = 0
   zoom                 = 0.65
   vehicle_shape_scale  = 1.5
   hash_delta           = 50
@@ -444,7 +444,7 @@ ProcessConfig = grafana_bridge
  
   influx_url    = localhost:8086   // no scheme: // starts a MOOS comment
   influx_tls    = false
-  influx_token  = e5fe113991d2c3d97be9de264a8ebbc9537eccb73d9d540e491ed3604b560656
+  influx_token  = bc606157a77e784b354bd2a81e3ef3fe85507d738f9586458ad161b3c858d6d5
   influx_org    = usv
   influx_bucket = telemetry
   events_bucket = events

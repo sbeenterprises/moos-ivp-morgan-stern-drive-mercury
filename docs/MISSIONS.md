@@ -25,7 +25,7 @@ uMAC real.moos             # appcast monitor (any mission)
 
 | File | Purpose |
 |---|---|
-| `real_usv722.moos`, `real_usv725.moos` | Real boat, one file per boat: sensors via Signal K, CAN actuation, radar, UI. They differ only in the boat profile (`profile_file`, also used by planchaPID), the telemetry `vessel_id`, and the own-ship MMSI line. |
+| `real_usv722.moos`, `real_usv725.moos` | Real boat, one file per boat: sensors via Signal K, CAN actuation, radar, UI. They differ in the boat profile (`profile_file`, also used by planchaPID), the telemetry `vessel_id`, the own-ship MMSI line, and the site: `real_usv725.moos` uses the Lumut origin (4.2245, 100.5868) and `lumut.tif`, with pMarineViewer off, as on that boat. |
 | `real.moos` | The generic template the two files above were made from; its `profile_file` line must be edited per boat. Prefer the per-boat files. |
 | `simulated.moos` | Desktop sim: uSimMarineV22 owns NAV_*, iNMEA feeds Signal K, pTrafficSim targets, pColavEval metrics, iMOOSGateway (TCP 9501). No pLogger. |
 | `external.moos` | Real-boat topology, but sensors come from `tools/aissim` via Signal K. No iCAN/iCANRec. Best end-to-end test of the real data path without hardware. |
