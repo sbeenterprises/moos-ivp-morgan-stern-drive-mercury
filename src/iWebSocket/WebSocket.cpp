@@ -129,6 +129,13 @@ WebSocket::WebSocket()
   m_link_ok_posted = false;
   m_last_link_post = 0.0;
   m_lost_link_stop = false;
+  m_region_margin = 0;
+  m_region_halt_lead = 0;
+  m_region_recover_speed = -1;
+  m_nav_xy_known = false;
+  m_nav_x = m_nav_y = 0;
+  m_region_state = "off";
+  m_region_repost_at = 0;
   m_auto_link_timeout = -1;   // unset: same as link_timeout
   m_auto_link_ok_posted = false;
 
@@ -277,6 +284,14 @@ bool WebSocket::OnNewMail(MOOSMSG_LIST &NewMail)
 
     if(key == "NAV_HEADING")
       nav_heading = msg.GetDouble();
+    else if(key == "NAV_X") {
+      m_nav_x = msg.GetDouble();
+      m_nav_xy_known = true;
+    }
+    else if(key == "NAV_Y")
+      m_nav_y = msg.GetDouble();
+    else if(key == "V26_STATE")
+      m_region_state = msg.GetString();
     else if(key == "DESIRED_HEADING")
       desired_heading = msg.GetDouble();
     else if(key == "DESIRED_SPEED")
@@ -333,8 +348,11 @@ bool WebSocket::OnNewMail(MOOSMSG_LIST &NewMail)
       else
         m_can_str[key] = msg.GetString();
     }
-    else if(key == "REGION")
+    else if(key == "REGION") {
       region_active = (msg.GetString() == "true");
+      if(!region_active)
+        m_region_state = "off";
+    }
     else if(key == "SERVICE_MODE")
       service_mode = (msg.GetString() == "true");
     else if(key == "PID_GAINS")
@@ -500,6 +518,16 @@ bool WebSocket::Iterate()
     m_last_link_post = current_time;
   }
 
+  // BHV_OpRegionV26 only reads REGION_POLY in an iteration where it runs
+  // and the variable was just posted, and it runs only while a mission,
+  // follow or station-keep drives the boat (alpha.bhv). Re-post the
+  // polygon every 2 s while the region is on so it is picked up as soon
+  // as one starts.
+  if (region_active && !m_region_spec.empty() && current_time >= m_region_repost_at) {
+    Notify("REGION_POLY", m_region_spec);
+    m_region_repost_at = current_time + 2.0;
+  }
+
   // Aqui você pode incluir outras operações se necessário
 
   //Analysis the variables coming from Freeboard
@@ -564,6 +592,9 @@ bool WebSocket::Iterate()
   root["BASE_COORDS"] = base_coords;
   root["CAN_SEND"] = can_send;
   root["REGION"] = region_active;
+  root["REGION_STATE"] = region_active ? m_region_state : std::string("off");
+  root["REGION_CORE"] = m_region_core;
+  root["REGION_MSG"] = m_region_msg;
   root["DESIRED_RUDDER"] = desired_rudder;
   root["DESIRED_THRUST"] = desired_thrust;
   root["ENGINE_ACCELERATOR_PEDAL_POSITION"] = engine_accelerator_pedal_position;
@@ -667,6 +698,18 @@ bool WebSocket::OnStartUp()
       m_link_timeout = atof(value.c_str());
       handled = true;
     }
+    else if(param == "region_margin" && isNumber(value) && atof(value.c_str()) >= 0) {
+      m_region_margin = atof(value.c_str());
+      handled = true;
+    }
+    else if(param == "region_halt_lead" && isNumber(value) && atof(value.c_str()) >= 0) {
+      m_region_halt_lead = atof(value.c_str());
+      handled = true;
+    }
+    else if(param == "region_recover_speed" && isNumber(value) && atof(value.c_str()) > 0) {
+      m_region_recover_speed = atof(value.c_str());
+      handled = true;
+    }
     else if(param == "autonomy_link_timeout" && isNumber(value) && atof(value.c_str()) > 0) {
       m_auto_link_timeout = atof(value.c_str());
       handled = true;
@@ -730,6 +773,9 @@ void WebSocket::registerVariables()
   Register("DEPLOY", 0);
   Register("STOP_CAN", 0);
   Register("NAV_HEADING", 0);
+  Register("NAV_X", 0);
+  Register("NAV_Y", 0);
+  Register("V26_STATE", 0);   // BHV_OpRegionV26 state (region)
   Register("DESIRED_HEADING", 0);
   Register("DESIRED_THRUST", 0);
   Register("DESIRED_RUDDER", 0);
@@ -868,7 +914,8 @@ void WebSocket::initializeMessageHandlers()
 
 //---------------------------------------------------------
 // Procedure: handleTrailFollow()
-//   TRAIL_FOLLOW=mmsi=366999001#range=150#angle=180
+//   TRAIL_FOLLOW=mmsi=366999001#range=150#angle=180[#speed=5]
+//   speed = most the trail may ask for (helm units), sets trail_max_speed
 //   TRAIL_FOLLOW=off
 //
 //   The contact name is the MMSI with an AIS prefix - pTrafficSim names its
@@ -889,6 +936,7 @@ void WebSocket::handleTrailFollow(const std::string& value)
   std::string mmsi;
   std::string range;
   std::string angle;
+  std::string speed;
 
   std::stringstream ss(value);
   std::string token;
@@ -901,6 +949,7 @@ void WebSocket::handleTrailFollow(const std::string& value)
     if (k == "mmsi")       mmsi  = v;
     else if (k == "range") range = v;
     else if (k == "angle") angle = v;
+    else if (k == "speed") speed = v;
   }
 
   if (mmsi.empty()) {
@@ -924,6 +973,15 @@ void WebSocket::handleTrailFollow(const std::string& value)
   // Without this the helm computes a trail solution that never reaches the
   // actuators. AUTONOMOUS_START does the same thing for the same reason.
   Notify("MOOS_MANUAL_OVERRIDE", "false");
+
+  // Most speed the trail may ask for (trail_max_speed in alpha.bhv). Without
+  // a cap BHV_Trail closes range at any speed in the helm domain.
+  if (!speed.empty()) {
+    if (isNumber(speed) && atof(speed.c_str()) > 0)
+      Notify("TRAIL_SPEED_UPDATES", "max_speed=" + speed);
+    else
+      reportRunWarning("[TRAIL_FOLLOW] ignored bad speed: " + speed);
+  }
 
   Notify("TRAIL_UPDATES", updates);
   Notify("TRAILING", "true");
@@ -1776,150 +1834,139 @@ void WebSocket::handleCanSend(const std::string& value)
   }
 }
 
-void WebSocket::handleRegionUpdates(const std::string& value)
-{
-  // Expected value format: core_poly=pts={lat,lon:lat,lon:lat,lon:...}
-  // Parse the pts={...} block, convert lat/lon to local x,y,
-  // and rebuild the string with local coordinates.
-
-  reportEvent("[REGION_UPDATES] Raw input: [" + value + "]");
-  reportEvent("[REGION_UPDATES] Input length: " + std::to_string(value.length()));
-
-  if (!originReady("REGION_UPDATES"))
-    return;
-
-  // Find the pts={...} block
-  size_t ptsStart = value.find("pts={");
-  if (ptsStart == std::string::npos) {
-    reportRunWarning("[REGION_UPDATES] Could not find pts={} in value: " + value);
-    return;
-  }
-
-  // Everything before "pts={"
-  std::string prefix = value.substr(0, ptsStart);
-
-  size_t braceOpen = value.find('{', ptsStart);
-  size_t braceClose = value.find('}', braceOpen);
-  if (braceOpen == std::string::npos || braceClose == std::string::npos) {
-    reportRunWarning("[REGION_UPDATES] Malformed pts block in value: " + value);
-    return;
-  }
-
-  // Extract the coordinate string inside braces
-  std::string coordsStr = value.substr(braceOpen + 1, braceClose - braceOpen - 1);
-
-  // Everything after the closing brace (could be empty)
-  std::string suffix = value.substr(braceClose + 1);
-
-  // Split coordinates by ':'
-  std::vector<std::string> coordTokens;
-  std::istringstream tokenStream(coordsStr);
-  std::string token;
-  while (std::getline(tokenStream, token, ':')) {
-    if (!token.empty()) {
-      coordTokens.push_back(token);
-    }
-  }
-
-  // Convert each lat,lon pair to local x,y
-  std::vector<std::string> convertedCoords;
-  for (const auto &coordStr : coordTokens) {
-    size_t commaPos = coordStr.find(',');
-    reportEvent("[REGION_UPDATES] Processing coord token: [" + coordStr + "]");
-    if (commaPos == std::string::npos) {
-      std::cerr << "[REGION_UPDATES] Invalid coordinate format: " << coordStr << std::endl;
-      continue;
-    }
-
-    std::string latPart = coordStr.substr(0, commaPos);
-    std::string lonPart = coordStr.substr(commaPos + 1);
-
-    try {
-      double orig_lat = std::stod(latPart);
-      double orig_lon = std::stod(lonPart);
-
-      double local_y = 0.0, local_x = 0.0;
-      m_geodesy.LatLong2LocalUTM(orig_lat, orig_lon, local_y, local_x);
-
-      std::ostringstream oss;
-      oss << std::fixed << std::setprecision(1) << local_x << "," << local_y;
-      convertedCoords.push_back(oss.str());
-    } catch (const std::exception &e) {
-      std::cerr << "[REGION_UPDATES] Error converting coordinate (" << coordStr << "): " << e.what() << std::endl;
-    }
-  }
-
-  // Remove closing vertex if polygon is a closed ring
-  // (last point == first point), as XYPolygon expects open polygons
-  if (convertedCoords.size() > 1 && 
-      convertedCoords.front() == convertedCoords.back()) {
-    convertedCoords.pop_back();
-  }
-
-  // Validate: need at least 3 points for a convex polygon
-  if (convertedCoords.size() < 3) {
-    reportRunWarning("[REGION_UPDATES] Only " + std::to_string(convertedCoords.size()) 
-                     + " unique coords, need at least 3");
-    return;
-  }
-
-  // Rebuild the pts={...} string with local coordinates
-  std::ostringstream finalStream;
-  finalStream << prefix << "pts={";
-  bool first = true;
-  for (const auto &convertedCoord : convertedCoords) {
-    if (!first) {
-      finalStream << ":";
-    }
-    finalStream << convertedCoord;
-    first = false;
-  }
-  finalStream << "}" << suffix;
-
-  std::string region_update_str = finalStream.str();
-  Notify("REGION_UPDATES", region_update_str);
-  reportEvent("[REGION_UPDATES] Published: " + region_update_str);
-}
 
 void WebSocket::handleRegion(const std::string& value)
 {
-  // Expected format: true#REGION_UPDATES=core_poly=pts={lat,lon:lat,lon:...}
-  //              or: false#REGION_UPDATES=core_poly=pts={lat,lon:lat,lon:...}
-
-  // Split on the first '#'
+  // REGION=true#REGION_UPDATES=core_poly=pts={lat,lon:lat,lon:...}
+  // REGION=true | REGION=false
+  // The polygon is the HALT line drawn in the UI. It is checked and
+  // turned into the working boundary first; if it is refused, REGION is
+  // not switched on (an old region must never stay in force silently).
   size_t hashPos = value.find('#');
+  std::string regionBool = (hashPos == std::string::npos) ? value : value.substr(0, hashPos);
+  std::string remainder = (hashPos == std::string::npos) ? "" : value.substr(hashPos + 1);
 
-  std::string regionBool;
-  std::string remainder;
-
-  if (hashPos != std::string::npos) {
-    regionBool = value.substr(0, hashPos);
-    remainder = value.substr(hashPos + 1);
-  } else {
-    regionBool = value;
-  }
-
-  // Set the REGION variable
-  if (regionBool == "true") {
-    Notify("REGION", "true");
-  } else if (regionBool == "false") {
-    Notify("REGION", "false");
-  }
-
-  // Process REGION_UPDATES if present
+  bool poly_ok = true;
   if (!remainder.empty()) {
-    // remainder should be: REGION_UPDATES=core_poly=pts={...}
     size_t eqPos = remainder.find('=');
-    if (eqPos != std::string::npos) {
-      std::string key = remainder.substr(0, eqPos);
-      std::string regionValue = remainder.substr(eqPos + 1);
-
-      if (key == "REGION_UPDATES" && !regionValue.empty()) {
-        handleRegionUpdates(regionValue);
-      }
-    }
+    if (eqPos != std::string::npos &&
+        remainder.substr(0, eqPos) == "REGION_UPDATES")
+      poly_ok = handleRegionUpdatesOk(remainder.substr(eqPos + 1));
   }
+
+  if (regionBool == "true") {
+    if (!poly_ok) {
+      reportRunWarning("[REGION] not switched on: " + m_region_msg);
+      return;
+    }
+    Notify("REGION", "true");
+  }
+  else if (regionBool == "false")
+    Notify("REGION", "false");
 }
+
+void WebSocket::handleRegionUpdates(const std::string& value)
+{
+  handleRegionUpdatesOk(value);
+}
+
+//---------------------------------------------------------
+// handleRegionUpdatesOk(): core_poly=pts={lat,lon:lat,lon:...}
+
+bool WebSocket::handleRegionUpdatesOk(const std::string& value)
+{
+  size_t ptsStart = value.find("pts={");
+  size_t braceClose = (ptsStart == std::string::npos) ? std::string::npos
+                                                       : value.find('}', ptsStart);
+  if (braceClose == std::string::npos) {
+    m_region_msg = "Region refused: no pts={...} in the update";
+    reportRunWarning("[REGION_UPDATES] " + m_region_msg + ": " + value);
+    Notify("REGION_MSG", m_region_msg);
+    return false;
+  }
+  return applyRegionPolygon(value.substr(ptsStart + 5, braceClose - ptsStart - 5));
+}
+
+//---------------------------------------------------------
+// applyRegionPolygon(): drawn halt line (lat,lon:...) -> working boundary
+//   REGION_UPDATES = reset=true # breach_dist=<margin>   (new region: start
+//                    over, so a region set elsewhere is not an instant breach)
+//   REGION_POLY    = border={x,y:...} # pts={...} ...    (dynamic_region_var)
+
+bool WebSocket::applyRegionPolygon(const std::string& latlon_pts)
+{
+  if (!originReady("REGION_UPDATES"))
+    return false;
+
+  RegionGeom::Ring drawn;
+  std::stringstream ss(latlon_pts);
+  std::string tok;
+  while (std::getline(ss, tok, ':')) {
+    size_t comma = tok.find(',');
+    if (comma == std::string::npos)
+      continue;
+    std::string slat = stripBlankEnds(tok.substr(0, comma));
+    std::string slon = stripBlankEnds(tok.substr(comma + 1));
+    if (!isNumber(slat) || !isNumber(slon)) {
+      m_region_msg = "Region refused: bad coordinate '" + tok + "'";
+      reportRunWarning("[REGION] " + m_region_msg);
+      Notify("REGION_MSG", m_region_msg);
+      return false;
+    }
+    double y = 0, x = 0;
+    m_geodesy.LatLong2LocalUTM(atof(slat.c_str()), atof(slon.c_str()), y, x);
+    drawn.push_back(RegionGeom::Pt(x, y));
+  }
+
+  RegionGeom::RegionResult res =
+    RegionGeom::buildRegion(drawn, m_region_margin, m_nav_xy_known, m_nav_x, m_nav_y);
+  if (!res.ok) {
+    m_region_msg = "Region refused: " + res.error;
+    reportRunWarning("[REGION] " + m_region_msg);
+    Notify("REGION_MSG", m_region_msg);
+    return false;
+  }
+
+  // The helm stops (neutral) at breach_dist outside the working boundary;
+  // stopping that region_halt_lead before the drawn line leaves room to
+  // coast, so the boat comes to rest by the line rather than past it.
+  std::string updates = "reset=true";
+  if (m_region_margin > 0) {
+    double breach = m_region_margin - m_region_halt_lead;
+    if (breach < 5)
+      breach = 5;
+    updates += " # breach_dist=" + doubleToStringX(breach, 1);
+  }
+  if (m_region_recover_speed > 0)
+    updates += " # recover_speed=" + doubleToStringX(m_region_recover_speed, 2);
+  Notify("REGION_UPDATES", updates);
+  Notify("REGION_POLY", res.spec);
+  m_region_spec = res.spec;
+  m_region_repost_at = MOOSTime() + 1.0;   // then every 2 s while REGION is on
+
+  // working boundary back to lat/lon for the UI
+  std::string core;
+  for (size_t i = 0; i < res.core.size(); i++) {
+    double lat = 0, lon = 0;
+#ifdef USE_UTM
+    m_geodesy.UTM2LatLong(res.core[i].x, res.core[i].y, lat, lon);
+#else
+    m_geodesy.LocalGrid2LatLong(res.core[i].x, res.core[i].y, lat, lon);
+#endif
+    if (i) core += ":";
+    core += doubleToString(lat, 7) + "," + doubleToString(lon, 7);
+  }
+  m_region_core = core;
+  m_region_msg = res.note;
+  Notify("REGION_MSG", m_region_msg);
+  reportEvent("[REGION] " + std::to_string(drawn.size()) + " points, margin " +
+              doubleToStringX(m_region_margin, 1) + " m -> working boundary " +
+              std::to_string(res.core.size()) + " points, " +
+              std::to_string(res.pieces.size()) + " convex pieces" +
+              (res.note.empty() ? "" : " (" + res.note + ")"));
+  return true;
+}
+
 
 //---------------------------------------------------------
 // Procedure: handleCorridor()

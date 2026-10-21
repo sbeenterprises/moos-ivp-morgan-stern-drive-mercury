@@ -796,6 +796,7 @@ static void testAutoTuning()
   CHECK(d.thrust_max == 50 && d.i_authority == 2, "default thrust max 50, I-term 2");
   CHECK(d.speed_filter == 0.1 && d.heading_filter == 0.15, "default filters 0.1 / 0.15");
   CHECK(d.speed_ramp_up == 0 && d.speed_ramp_down == 0, "default: no speed ramp (old behaviour)");
+  CHECK(d.heading_turn_latch == 0, "default: no turn latch (old behaviour)");
   double hp, hi, hd;
   d.headingGains(3, hp, hi, hd);   CHECK(hp == 0.28 && hi == 0 && hd == 0.07, "default heading gains below 5 kn");
   d.headingGains(7, hp, hi, hd);   CHECK(hp == 0.22 && hd == 0.06, "default heading gains 5..10 kn");
@@ -816,6 +817,7 @@ static void testAutoTuning()
           "mercury speed side = old tuning at " << v);
   }
   CHECK(mt.speed_ramp_up == 0 && mt.speed_ramp_down == 0, "mercury: no speed ramp (unchanged)");
+  CHECK(mt.heading_turn_latch == 150, "mercury turn latch 150");
   double mp, mi, md;
   mt.headingGains(6, mp, mi, md);
   CHECK(mp == 0.5 && mi == 0.03 && mt.heading_i_authority == 15,
@@ -837,6 +839,7 @@ static void testAutoTuning()
   ut.gains(10, kp, ki);
   CHECK(kp == 2.0 && ki == 0.04, "usv722 speed gains 6..12 kn: kp 2 %/kn, ki 0.04");
   CHECK(ut.speed_ramp_up == 0.5 && ut.speed_ramp_down == 1.5, "usv722 speed ramps 0.5 up / 1.5 down");
+  CHECK(ut.heading_turn_latch == 150, "usv722 turn latch 150");
   ut.headingGains(6, hp, hi, hd);
   CHECK(hp == 0.5 && hi == 0.03 && ut.heading_i_authority == 10,
         "usv722 heading at 6 kn: kp 0.5, ki 0.03, I-term up to 10 %");
@@ -854,6 +857,8 @@ static void testAutoTuning()
   CHECK(rejects("auto_heading_kp = 0.3\n", "unknown setting"), "old auto_heading_kp key is gone");
   CHECK(rejects("auto_speed_ramp_up = -1\n", "0 (no ramp) or more"), "negative ramp up rejected");
   CHECK(rejects("auto_speed_ramp_down = -0.5\n", "0 (no ramp) or more"), "negative ramp down rejected");
+  CHECK(rejects("auto_heading_turn_latch_deg = 45\n", "0 (off) or 90..179"), "turn latch below 90 rejected");
+  CHECK(rejects("auto_heading_turn_latch_deg = 180\n", "0 (off) or 90..179"), "turn latch 180 rejected");
 }
 
 //------------------------------------------------------------------

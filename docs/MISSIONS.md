@@ -63,6 +63,7 @@ R = run, c = config block only, – = absent
 | pTrafficSim | – | **R** | – | – | – | – |
 | pColavEval | – | **R** | – | – | – | – |
 | pCorridor | R | R | R | – | – | – |
+| pTurnLimit, pColavScale | R | R | R | – | – | – |
 | iMOOSGateway | – | R (tcp 9501) | – | – | – | – |
 | pVisionDetector_ref / pSensorFusionTracker_ref | – | – | – | **R** | – | – |
 
@@ -86,14 +87,16 @@ R = run, c = config block only, – = absent
 | `waypt_survey` | BHV_Waypoint_mod | 100 | `WAYPOINT=true` | `WPT_UPDATE` |
 | `station-keep` | BHV_StationKeep | 50 | `STATIONING=true` | `STATION_UPDATES` |
 | `avdcol_` (templated per contact) | BHV_AvdColregsV22 | 250 | `WAYPOINT=true` | `CONTACT_INFO` |
-| `opr24` | BHV_OpRegionV24 | 300 | `REGION=true` | `REGION_UPDATES` |
+| `opregion` | BHV_OpRegionV26 (any shape; `dynamic_region_var = REGION_POLY`, breach at the drawn line) | 300 | `REGION=true` and (`WAYPOINT` or `TRAILING` or `STATIONING`) | `REGION_UPDATES` |
+| `turn_max_speed` | BHV_MaxSpeed (max_speed from pTurnLimit's `turn_speed`) | 300 | `TURN_LIMIT=true` | `TURN_LIMIT_UPDATES` |
 | `trail_contact` | BHV_Trail | 100 | `TRAILING=true` | `TRAIL_UPDATES` |
+| `trail_max_speed` | BHV_MaxSpeed (max_speed 5, set from the UI's Follow panel) | 300 | `TRAILING=true` | `TRAIL_SPEED_UPDATES` |
 | `corridor_slow` | BHV_ConstantSpeed (speed 2) | 200 | `CORRIDOR_STATUS=slow`, `WAYPOINT=true` | `CORRIDOR_SLOW_UPDATES` |
 | `corridor_recover` | BHV_Waypoint (speed 2, capture 5, reports silent) | 200 | `CORRIDOR_STATUS=recovering`, `WAYPOINT=true` | `CORRIDOR_RECOVER_UPDATES` |
 | `corridor_turn` | BHV_ConstantSpeed (speed 2) | 200 | `CORRIDOR_TURN=true`, `WAYPOINT=true` | `CORRIDOR_TURN_UPDATES` |
 | `corridor_stop` | BHV_ConstantSpeed (speed 0) | 240 | `CORRIDOR_STATUS=stop`, `WAYPOINT=true` | – |
 
-Initialised false: `DEPLOY`, `RETURN`, `WAYPOINT`, `STATIONING`, `REGION`, `TRAILING`, `CORRIDOR`
+Initialised false: `DEPLOY`, `RETURN`, `WAYPOINT`, `STATIONING`, `REGION`, `TRAILING`, `CORRIDOR`, `TURN_LIMIT`
 (and `CORRIDOR_STATUS=none`).
 
 The `corridor_*` blocks only run when pCorridor reports a zone, i.e. a corridor

@@ -36,6 +36,8 @@ ProcessConfig = ANTLER
   //Run = iSignalK	      @ NewConsole = false
   Run = iWebSocket	      @ NewConsole = false
   Run = pCorridor     @ NewConsole = false
+  Run = pTurnLimit    @ NewConsole = false
+  Run = pColavScale   @ NewConsole = false
   Run = pXYpublisher      @ NewConsole = false
   Run = pContactSpawn	      @ NewConsole = false
   Run = pContactMgrV20 @ NewConsole = false
@@ -185,6 +187,17 @@ ProcessConfig = iWebSocket
    // the link returns (keep in step with lost_link_autonomy in iCAN).
    // continue = carry on without the UI.
    lost_link_autonomy = stop
+
+   // Operating region: the polygon drawn in the UI is the HALT line; the
+   // boat works inside it shrunk by this margin (BHV_OpRegionV26 breaches,
+   // i.e. stops, on or just inside the drawn line).
+   region_margin = 30
+   // Halt this far before the drawn line, so the boat coasts to rest by it
+   // (neutral, no braking). [P] set from the coasting distance at speed.
+   region_halt_lead = 15
+   // Speed to steer back into the working area (helm units: knots on the
+   // boat, m/s in the sim); slow enough for a tight turn, enough to steer.
+   region_recover_speed = 4
 }
 
 //------------------------------------------------
@@ -466,4 +479,49 @@ ProcessConfig = grafana_bridge
   optional_apps = pMarineViewer,pContactSpawn
   enc_fitted = false          // no ENC yet: row reads N/A
   console_checklist = false   // UI keeps its checklist local
+}
+
+//------------------------------------------------
+// pTurnLimit config block
+//
+// Holds the boat to turn_speed near sharp route corners (with or without a
+// corridor) and while it turns hard (desired heading far off its heading:
+// region turn-away, collision avoidance, follow). At speed the rudder is
+// limited, so turns are wide; this keeps them tight. Only slows the boat.
+
+ProcessConfig = pTurnLimit
+{
+  AppTick   = 4
+  CommsTick = 4
+
+  turn_speed      = 5    // knots
+  heading_trigger = 45   // deg off the desired heading -> limit
+  heading_release = 15   // ... released below this
+  corner_dist     = 100  // m to a route corner turning by corner_angle+
+  corner_angle    = 60   // (route capture radius is 60 m without a corridor)
+  hold_secs       = 3
+}
+
+//------------------------------------------------
+// pColavScale config block
+//
+// Collision-avoidance distances from closing speed, per contact: start
+// avoiding outer_secs before a possible meeting, full priority inner_secs
+// before. The UI's Calibration distances (COLAV_DIST) are the minimums;
+// outer_max is also pContactMgrV20's alert range. [P] until water-tested.
+
+ProcessConfig = pColavScale
+{
+  AppTick   = 4
+  CommsTick = 4
+
+  nav_speed_units     = knots
+  contact_speed_units = mps    // NODE_REPORT SPD (radar sends knots: earlier, never later)
+  outer_secs = 60
+  inner_secs = 30
+  outer_min  = 150
+  inner_min  = 75
+  outer_max  = 1400
+  inner_max  = 700
+  cpa_range  = 1500    // keep >= avdcol_ completed_dist in alpha.bhv
 }

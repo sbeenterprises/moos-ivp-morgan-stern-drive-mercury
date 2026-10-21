@@ -20,6 +20,7 @@
 #include <atomic>
 #include <set>
 #include "MOOS/libMOOSGeodesy/MOOSGeodesy.h"
+#include "RegionGeom.h"
 
 
 class WebSocket : public AppCastingMOOSApp
@@ -101,6 +102,21 @@ class WebSocket : public AppCastingMOOSApp
   // lost_link_autonomy = stop: a lost link ends the autonomous mode
   // (as AUTONOMOUS_STOP does), so the boat stays stopped when it returns.
   bool   m_lost_link_stop;
+
+  // Operating region. The UI's polygon is the HALT line; the boat works
+  // inside it shrunk by region_margin (lib_regiongeom), handed to
+  // BHV_OpRegionV26 through REGION_POLY with breach_dist = region_margin.
+  double m_region_margin;        // metres, 0 = the drawn line is the working boundary
+  double m_region_halt_lead;     // halt this far before the drawn line (coasting room)
+  double m_region_recover_speed; // helm units to steer back in; <= 0 = alpha.bhv's
+  bool   m_nav_xy_known;
+  double m_nav_x, m_nav_y;
+  std::string m_region_state;    // V26_STATE while REGION is on, else "off"
+  std::string m_region_core;     // working boundary, "lat,lon:lat,lon:..."
+  std::string m_region_msg;      // last refusal / note for the UI
+  std::string m_region_spec;     // last REGION_POLY posted
+  double m_region_repost_at;     // next REGION_POLY re-post (every 2 s while REGION is on)
+  bool   applyRegionPolygon(const std::string& latlon_pts);
   // Autonomy may allow a longer outage than manual: UI_LINK_OK_AUTO uses
   // autonomy_link_timeout (default: link_timeout).
   double m_auto_link_timeout;
@@ -158,6 +174,7 @@ class WebSocket : public AppCastingMOOSApp
   void handleCanSend(const std::string& value);
   void handleRegionUpdates(const std::string& value);
   void handleRegion(const std::string& value);
+  bool handleRegionUpdatesOk(const std::string& value);
   void handleCorridor(const std::string& value);
   void handleLoopStart(const std::string& value);
 

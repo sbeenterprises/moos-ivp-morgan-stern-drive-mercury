@@ -20,6 +20,10 @@
 //   auto_speed_ramp_up, auto_speed_ramp_down   most the speed setpoint the
 //                     speed loop works to may rise / fall per second
 //                     (NAV_SPEED units/s); 0 = follow DESIRED_SPEED at once
+//   auto_heading_turn_latch_deg  heading error (deg) above which the turn
+//                     direction is held: near a reversal the shortest way
+//                     flips between +179 and -179 and the rudder bangs side
+//                     to side without turning. 0 = off; else 90..179
 //
 // Speeds are in NAV_SPEED units (knots on the real boats). Thrust is
 // DESIRED_THRUST %, i.e. before the profile's throttle tx_field map.
@@ -69,6 +73,7 @@ class AutoTuning {
   double thrust_max, i_authority;
   double speed_filter, heading_filter;
   double speed_ramp_up, speed_ramp_down;
+  double heading_turn_latch;   // deg, 0 = off
   std::vector<SpeedPoint> speed_ff;
   std::vector<GainStep>   speed_gains;
   std::vector<GainStep>   heading_gains;

@@ -66,6 +66,7 @@ class PIDController
     double kd;
     double integral;
     double prevError;
+    int    turn_latch_dir;   // +1 / -1 while the turn-direction latch holds, else 0
     double lower_bound;
     double upper_bound;
     double eff_kp;

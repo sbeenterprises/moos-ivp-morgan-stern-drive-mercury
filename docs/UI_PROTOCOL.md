@@ -29,6 +29,7 @@ Source: `src/iWebSocket/main.cpp`, `src/iWebSocket/WebSocket.cpp`.
   "COLAV_TEST": false, "COLAV_TEST_ACK": false, "COLAV_METRICS": "[...json array...]",
   "TRAFFIC_SPAWNED": "str", "TRAFFIC_TARGETS": "str", "COLAV_DIST": "str",
   "CORRIDOR": false, "CORRIDOR_STATUS": "none", "XTE_NOW": 0,
+  "REGION_STATE": "off", "REGION_CORE": "lat,lon:...", "REGION_MSG": "str",
   "CONTACT_INFO": { "NAME": "str", "LAT": 0, "LON": 0, "SPD": 0, "HDG": 0 }
 }
 ```
@@ -68,9 +69,9 @@ lists use `:`, coordinates are `lat,lon`. Unknown keys are ignored.
 | `DESIRED_SPEED` | number | `WPT_UPDATE=speed=<v>` |
 | `REPEAT` | integer | `WPT_UPDATE=repeat=<n>` |
 | `STATION_KEEP_WAYPOINT` | `TRUE#INNER_RADIUS=..#OUTER_RADIUS=..#COORDS=lat,lon` / `FALSE` | `STATIONING`, `STATION_UPDATES` (radii, `station_pt`, `pwt`), `WPT_UPDATE=pwt=` |
-| `REGION` | `true\|false[#REGION_UPDATES=core_poly=pts={lat,lon:...}]` | `REGION`, `REGION_UPDATES` |
-| `REGION_UPDATES` | `...pts={lat,lon:...}...` | `REGION_UPDATES` (x,y) |
-| `TRAIL_FOLLOW` | `mmsi=..#range=..#angle=..` / `off` | `WAYPOINT=false`, `STATIONING=false`, `MOOS_MANUAL_OVERRIDE=false`, `TRAIL_UPDATES=contact=AIS<mmsi>...`, `TRAILING=true` / off: `TRAILING=false`, rudder/thrust 0 |
+| `REGION` | `true\|false[#REGION_UPDATES=core_poly=pts={lat,lon:...}]` | The polygon is the HALT line (any shape, no crossing edges). Shrunk by `region_margin`: `REGION_UPDATES=reset=true # breach_dist=<margin − region_halt_lead> [# recover_speed=..]`, `REGION_POLY=border={x,y:...} # pts={...}...`, then `REGION=true`. A refused polygon leaves `REGION` off and sets `REGION_MSG` |
+| `REGION_UPDATES` | `...pts={lat,lon:...}...` | same polygon handling, without switching `REGION` |
+| `TRAIL_FOLLOW` | `mmsi=..#range=..#angle=..[#speed=..]` / `off` | `WAYPOINT=false`, `STATIONING=false`, `MOOS_MANUAL_OVERRIDE=false`, `TRAIL_SPEED_UPDATES=max_speed=<speed>` (if given, > 0; most speed the follow may use, helm units), `TRAIL_UPDATES=contact=AIS<mmsi>...`, `TRAILING=true` / off: `TRAILING=false`, rudder/thrust 0 |
 | `CONTROLE_MANUAL` | `true\|false` | `MOOS_MANUAL_OVERRIDE` (SS UI becomes the drive owner; manual rudder/thrust latch until changed), on false also rudder/thrust 0; plus `DEPLOY=1.0` (double) from `main.cpp` |
 | `AUTONOMOUS_CONTROL` | any | `MOOS_MANUAL_OVERIDE=true` (typo) |
 | `DESIRED_HEADING` / `DESIRED_RUDDER` / `DESIRED_THRUST` | number | same name |

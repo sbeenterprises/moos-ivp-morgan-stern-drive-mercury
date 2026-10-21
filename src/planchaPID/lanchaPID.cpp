@@ -106,6 +106,7 @@ PIDController::PIDController(double kp, double ki, double kd)
   lower_bound = -20;
   integral = 0;
   prevError = 0;
+  turn_latch_dir = 0;
   eff_kp = 0;
   eff_ki = 0;
   eff_kd = 0;
@@ -193,6 +194,20 @@ double PIDController::Calculate(double desired, double current, double dt) {
     } else if (error > 180){
       error -= 360;
     }
+
+    // Turn-direction latch (profile auto_heading_turn_latch_deg, 0 = off).
+    // Near a reversal the shortest turn flips between +179 and -179 with
+    // every small heading change and the rudder bangs side to side without
+    // turning. Above the latch angle keep turning the way the boat started.
+    double latch = g_tuning.heading_turn_latch;
+    if (latch > 0 && fabs(error) >= latch) {
+      if (turn_latch_dir == 0)
+        turn_latch_dir = (error >= 0) ? 1 : -1;
+      else if ((error >= 0 ? 1 : -1) != turn_latch_dir)
+        error += 360.0 * turn_latch_dir;   // same angle, the way we already turn
+    }
+    else
+      turn_latch_dir = 0;
 
     integral += error*dt; //Multiplico pelo período dt de tempo
 
@@ -337,6 +352,7 @@ double PIDController::getEffKD() { return eff_kd; }
 
 void PIDController::resetIntegral() {
   integral = 0.0;
+  turn_latch_dir = 0;
 } // resetIntegral()
 
 //---------------------------------------------------------

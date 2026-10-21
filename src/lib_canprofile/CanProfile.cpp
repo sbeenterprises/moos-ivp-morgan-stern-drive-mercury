@@ -327,6 +327,7 @@ Profile::Profile() : m_loaded(false)
   m_settings["auto_heading_filter"]        = 0.15;  // NAV_HEADING smoothing
   m_settings["auto_speed_ramp_up"]         = 0;     // speed units/s, 0 = no ramp
   m_settings["auto_speed_ramp_down"]       = 0;     // speed units/s, 0 = no ramp
+  m_settings["auto_heading_turn_latch_deg"] = 0;    // deg, 0 = off
   m_string_settings["auto_speed_ff"]       = DEFAULT_AUTO_SPEED_FF;
   m_string_settings["auto_speed_gains"]    = DEFAULT_AUTO_SPEED_GAINS;
 }
@@ -844,6 +845,9 @@ void Profile::validate()
   for(int i=0; i<2; i++)
     if(setting(ramp[i]) < 0)
       addError(0, string(ramp[i]) + " must be 0 (no ramp) or more");
+  double latch = setting("auto_heading_turn_latch_deg");
+  if(latch != 0 && (latch < 90 || latch > 179))
+    addError(0, "auto_heading_turn_latch_deg must be 0 (off) or 90..179");
   if(setting("auto_rudder_min_pct") > setting("auto_rudder_max_pct"))
     addError(0, "auto_rudder_min_pct is above auto_rudder_max_pct");
   if(setting("auto_rudder_speed_low") >= setting("auto_rudder_speed_high"))

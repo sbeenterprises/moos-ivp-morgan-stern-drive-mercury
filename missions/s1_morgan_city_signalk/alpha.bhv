@@ -9,6 +9,7 @@ initialize   TRAILING = false
 initialize   CORRIDOR = false
 initialize   CORRIDOR_STATUS = none
 initialize   CORRIDOR_TURN = false
+initialize   TURN_LIMIT = false
 	
 //----------------------------------------------
 Behavior = BHV_Waypoint_mod
@@ -228,19 +229,45 @@ Behavior = BHV_AvdColregsV22
 }
 
 //----------------------------------------------
-Behavior = BHV_OpRegionV24
- {
-   name = opr24
-   pwt  = 300
-   condition = REGION = true
-   endflag   = REGION = false
-   updates   = REGION_UPDATES    
+// Operating region (BHV_OpRegionV26: any polygon shape, convex or not).
+//
+// The UI's region polygon is the HALT line. iWebSocket shrinks it by its
+// region_margin into the working boundary and posts it, as a border plus
+// convex cover pieces, on REGION_POLY (read via dynamic_region_var), with
+// REGION_UPDATES = reset=true # breach_dist=<margin>. So:
+//   inside the working boundary   contained: looks 10-30 s ahead (eta) and
+//                                 turns / slows before reaching its edge
+//   between it and the halt line  lapsed: steers back in at recover_speed
+//   more than breach_dist outside breached: helm all-stop (neutral) - on or
+//                                 just inside the drawn halt line
+// Enforced only after the boat has been inside once (trigger_on_poly_entry),
+// so switching a region on with the boat outside does not stop it.
+// No default polygon: until the UI sends one nothing is enforced (the old
+// default was a Morgan City quad, wrong anywhere else).
+// State is posted as V26_STATE (iWebSocket -> UI REGION_STATE).
+// Only while something drives the boat: on its own its stay-in function is
+// always a decision, so with REGION on and no mission the helm drove the
+// boat at full speed (sim, 20 Oct). Between missions the boat stays in
+// neutral (planchaPID: no decision = neutral).
 
-   core_poly = pts={-6790,253:-6777,7:-6604,48:-6592,247}
-   save_dist = 5
-   halt_dist = 100
-   recover_spd = 5 // 5 knots of recovery speed
- }
+Behavior = BHV_OpRegionV26
+{
+  name      = opregion
+  pwt       = 300
+  condition = REGION = true
+  condition = ((WAYPOINT == true) or (TRAILING == true)) or (STATIONING == true)
+  updates   = REGION_UPDATES
+  perpetual = true
+
+  dynamic_region_var = REGION_POLY
+
+  breach_dist   = 100   // replaced by iWebSocket's region_margin when > 0
+  recover_speed = 5     // helm units (knots on the boat)
+  min_util_eta  = 10    // seconds to the working boundary: worst ...
+  max_util_eta  = 30    // ... and no concern beyond this
+  trigger_on_poly_entry = true
+  trigger_breach_time   = 0.5
+}
 
 
 //This behavior has the purpose to slow down when getting closer to a waypoint
@@ -291,4 +318,46 @@ Behavior = BHV_Trail
   // pContactMgrV20 here runs with hold_alerts_for_helm, so the behaviour has
   // to ask for contact information rather than assume it is being fed.
   no_alert_request = false
+}
+
+//----------------------------------------------
+// Speed cap while turning hard. pTurnLimit posts TURN_LIMIT=true near a
+// sharp route corner (with or without a corridor) and while the helm's
+// desired heading is far off the boat's heading (region turn-away,
+// collision avoidance, follow, recovery), and sets max_speed to the boat's
+// turn_speed from its .moos file (TURN_LIMIT_UPDATES). At speed the
+// rudder is limited, so turns are wide; slowing keeps them tight. A cap:
+// it never speeds the boat up.
+
+Behavior = BHV_MaxSpeed
+{
+  name      = turn_max_speed
+  pwt       = 300
+  condition = TURN_LIMIT = true
+  updates   = TURN_LIMIT_UPDATES
+  perpetual = true
+
+  max_speed = 5        // until pTurnLimit sends the boat's turn_speed
+  basewidth = 0.5
+}
+
+//----------------------------------------------
+// Speed cap while following. Farther than nm_radius from its trail point
+// BHV_Trail cuts range with any speed in the helm domain (up to 35), so
+// on 20 Oct USV-722 chasing a 3 kn ship asked for 0.5-26 kn and planed.
+// This caps it; within nm_radius the trail still matches the contact's
+// speed, up to this cap. The UI's Follow panel sets max_speed
+// (TRAIL_FOLLOW=...#speed=<v> -> TRAIL_SPEED_UPDATES). Helm speed units:
+// knots on the boat, m/s in the sim. pwt above trail_contact so it wins.
+
+Behavior = BHV_MaxSpeed
+{
+  name      = trail_max_speed
+  pwt       = 300
+  condition = TRAILING = true
+  updates   = TRAIL_SPEED_UPDATES
+  perpetual = true
+
+  max_speed = 5        // default until the UI sends one
+  basewidth = 0.5
 }

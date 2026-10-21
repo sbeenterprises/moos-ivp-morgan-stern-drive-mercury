@@ -23,6 +23,7 @@ TARGET_LINK_LIBRARIES(iWebSocket
    ${JSONCPP_LIBRARIES}
    ${MOOSGeodesy_LIBRARIES}
    jsoncpp_lib
+   regiongeom
    apputil
    mbutil
    m

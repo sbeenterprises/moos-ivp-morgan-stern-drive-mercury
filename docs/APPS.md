@@ -72,6 +72,10 @@ Positional parse (expects token 2 = `X=`, 3 = `Y=`).
   `DESIRED_SPEED` <= 0, thrust and rudder are 0 and the integrals reset. Before,
   the last speed (the helm often never posts 0 on `NothingToDo`) or a leftover
   I-term kept the gear in forward after the mission.
+- **Turn-direction latch**: with `auto_heading_turn_latch_deg` (profile, 0 = off; 150 on
+  both boats) a heading error above that angle keeps the turn going the way it started.
+  Without it a full reversal (error near ±180) flipped the sign every tick and the rudder
+  banged ±limit without turning (sim, 20 Oct: give-way-astern and region recovery failed).
 - **Speed ramp**: with `auto_speed_ramp_up/down` > 0 the speed PID chases a setpoint
   that starts at the current `NAV_SPEED` when planchaPID starts driving and moves
   toward `DESIRED_SPEED` at those rates; 0 (the default) steps straight to it.
@@ -100,7 +104,21 @@ Positional parse (expects token 2 = `X=`, 3 = `Y=`).
 ## iWebSocket
 `src/iWebSocket/` — WebSocket server `0.0.0.0:8000` (IXWebSocket), no TLS/auth.
 - **Config**: `colav_pwt_outer_dist` (300), `colav_pwt_inner_dist` (150),
-  `colav_completed_dist` (1500), `colav_min_util_cpa_dist` (100), `colav_max_util_cpa_dist` (300).
+  `colav_completed_dist` (1500), `colav_min_util_cpa_dist` (100), `colav_max_util_cpa_dist` (300),
+  `link_timeout` (3 s), `autonomy_link_timeout` (= link_timeout), `lost_link_autonomy`
+  (`continue`), `region_margin` (0 m), `region_halt_lead` (0 m: breach_dist =
+  margin − lead, at least 5, so the boat coasts to rest by the drawn line),
+  `region_recover_speed` (unset = alpha.bhv's `recover_speed`).
+- **Operating region**: the UI's polygon is the HALT line. `lib_regiongeom` checks it (3+
+  corners, no crossing edges), shrinks it inward by `region_margin` (any shape; narrow
+  parts vanish, a split keeps the part the boat is in or the largest) and splits the result
+  into convex pieces. Posts `REGION_UPDATES = reset=true # breach_dist=<margin − halt lead>
+  [# recover_speed=..]` and
+  `REGION_POLY = border={x,y:...} # pts={...} ...` (BHV_OpRegionV26's `dynamic_region_var`,
+  re-posted every 2 s while the region is on: the behaviour only reads it while a mission,
+  follow or station-keep runs), then `REGION=true`. A refused polygon never switches the region
+  on (`REGION_MSG` says why). Telemetry adds `REGION_STATE` (from `V26_STATE`),
+  `REGION_CORE` (working boundary, lat,lon:...) and `REGION_MSG`.
 - Protocol (subs, pubs, JSON schema, command keys): [UI_PROTOCOL.md](UI_PROTOCOL.md).
 
 ## iRadarTargets
@@ -180,6 +198,45 @@ Positional parse (expects token 2 = `X=`, 3 = `Y=`).
   (see [MISSIONS.md](MISSIONS.md#alphabhv-behaviors)). A boat in `stop` stays stopped
   until the operator acts (CORRIDOR=off, a wider corridor, manual control or AUTONOMOUS_STOP);
   with `stop_action = recover` the `stop` zone is never posted.
+
+## pTurnLimit
+`src/pTurnLimit/` — holds the boat to `turn_speed` while it turns hard. Logic in
+`TurnLimitModel.{h,cpp}` (plain C++; tests in `tests/turnlimit_test.cpp`). Never steers.
+- **Config**: `turn_speed` (helm units, required; unset = never limits), `heading_trigger`
+  (45°), `heading_release` (15°), `corner_dist` (100 m), `corner_angle` (60°), `hold_secs` (3),
+  `desired_stale_secs` (3).
+- **Limited when** an autonomous mode drives (`WAYPOINT`/`TRAILING`/`STATIONING`, not
+  manual) and either: within `corner_dist` of the route waypoint the boat is heading for
+  (`WPT_INDEX`) where the route (`WPT_UPDATE` polygon/points/xpoints, `loop_start`,
+  `repeat`) turns by `corner_angle`+ — with or without a corridor; or `DESIRED_HEADING` is
+  `heading_trigger`+ off `NAV_HEADING` (region turn-away, avoidance, follow, recovery),
+  released at `heading_release`. Held `hold_secs` after both clear.
+- **Pubs**: `TURN_LIMIT` (condition of `turn_max_speed`, BHV_MaxSpeed pwt 300 in
+  alpha.bhv), `TURN_LIMIT_REASON` (corner/heading/hold), `TURN_LIMIT_UPDATES = max_speed=..`.
+
+## pColavScale
+`src/pColavScale/` — collision-avoidance distances from closing speed, per contact.
+Logic in `ColavScaleModel.{h,cpp}` (tests in `tests/colavscale_test.cpp`). Never steers.
+- For each running `avdcol_` instance (`IVPHELM_LIFE_EVENT` spawn/death) with a fresh
+  `NODE_REPORT`: v = the contact's speed relative to us while the range closes (0 while it
+  opens); posts `CONTACT_INFO = name=<contact> # pwt_outer_dist=.. # pwt_inner_dist=..`
+  (addressed to that instance only) with outer = clamp(`outer_secs`·v, `outer_min`,
+  `outer_max`), inner likewise (≤ outer), on a change of `change_frac` and `change_min`.
+- **Alert range**: the helm sets pContactMgrV20's alert range to the template's
+  `pwt_outer_dist` (300 m) at start-up; pColavScale posts `BCM_ALERT_REQUEST` with
+  `alert_range = outer_max`, every `alert_repost_secs` and whenever another app posts one.
+- **Config**: `nav_speed_units` (`knots` on the boat, `mps` in the sim), `contact_speed_units`
+  (`mps`), `outer_secs` (60), `inner_secs` (30), `outer_min` (150), `inner_min` (75),
+  `outer_max` (1400), `inner_max` (700), `cpa_range` (1500, ≥ `completed_dist`), `change_frac`
+  (0.1), `change_min` (20 m), `contact_max_age` (30 s), `alert_repost_secs` (15),
+  `behavior_prefix` (`avdcol_`). The UI's `COLAV_DIST` (Calibration) values become the minimums.
+- **Pubs**: `CONTACT_INFO`, `BCM_ALERT_REQUEST`, `COLAV_SCALE` (`<contact>=<outer>/<inner>,...`).
+
+## lib_regiongeom
+`src/lib_regiongeom/` — operating-region geometry for iWebSocket (plain C++, tests in
+`tests/region_test.cpp`): validation, inward offset by a margin (signed-distance grid +
+marching squares, made conservative so the result is at least `margin` from the drawn
+line), simplification, convex decomposition (ear clipping + merging), BHV_OpRegionV26 spec.
 
 ## pSensorFusionTracker_ref
 `src/pSensorFusionTracker_ref/` — needs Eigen3.

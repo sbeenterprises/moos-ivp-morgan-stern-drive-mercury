@@ -66,7 +66,8 @@ Per tick (`dt = 1/AppTick`, 20 Hz on the boat):
    measurement, integral clamped to bounds. Outside service mode the gains come
    from a **hardcoded speed schedule** (kp 0.28→0.05, kd 0.07→0.025, ki 0);
    `.moos` `HEADING_K*` only apply in `SERVICE_MODE`.
-   If `CONSTANT_HEADING=true` the setpoint is `SETPOINT_HEADING`.
+   If `CONSTANT_HEADING=true` the setpoint is `SETPOINT_HEADING`. Above
+   `auto_heading_turn_latch_deg` of error the turn direction is held (no ±180 flip-flop).
 3. **Rudder limit by speed**: 20 at ≤5 kt tapering linearly to 8 at ≥18 kt.
 4. **Speed loop** → `desired_thrust` (`CalculateSpeed`). The PID's setpoint walks
    from the current speed toward `DESIRED_SPEED` at the profile's
@@ -146,7 +147,7 @@ initialised `false` in `alpha.bhv`:
 |---|---|---|---|
 | `WAYPOINT` | `waypt_survey` BHV_Waypoint_mod (100) **and** `avdcol_` AvdColregsV22 (250) | `AUTONOMOUS_START` / `AUTONOMOUS_STOP` | yes |
 | `STATIONING` | `station-keep` BHV_StationKeep (50 → 250 via UI) | `STATION_KEEP_WAYPOINT` | **no** |
-| `REGION` | `opr24` BHV_OpRegionV24 (300) | `REGION` / `REGION_UPDATES` | **no** |
+| `REGION` | `opregion` BHV_OpRegionV26 (300), region from iWebSocket on `REGION_POLY` | `REGION` / `REGION_UPDATES` | **no** |
 | `TRAILING` | `trail_contact` BHV_Trail (100) | `TRAIL_FOLLOW` | yes |
 | `CORRIDOR` (+ `WAYPOINT`) | via pCorridor's `CORRIDOR_STATUS`: `corridor_slow` (200), `corridor_recover` (200), `corridor_turn` (200, on `CORRIDOR_TURN`), `corridor_stop` (240) | `CORRIDOR` | yes (only with `WAYPOINT=true`) |
 | `RETURN`, `DEPLOY` | *(none in the signalk alpha.bhv)* | `AUTONOMOUS_RETURN_TO_BASE`, pMarineViewer buttons | – |

@@ -144,6 +144,9 @@ auto_thrust_max_pct        = 100               // lever 100 % = engine 50 %
 auto_heading_gains         = 5:0.6:0.03:0.10|10:0.5:0.03:0.10|15:0.35:0.02:0.08|20:0.25:0.015:0.06|1000:0.15:0.01:0.04
 auto_heading_i_authority_pct = 10
 auto_heading_limit_pct     = 40
+// Hold the turn direction above 150 deg of heading error, so a full
+// reversal turns instead of banging the rudder +/- (sim, 20 Oct).     [P]
+auto_heading_turn_latch_deg = 150
 auto_rudder_max_pct        = 40                // at or below 5 kn
 auto_rudder_min_pct        = 10                // at or above 18 kn (planing)
 auto_rudder_speed_low      = 5
