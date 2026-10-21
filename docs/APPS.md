@@ -62,6 +62,8 @@ Positional parse (expects token 2 = `X=`, 3 = `Y=`).
   profile, `HEADING_*` / `RUDDER_LIMIT_*` lines in the .moos file are ignored
   (warned); without one the .moos values and the built-in defaults (the old
   hardcoded values) apply.
+- **Navigation fault**: `NAV_STATUS = fault` (pNavGuard) while the helm drives = neutral,
+  rudder 0, held until the helm stops driving (backup to iWebSocket ending the mission).
 - **Config**: `AppTick` (sets dt), `profile_file`, `SPEED_KP/KI/KD` (service mode only),
   `SERVICE_MODE` (false); `HEADING_KP/KI/KD` (service mode only, as for speed);
   `HEADING_UPPER/LOWER_BOUND`, `RUDDER_LIMIT_MAX/MIN/SPEED_LOW/SPEED_HIGH` only
@@ -108,7 +110,12 @@ Positional parse (expects token 2 = `X=`, 3 = `Y=`).
   `link_timeout` (3 s), `autonomy_link_timeout` (= link_timeout), `lost_link_autonomy`
   (`continue`), `region_margin` (0 m), `region_halt_lead` (0 m: breach_dist =
   margin − lead, at least 5, so the boat coasts to rest by the drawn line),
-  `region_recover_speed` (unset = alpha.bhv's `recover_speed`).
+  `region_recover_speed` (unset = alpha.bhv's `recover_speed`), `nav_guard_required` (false).
+- **Navigation integrity**: `NAV_GUARD_STOP` from pNavGuard ends a running mission, follow or
+  station-keep as Stop does (`NAV_FAULT_STOP=<modes>`). While `NAV_STATUS` is `fault` (or, with
+  `nav_guard_required = true`, while pNavGuard has been silent 5 s) `AUTONOMOUS_START`,
+  `AUTONOMOUS_RETURN_TO_BASE`, `STATION_KEEP_WAYPOINT=TRUE...` and `TRAIL_FOLLOW` are refused.
+  Telemetry adds `NAV_STATUS`, `NAV_STATUS_MSG`, `NAV_STOP_MSG`, `NAV_REFUSED`.
 - **Operating region**: the UI's polygon is the HALT line. `lib_regiongeom` checks it (3+
   corners, no crossing edges), shrinks it inward by `region_margin` (any shape; narrow
   parts vanish, a split keeps the part the boat is in or the largest) and splits the result
@@ -231,6 +238,31 @@ Logic in `ColavScaleModel.{h,cpp}` (tests in `tests/colavscale_test.cpp`). Never
   (0.1), `change_min` (20 m), `contact_max_age` (30 s), `alert_repost_secs` (15),
   `behavior_prefix` (`avdcol_`). The UI's `COLAV_DIST` (Calibration) values become the minimums.
 - **Pubs**: `CONTACT_INFO`, `BCM_ALERT_REQUEST`, `COLAV_SCALE` (`<contact>=<outer>/<inner>,...`).
+
+## pNavGuard
+`src/pNavGuard/` — navigation integrity: warns the operator and stops autonomy when the
+navigation data cannot be trusted. Logic in `NavGuardModel.{h,cpp}` (plain C++; tests in
+`tests/navguard_test.cpp`). Never steers. A sensor cannot tell that it is wrong, so it compares
+independent data with each other (speeds in m/s inside, config in `nav_speed_units`):
+- **heading**: `NAV_HEADING` vs the track of the GPS positions over `window_secs` (4 s), on
+  straight runs above `min_speed` — `heading_tol` (45°) for `heading_secs` (10 s).
+- **speed**: `NAV_SPEED` vs the speed of the positions — `speed_tol` for `speed_secs` (8 s).
+- **frozen**: `NAV_SPEED` / `NAV_COG` unchanged `freeze_secs` (5 s), `NAV_HEADING`
+  `heading_freeze_secs` (10 s), while the positions show the speed changing by `speed_tol` or
+  the track turning 20°+ (a steady value alone is fine).
+- **stale**: no `NAV_LAT`/`NAV_LONG` for `stale_secs` (3 s), or positions not changing while
+  `NAV_SPEED` says moving. **jump**: a step of `jump_min_dist`+ (15 m) faster than `jump_speed`
+  (immediate fault). **gps_flag**: `$--RMC` status `V` in `nmea_var` (`MSG_UDP`) for
+  `gps_flag_secs` (2 s).
+- **follow** (autonomy only): the track `follow_tol` (60°) off a steady `DESIRED_HEADING` for
+  `follow_secs` (20 s), unless the error is shrinking (a turn toward the course).
+- A failing check gives `warn` after 2 s, `fault` at its time; a fault holds until every check
+  has been clean `clear_secs` (10 s). In a fault while `IVPHELM_ALLSTOP = clear` it posts
+  `NAV_GUARD_STOP=<reason>` (every 2 s while both hold); planchaPID also holds neutral then.
+- **Pubs**: `NAV_STATUS` (ok/warn/fault, on change and 1 Hz), `NAV_STATUS_MSG`, `NAV_GUARD_STOP`.
+- **Offline**: `navguard_replay [--param=value ...] <file>.alog` runs the same model over a log
+  (raw NMEA in `MSG_UDP` when present, else the `NAV_*` variables; autonomy = helm `clear`) and
+  prints each warn/fault and where autonomy would have been stopped.
 
 ## lib_regiongeom
 `src/lib_regiongeom/` — operating-region geometry for iWebSocket (plain C++, tests in

@@ -80,6 +80,11 @@ std::string region; // Variável para verificar se o OpRegion está ativo
 // Helm all-stop status: "clear" while the helm has a decision; anything
 // else (NothingToDo, ManualOverride, BehaviorError...) means stop.
 std::string helm_allstop = "unknown";
+// pNavGuard's NAV_STATUS. A fault while the helm drives holds neutral
+// until the helm stops driving (backup to iWebSocket ending the mission
+// on NAV_GUARD_STOP), so a lost stop cannot let the boat carry on.
+std::string nav_status;
+bool nav_fault_hold = false;
 
 //Cria os objetos para o controle PID com valores iniciais de kp, ki e kd lidos do arquivo
 //PIDController speedController("/home/dueiras/vsnt/moos-ivp-vsnt/src/planchaPID/speed_pid_parameters.txt");
@@ -474,6 +479,8 @@ bool lanchaPID::OnNewMail(MOOSMSG_LIST &NewMail)
         region = msg.GetString();
       else if(key == "IVPHELM_ALLSTOP")
         helm_allstop = msg.GetString();
+      else if(key == "NAV_STATUS")
+        nav_status = msg.GetString();
      else if(key != "APPCAST_REQ") // handled by AppCastingMOOSApp
        reportRunWarning("Unhandled Mail: " + key);
    }
@@ -558,7 +565,15 @@ bool lanchaPID::Iterate()
   // DESIRED_SPEED=0, so the last mission speed would stay in force; and a
   // leftover speed I-term sends a little thrust, which puts the gear in
   // forward, so the boat idled along in gear. No ramp: neutral at once.
-  if(desired_speed <= 0 || helm_allstop != "clear") {
+  if(nav_status == "fault" && helm_allstop == "clear") {
+    if(!nav_fault_hold)
+      reportRunWarning("Navigation fault in autonomy: neutral until the mission is stopped");
+    nav_fault_hold = true;
+  }
+  else if(helm_allstop != "clear" && nav_status != "fault")
+    nav_fault_hold = false;
+
+  if(desired_speed <= 0 || helm_allstop != "clear" || nav_fault_hold) {
     desired_thrust = 0;
     desired_rudder = 0;
     headingController.resetIntegral();
@@ -789,6 +804,7 @@ void lanchaPID::registerVariables()
   Register("TRAILING",0);
   Register("REGION",0);
   Register("IVPHELM_ALLSTOP",0);
+  Register("NAV_STATUS",0);
   Register("SERVICE_MODE",0);
 }
 

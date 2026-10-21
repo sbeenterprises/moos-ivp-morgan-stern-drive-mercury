@@ -122,6 +122,20 @@ class WebSocket : public AppCastingMOOSApp
   double m_auto_link_timeout;
   bool   m_auto_link_ok_posted;
   void   stopAutonomyOnLostLink();
+  // Ends a running mission / station-keep / follow as AUTONOMOUS_STOP does
+  // and posts event_var = the modes it ended.
+  void   stopAutonomy(const std::string& why, const std::string& event_var);
+
+  // Navigation integrity (pNavGuard). NAV_GUARD_STOP ends autonomy;
+  // while NAV_STATUS is fault, starts are refused. nav_guard_required:
+  // also refuse them when pNavGuard has not been heard for 5 s.
+  bool   m_nav_guard_required;
+  std::string m_nav_status;      // ok | warn | fault, "" = never heard
+  std::string m_nav_status_msg;
+  double m_nav_status_time;
+  std::string m_nav_stop_msg;    // why the last nav stop happened (UI)
+  std::string m_nav_refused;     // last start refused for nav (UI)
+  bool   navReady(const std::string& what);
 
   // iCAN status passed through to SS UI (CAN_* variables)
   std::set<std::string> m_can_vars;

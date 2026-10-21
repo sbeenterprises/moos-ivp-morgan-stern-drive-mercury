@@ -129,6 +129,8 @@ WebSocket::WebSocket()
   m_link_ok_posted = false;
   m_last_link_post = 0.0;
   m_lost_link_stop = false;
+  m_nav_guard_required = false;
+  m_nav_status_time = 0;
   m_region_margin = 0;
   m_region_halt_lead = 0;
   m_region_recover_speed = -1;
@@ -292,6 +294,24 @@ bool WebSocket::OnNewMail(MOOSMSG_LIST &NewMail)
       m_nav_y = msg.GetDouble();
     else if(key == "V26_STATE")
       m_region_state = msg.GetString();
+    else if(key == "NAV_STATUS") {
+      m_nav_status = msg.GetString();
+      m_nav_status_time = MOOSTime();
+      if (m_nav_status != "fault")
+        m_nav_refused.clear();
+    }
+    else if(key == "NAV_STATUS_MSG")
+      m_nav_status_msg = msg.GetString();
+    else if(key == "NAV_GUARD_STOP") {
+      // Only a stop posted after we started counts (the DB hands a new
+      // subscriber the last value).
+      if (msg.GetTime() >= GetAppStartTime()) {
+        bool running = (waypoint == "true") || stationing || trailing;
+        if (running)
+          m_nav_stop_msg = "Autonomy stopped - navigation fault: " + msg.GetString();
+        stopAutonomy("Navigation fault (" + msg.GetString() + ")", "NAV_FAULT_STOP");
+      }
+    }
     else if(key == "DESIRED_HEADING")
       desired_heading = msg.GetDouble();
     else if(key == "DESIRED_SPEED")
@@ -595,6 +615,13 @@ bool WebSocket::Iterate()
   root["REGION_STATE"] = region_active ? m_region_state : std::string("off");
   root["REGION_CORE"] = m_region_core;
   root["REGION_MSG"] = m_region_msg;
+  // Navigation integrity: "" when pNavGuard is not running
+  bool nav_fresh = !m_nav_status.empty() && (current_time - m_nav_status_time <= 5.0);
+  root["NAV_STATUS"] = m_nav_status.empty() ? std::string("") :
+                       (nav_fresh ? m_nav_status : std::string("unknown"));
+  root["NAV_STATUS_MSG"] = nav_fresh ? m_nav_status_msg : std::string("navigation monitor (pNavGuard) not reporting");
+  root["NAV_STOP_MSG"] = m_nav_stop_msg;
+  root["NAV_REFUSED"] = m_nav_refused;
   root["DESIRED_RUDDER"] = desired_rudder;
   root["DESIRED_THRUST"] = desired_thrust;
   root["ENGINE_ACCELERATOR_PEDAL_POSITION"] = engine_accelerator_pedal_position;
@@ -714,6 +741,10 @@ bool WebSocket::OnStartUp()
       m_auto_link_timeout = atof(value.c_str());
       handled = true;
     }
+    else if(param == "nav_guard_required") {
+      m_nav_guard_required = (tolower(value) == "true");
+      handled = (tolower(value) == "true" || tolower(value) == "false");
+    }
     else if(param == "lost_link_autonomy" &&
             (tolower(value) == "stop" || tolower(value) == "continue")) {
       m_lost_link_stop = (tolower(value) == "stop");
@@ -776,6 +807,9 @@ void WebSocket::registerVariables()
   Register("NAV_X", 0);
   Register("NAV_Y", 0);
   Register("V26_STATE", 0);   // BHV_OpRegionV26 state (region)
+  Register("NAV_STATUS", 0);      // pNavGuard: ok | warn | fault
+  Register("NAV_STATUS_MSG", 0);  // pNavGuard: why
+  Register("NAV_GUARD_STOP", 0);  // pNavGuard: stop autonomy now (reason)
   Register("DESIRED_HEADING", 0);
   Register("DESIRED_THRUST", 0);
   Register("DESIRED_RUDDER", 0);
@@ -956,6 +990,9 @@ void WebSocket::handleTrailFollow(const std::string& value)
     std::cerr << "[TRAIL_FOLLOW] no mmsi in: " << value << std::endl;
     return;
   }
+  if (!navReady("Follow"))
+    return;
+  m_nav_stop_msg.clear();
 
   std::string updates = "contact=AIS" + mmsi;
   if (!range.empty())
@@ -1328,6 +1365,9 @@ void WebSocket::handleAutonomousStart(const std::string& value)
 {
   if (!originReady("AUTONOMOUS_START"))
     return;
+  if (value.compare(0, 4, "true") == 0 && !navReady("Start"))
+    return;
+  m_nav_stop_msg.clear();
   // New format: true#SPEED#WAYPOINTS#REPEAT=true/false
   // Example: true#10#42.3601,-71.0589:42.3602,-71.0590#REPEAT=true
   
@@ -1528,20 +1568,52 @@ void WebSocket::handleAutonomousStop(const std::string& value)
 
 void WebSocket::stopAutonomyOnLostLink()
 {
+  stopAutonomy("SS UI link lost", "LOST_LINK_STOP");
+}
+
+//---------------------------------------------------------
+// Procedure: stopAutonomy()
+//   Shared by the lost-link stop and pNavGuard's NAV_GUARD_STOP: end a
+//   running mission, station-keep or follow as the UI's Stop does.
+
+void WebSocket::stopAutonomy(const std::string& why, const std::string& event_var)
+{
   if (waypoint != "true" && !stationing && !trailing)
     return;
   std::string modes = std::string(waypoint == "true" ? "WAYPOINT " : "") +
     (stationing ? "STATIONING " : "") + (trailing ? "TRAILING" : "");
-  reportRunWarning("SS UI link lost: autonomy stopped (" + modes + ")");
-  Notify("LOST_LINK_STOP", modes);
+  reportRunWarning(why + ": autonomy stopped (" + modes + ")");
+  Notify(event_var, modes);
   if (trailing)
     Notify("TRAILING", "false");
   handleAutonomousStop("true");
 }
 
+//---------------------------------------------------------
+// Procedure: navReady()
+//   Starting autonomy needs navigation pNavGuard does not fault. Manual
+//   control is never refused.
+
+bool WebSocket::navReady(const std::string& what)
+{
+  std::string why;
+  bool fresh = !m_nav_status.empty() && (MOOSTime() - m_nav_status_time <= 5.0);
+  if (fresh && m_nav_status == "fault")
+    why = "navigation fault: " + m_nav_status_msg;
+  else if (!fresh && m_nav_guard_required)
+    why = "navigation monitor (pNavGuard) not reporting";
+  if (why.empty())
+    return true;
+  m_nav_refused = what + " refused - " + why;
+  reportRunWarning(m_nav_refused);
+  return false;
+}
+
 void WebSocket::handleAutonomousReturnToBase(const std::string& value)
 {
   if (value == "true") {
+    if (!navReady("Return to base"))
+      return;
     Notify("RETURN", "true");
   } else if (value == "false") {
     Notify("RETURN", "false");
@@ -1680,6 +1752,9 @@ void WebSocket::handleStationKeepWaypoint(const std::string& value)
     std::string boolPart = value.substr(0, hashPos);
 
     if (boolPart == "TRUE") {
+      if (!navReady("Station keep"))
+        return;
+      m_nav_stop_msg.clear();
       // Extract parameters
       std::string params = value.substr(hashPos + 1);
 

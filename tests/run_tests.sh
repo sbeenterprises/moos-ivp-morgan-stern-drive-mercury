@@ -1,8 +1,8 @@
 #!/bin/bash
 #------------------------------------------------------------------
 # Builds and runs the lib_canprofile, pCorridor (CorridorModel),
-# lib_regiongeom, pTurnLimit (TurnLimitModel) and pColavScale
-# (ColavScaleModel) tests with plain g++. No MOOS or CAN hardware needed. Run from anywhere:
+# lib_regiongeom, pTurnLimit (TurnLimitModel), pColavScale
+# (ColavScaleModel) and pNavGuard (NavGuardModel) tests with plain g++. No MOOS or CAN hardware needed. Run from anywhere:
 #   tests/run_tests.sh
 #------------------------------------------------------------------
 
@@ -13,6 +13,7 @@ OUT_CORRIDOR="${TMPDIR:-/tmp}/corridor_test.$$"
 OUT_REGION="${TMPDIR:-/tmp}/region_test.$$"
 OUT_TURN="${TMPDIR:-/tmp}/turnlimit_test.$$"
 OUT_COLAV="${TMPDIR:-/tmp}/colavscale_test.$$"
+OUT_NAV="${TMPDIR:-/tmp}/navguard_test.$$"
 
 g++ -std=c++11 -Wall -Wextra -O1 \
     -I"$ROOT/src/lib_canprofile" \
@@ -46,7 +47,13 @@ g++ -std=c++11 -Wall -Wextra -O1 \
     "$ROOT/tests/colavscale_test.cpp" \
     -o "$OUT_COLAV"
 
-trap 'rm -f "$OUT" "$OUT_CORRIDOR" "$OUT_REGION" "$OUT_TURN" "$OUT_COLAV"' EXIT
+g++ -std=c++11 -Wall -Wextra -O1 \
+    -I"$ROOT/src/pNavGuard" \
+    "$ROOT/src/pNavGuard/NavGuardModel.cpp" \
+    "$ROOT/tests/navguard_test.cpp" \
+    -o "$OUT_NAV"
+
+trap 'rm -f "$OUT" "$OUT_CORRIDOR" "$OUT_REGION" "$OUT_TURN" "$OUT_COLAV" "$OUT_NAV"' EXIT
 echo "== lib_canprofile =="
 "$OUT" "$ROOT/profiles"
 echo "== pCorridor CorridorModel =="
@@ -57,3 +64,5 @@ echo "== pTurnLimit TurnLimitModel =="
 "$OUT_TURN"
 echo "== pColavScale ColavScaleModel =="
 "$OUT_COLAV"
+echo "== pNavGuard NavGuardModel =="
+"$OUT_NAV"

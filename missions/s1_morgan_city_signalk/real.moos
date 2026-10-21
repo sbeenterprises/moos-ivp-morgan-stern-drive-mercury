@@ -38,6 +38,7 @@ ProcessConfig = ANTLER
   Run = pCorridor     @ NewConsole = false
   Run = pTurnLimit    @ NewConsole = false
   Run = pColavScale   @ NewConsole = false
+  Run = pNavGuard     @ NewConsole = false
   Run = pXYpublisher      @ NewConsole = false
   Run = pContactSpawn	      @ NewConsole = false
   Run = pContactMgrV20 @ NewConsole = false
@@ -187,6 +188,10 @@ ProcessConfig = iWebSocket
    // the link returns (keep in step with lost_link_autonomy in iCAN).
    // continue = carry on without the UI.
    lost_link_autonomy = stop
+
+   // Starts (mission, RTB, station-keep, follow) are refused while pNavGuard
+   // reports a navigation fault; true = also while it is not reporting.
+   nav_guard_required = true
 
    // Operating region: the polygon drawn in the UI is the HALT line; the
    // boat works inside it shrunk by this margin (BHV_OpRegionV26 breaches,
@@ -525,3 +530,38 @@ ProcessConfig = pColavScale
   inner_max  = 700
   cpa_range  = 1500    // keep >= avdcol_ completed_dist in alpha.bhv
 }
+
+//------------------------------------------------
+// pNavGuard config block
+//
+// Navigation integrity: compares heading, speed and course with what the
+// GPS positions show, and watches for frozen / stale / jumping data. Warns
+// the operator (NAV_STATUS in the UI) and, in a fault while the helm
+// drives, stops the mission (NAV_GUARD_STOP -> iWebSocket; planchaPID
+// holds neutral as a backup). Manual control is never affected. Check a
+// log offline with: navguard_replay <file>.alog. [P] until water-tested.
+
+ProcessConfig = pNavGuard
+{
+  AppTick   = 4
+  CommsTick = 4
+
+  nav_speed_units = knots
+  nmea_var        = MSG_UDP  // raw NMEA from iDivisorNMEA (RMC status V = no fix)
+  min_speed       = 3      // knots, heading / speed / follow checks above it
+  speed_tol       = 2      // knots, NAV_SPEED vs GPS positions
+  jump_speed      = 60     // knots, faster step between fixes = jump
+  stop_on_fault   = true
+  heading_tol     = 45     // deg, NAV_HEADING vs GPS track on straight runs
+  heading_secs    = 10     // ... for this long = fault
+  speed_secs      = 8
+  freeze_secs     = 5      // speed / course not changing while the GPS shows it should
+  heading_freeze_secs = 10
+  stale_secs      = 3      // no new GPS position
+  jump_min_dist   = 15     // m
+  gps_flag_secs   = 2
+  follow_tol      = 60     // deg, autonomy: track off the commanded course ...
+  follow_secs     = 20     // ... for this long (not while turning toward it)
+  clear_secs      = 10     // a fault clears after this long with all checks clean
+}
+

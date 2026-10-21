@@ -30,6 +30,7 @@ Source: `src/iWebSocket/main.cpp`, `src/iWebSocket/WebSocket.cpp`.
   "TRAFFIC_SPAWNED": "str", "TRAFFIC_TARGETS": "str", "COLAV_DIST": "str",
   "CORRIDOR": false, "CORRIDOR_STATUS": "none", "XTE_NOW": 0,
   "REGION_STATE": "off", "REGION_CORE": "lat,lon:...", "REGION_MSG": "str",
+  "NAV_STATUS": "ok|warn|fault|unknown|''", "NAV_STATUS_MSG": "str", "NAV_STOP_MSG": "str", "NAV_REFUSED": "str",
   "CONTACT_INFO": { "NAME": "str", "LAT": 0, "LON": 0, "SPD": 0, "HDG": 0 }
 }
 ```
@@ -50,6 +51,8 @@ Plain text (not JSON) `HEARTBEAT=<MOOSTime>` every 30 s — clients must tolerat
 The server also sends a WebSocket ping every second; browsers answer it automatically, and each pong keeps `UI_LINK_OK` true even while the UI is idle or in the background.
 
 The server sends a WebSocket ping every second; browsers answer it automatically and that keeps `UI_LINK_OK=true`. If nothing is heard from any client for `link_timeout` (3 s), the link is lost and, in manual control, iCAN sets rudder and throttle to 0. iWebSocket also posts `UI_LINK_OK_AUTO`, the same test with `autonomy_link_timeout` (default = `link_timeout`; 5 s in the real-boat missions). With `lost_link_autonomy = stop` (real-boat missions) losing that one ends a running mission, station-keep or follow (`WAYPOINT`/`STATIONING`/`TRAILING=false`, `CORRIDOR=false`, `LOST_LINK_STOP=<modes>`) and iCAN holds rudder/throttle 0 while it is down; after reconnecting the UI sees the mission stopped and must Start again. Both timeouts are MOOS time: scale it by `MOOSTimeWarp` in a time-warped sim.
+
+**Navigation integrity.** pNavGuard compares heading, speed and course with what the GPS positions show. `NAV_STATUS` is `ok`, `warn` or `fault` (`unknown` = pNavGuard silent for 5 s, `''` = not running), `NAV_STATUS_MSG` says why. In a fault while autonomy drives the boat ends the mission, follow or station-keep as Stop does and `NAV_STOP_MSG` says why (cleared by the next start). While in fault — or, with `nav_guard_required = true` (real-boat missions), while pNavGuard is silent — `AUTONOMOUS_START`, `AUTONOMOUS_RETURN_TO_BASE`, `STATION_KEEP_WAYPOINT=TRUE...` and `TRAIL_FOLLOW` are refused and `NAV_REFUSED` says so. Manual control is never refused.
 
 Telemetry also carries iCAN state: `CAN_STATUS`, `CAN_CONTROL_OWNER`, `CAN_LOST_LINK`, `CAN_CONFLICT`, `CAN_TX_RUDDER_PCT`, `CAN_TX_THRUST_PCT`, `CAN_TX_GEAR`, `CAN_RUDDER_MISMATCH`, `CAN_PROFILE`, and on USV-722 `CAN_RUDDER_ACTUAL_PCT`, `CAN_HELM_HAS_STEERING`, `CAN_ENGINE_GEAR`, `CAN_ENGINE_THROTTLE_PCT`, `CAN_FUEL_PCT` (present once first posted).
 

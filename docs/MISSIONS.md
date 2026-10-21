@@ -64,6 +64,7 @@ R = run, c = config block only, – = absent
 | pColavEval | – | **R** | – | – | – | – |
 | pCorridor | R | R | R | – | – | – |
 | pTurnLimit, pColavScale | R | R | R | – | – | – |
+| pNavGuard | R | R | R | – | – | – |
 | iMOOSGateway | – | R (tcp 9501) | – | – | – | – |
 | pVisionDetector_ref / pSensorFusionTracker_ref | – | – | – | **R** | – | – |
 
