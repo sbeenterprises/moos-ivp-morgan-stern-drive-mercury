@@ -9,6 +9,12 @@ SET(SRC
   main.cpp
 )
 
+# Find MOOSGeodesy before linking: newer MOOS-IvP provides it as an
+# imported target, so ${MOOSGeodesy_LIBRARIES} must be set before
+# TARGET_LINK_LIBRARIES (it was empty when found afterwards).
+find_package(MOOSGeodesy)
+include_directories(${MOOSGeodesy_INCLUDE_DIRS})
+
 ADD_EXECUTABLE(iSignalK ${SRC})
 
 find_package(CURL REQUIRED)
@@ -27,8 +33,3 @@ TARGET_LINK_LIBRARIES(iSignalK
    mbutil
    m
    pthread)
-
-#Find MOOSGeodesy
-find_package(MOOSGeodesy)
-include_directories(${MOOSGeodesy_INCLUDE_DIRS} ${MOOSGeodesy_LIBRARIES})
-

@@ -11,6 +11,12 @@ SET(SRC
 )
 add_subdirectory (NMEAParserLib)
 add_subdirectory (libais)
+# Find MOOSGeodesy before linking: newer MOOS-IvP provides it as an
+# imported target, so ${MOOSGeodesy_LIBRARIES} must be set before
+# TARGET_LINK_LIBRARIES (it was empty when found afterwards).
+find_package(MOOSGeodesy)
+include_directories(${MOOSGeodesy_INCLUDE_DIRS})
+
 ADD_EXECUTABLE(iDivisorNMEA ${SRC})
 
 TARGET_LINK_LIBRARIES(iDivisorNMEA
@@ -20,9 +26,3 @@ TARGET_LINK_LIBRARIES(iDivisorNMEA
    mbutil
    m
    pthread)
-
-#Find MOOSGeodesy
-find_package(MOOSGeodesy)
-include_directories(${MOOSGeodesy_INCLUDE_DIRS} ${MOOSGeodesy_LIBRARIES})
-
-
