@@ -326,8 +326,18 @@ bool WebSocket::OnNewMail(MOOSMSG_LIST &NewMail)
       wpt_index = msg.GetDouble();
     else if(key == "WPT_PCT_COMPLETE")
       wpt_pct_complete = msg.GetDouble();
-    else if(key == "IVPHELM_ALLSTOP")
-      ivphelm_allstop = msg.GetString();
+    else if(key == "IVPHELM_ALLSTOP") {
+      std::string allstop = msg.GetString();
+      // pHelmIvP drops behaviour updates while in manual override, and the
+      // region is usually activated before Start: send its settings again
+      // once the helm has control (REGION_POLY is re-posted every 2 s).
+      if (ivphelm_allstop == "ManualOverride" && allstop != "ManualOverride" &&
+          region_active && !m_region_updates.empty()) {
+        Notify("REGION_UPDATES", m_region_updates);
+        m_region_repost_at = 0;
+      }
+      ivphelm_allstop = allstop;
+    }
     else if(key == "WAYPOINT")
       waypoint = msg.GetString();
     else if(key == "WPT_STAT")
@@ -959,6 +969,9 @@ void WebSocket::handleTrailFollow(const std::string& value)
 {
   if (value == "off" || value == "false") {
     Notify("TRAILING", "false");
+    // Back to the placeholder: a stale contact makes the idle trail
+    // behaviour warn every helm iteration once it leaves the contact list.
+    Notify("TRAIL_UPDATES", "contact=unset_ok");
     // Same safety pair AUTONOMOUS_STOP uses: leave the boat with no residual
     // command once the behaviour releases the helm.
     Notify("DESIRED_RUDDER", 0.0);
@@ -2015,6 +2028,7 @@ bool WebSocket::applyRegionPolygon(const std::string& latlon_pts)
   if (m_region_recover_speed > 0)
     updates += " # recover_speed=" + doubleToStringX(m_region_recover_speed, 2);
   Notify("REGION_UPDATES", updates);
+  m_region_updates = updates;
   Notify("REGION_POLY", res.spec);
   m_region_spec = res.spec;
   m_region_repost_at = MOOSTime() + 1.0;   // then every 2 s while REGION is on

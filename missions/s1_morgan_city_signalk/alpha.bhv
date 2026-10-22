@@ -305,7 +305,7 @@ Behavior = BHV_Trail
   updates          = TRAIL_UPDATES
   perpetual        = true
 
-  contact          = unset          // replaced at runtime via TRAIL_UPDATES
+  contact          = unset_ok       // placeholder (no warnings while idle); set at runtime via TRAIL_UPDATES
   trail_range      = 100
   trail_angle      = 180            // 180 = directly astern of the contact
   trail_angle_type = relative

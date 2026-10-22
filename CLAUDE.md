@@ -18,6 +18,7 @@ C++11, CMake, Ubuntu 22.04. Full docs in [docs/](docs/ARCHITECTURE.md).
 - Details: docs/CODE_FLOW.md, docs/APPS.md, docs/UI_PROTOCOL.md, docs/CAN_INTERFACE.md.
 
 ## Gotchas
+- pHelmIvP **drops behaviour updates** (`*_UPDATES`, `WPT_UPDATE`, ...) posted while it is in manual override (`IVPHELM_ALLSTOP=ManualOverride`). Anything set before Start must be re-posted when the helm takes control (pCorridor and iWebSocket's region do).
 - Real-boat `NAV_SPEED` is **knots**; sim is m/s. `NODE_REPORT` SPD should be m/s (radar/fusion currently send knots).
 - `DESIRED_RUDDER` is ±% of steering travel in iCAN, though planchaPID calls it degrees.
 - CAN IDs/payloads live in `profiles/<boat>.prf` (lib_canprofile), never in iCAN. Mercury boat: `mercury_sterndrive.prf`; USV-722: `usv722_glendinning.prf`. Run `tests/run_tests.sh` after touching either (needs only g++).

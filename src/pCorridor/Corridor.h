@@ -53,6 +53,11 @@ class Corridor : public AppCastingMOOSApp
   double m_corr_capture, m_corr_slip, m_corr_lead;
   double m_route_capture, m_route_slip, m_route_lead;
   bool   m_tight_applied;
+  // pHelmIvP drops behaviour updates while it is in manual override, and
+  // the corridor is armed before Start: the last following spec and the
+  // corridor speeds are posted again when the helm takes control.
+  std::string m_following_posted;
+  bool   m_helm_manual;           // IVPHELM_ALLSTOP = ManualOverride
 
   // Slow before sharp turns (CORRIDOR_TURN) so the turn fits in the corridor.
   double m_turn_dist;       // metres from a sharp vertex

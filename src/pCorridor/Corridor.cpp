@@ -38,6 +38,7 @@ Corridor::Corridor()
   m_corr_capture  = 15;  m_corr_slip  = 30;  m_corr_lead  = 60;
   m_route_capture = 60;  m_route_slip = 90;  m_route_lead = 400;
   m_tight_applied = false;
+  m_helm_manual   = false;
 
   m_turn_dist      = 60;
   m_turn_min_angle = 60;
@@ -136,6 +137,18 @@ bool Corridor::OnNewMail(MOOSMSG_LIST &NewMail)
     else if(key == "NAV_Y")     { m_nav_y = msg.GetDouble(); m_nav_y_known = true; }
     else if(key == "CORRIDOR")  m_corridor_on = parseFlag(msg);
     else if(key == "WAYPOINT")  m_waypoint_on = parseFlag(msg);
+    else if(key == "IVPHELM_ALLSTOP") {
+      bool manual = (msg.GetString() == "ManualOverride");
+      if(m_helm_manual && !manual) {
+        if(!m_following_posted.empty()) {
+          Notify("WPT_UPDATE", m_following_posted);
+          reportEvent("Route following re-sent: helm took control");
+        }
+        // the corridor speeds go again on the next postSpeeds()
+        m_posted_slow = m_posted_turn = m_posted_recover = -1;
+      }
+      m_helm_manual = manual;
+    }
     else if(key == "CORRIDOR_UPDATE") handleCorridorUpdate(msg.GetString());
     else if(key == "WPT_UPDATE") {
       double spd = 0;
@@ -198,12 +211,14 @@ bool Corridor::Iterate()
   // restore the normal values when it goes off. Nothing is posted while no
   // corridor has been sent, so missions without one are unchanged.
   if(m_tighten && m_corridor_on && !m_tight_applied) {
-    Notify("WPT_UPDATE", followingSpec(m_corr_capture, m_corr_slip, m_corr_lead));
+    m_following_posted = followingSpec(m_corr_capture, m_corr_slip, m_corr_lead);
+    Notify("WPT_UPDATE", m_following_posted);
     m_tight_applied = true;
     reportEvent("Route following tightened for the corridor");
   }
   else if(m_tight_applied && !m_corridor_on) {
-    Notify("WPT_UPDATE", followingSpec(m_route_capture, m_route_slip, m_route_lead));
+    m_following_posted = followingSpec(m_route_capture, m_route_slip, m_route_lead);
+    Notify("WPT_UPDATE", m_following_posted);
     m_tight_applied = false;
     reportEvent("Route following restored");
   }
@@ -375,6 +390,7 @@ void Corridor::registerVariables()
   Register("NAV_X", 0);
   Register("NAV_Y", 0);
   Register("CORRIDOR", 0);
+  Register("IVPHELM_ALLSTOP", 0);   // re-send following when the helm takes control
   Register("CORRIDOR_UPDATE", 0);
   Register("WAYPOINT", 0);
   Register("WPT_UPDATE", 0);   // mission speed, to cap the corridor speeds

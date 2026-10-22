@@ -124,7 +124,9 @@ Positional parse (expects token 2 = `X=`, 3 = `Y=`).
   `REGION_POLY = border={x,y:...} # pts={...} ...` (BHV_OpRegionV26's `dynamic_region_var`,
   re-posted every 2 s while the region is on: the behaviour only reads it while a mission,
   follow or station-keep runs), then `REGION=true`. A refused polygon never switches the region
-  on (`REGION_MSG` says why). Telemetry adds `REGION_STATE` (from `V26_STATE`),
+  on (`REGION_MSG` says why). `REGION_UPDATES` is posted again when `IVPHELM_ALLSTOP` leaves
+  `ManualOverride` (a region activated before Start would otherwise keep alpha.bhv's
+  breach_dist / recover_speed). Telemetry adds `REGION_STATE` (from `V26_STATE`),
   `REGION_CORE` (working boundary, lat,lon:...) and `REGION_MSG`.
 - Protocol (subs, pubs, JSON schema, command keys): [UI_PROTOCOL.md](UI_PROTOCOL.md).
 
@@ -173,7 +175,10 @@ Positional parse (expects token 2 = `X=`, 3 = `Y=`).
   `route_capture_radius`/`route_slip_radius`/`route_lead` (60/90/400 m, must match `waypt_survey`).
 - **Subs**: `NAV_X`, `NAV_Y`, `CORRIDOR` (true/false), `CORRIDOR_UPDATE`
   (`width=<w>,pts={x1,y1:x2,y2:...}`, full width, local metres, from iWebSocket), `WAYPOINT`,
-  `WPT_UPDATE` (only its `speed=` field: the mission speed).
+  `WPT_UPDATE` (only its `speed=` field: the mission speed), `IVPHELM_ALLSTOP`.
+- **Re-sent on helm control**: the corridor is armed before Start, while the helm is in manual
+  override and drops behaviour updates, so when `IVPHELM_ALLSTOP` leaves `ManualOverride` the
+  last following spec (`WPT_UPDATE`) and the corridor speeds are posted again.
 - **Active** only while `CORRIDOR=true`, `WAYPOINT=true`, the geometry is valid and NAV_X/Y are known.
 - **Zones** (xte = distance to the nearest centreline segment, half = width/2):
   `in` ≤ slow_frac·half < `slow` ≤ half < `recovering` ≤ stop_factor·half < `stop`;

@@ -115,6 +115,8 @@ class WebSocket : public AppCastingMOOSApp
   std::string m_region_core;     // working boundary, "lat,lon:lat,lon:..."
   std::string m_region_msg;      // last refusal / note for the UI
   std::string m_region_spec;     // last REGION_POLY posted
+  std::string m_region_updates;  // last REGION_UPDATES posted: re-posted when the
+                                 // helm takes control (it drops updates in manual)
   double m_region_repost_at;     // next REGION_POLY re-post (every 2 s while REGION is on)
   bool   applyRegionPolygon(const std::string& latlon_pts);
   // Autonomy may allow a longer outage than manual: UI_LINK_OK_AUTO uses
