@@ -58,7 +58,19 @@ class WebSocket : public AppCastingMOOSApp
    // Connection monitoring methods
    void UpdateConnectionTime(ix::WebSocket* ws);
    void CheckStaleConnections();
-   
+
+   // Command authorisation (command_auth = signalk). Each connection gets
+   // the user's Signal K permission (readonly / readwrite / admin) from the
+   // Signal K server; only readwrite and admin may command the boat. The
+   // token comes from the JAUTHENTICATION / sktoken cookie on connect or
+   // from an AUTH=<token> message. Called from the websocket threads.
+   bool CommandAuthOn() const { return m_command_auth; }
+   void ReadAuthConfig(const std::string& mission_file, const std::string& app_name);
+   static std::string TokenFromCookies(const std::string& cookie_header);
+   void AuthorizeClient(ix::WebSocket* ws, const std::string& token);
+   bool ClientMayCommand(ix::WebSocket* ws);
+   void RejectCommand(ix::WebSocket* ws, const std::string& message);
+
 
  protected: // Standard MOOSApp functions to overload  
    bool OnNewMail(MOOSMSG_LIST &NewMail);
@@ -143,6 +155,21 @@ class WebSocket : public AppCastingMOOSApp
   std::set<std::string> m_can_vars;
   std::map<std::string, std::string> m_can_str;
   std::map<std::string, double> m_can_num;
+
+  // Command authorisation (see CommandAuthOn). With it on, only clients
+  // allowed to command keep the link up (UI_LINK_OK*): a read-only viewer
+  // left open must not hold off the lost-link failsafe.
+  struct ClientAuth { std::string level; std::string user; };
+  bool        m_command_auth;    // command_auth = signalk
+  std::string m_signalk_http;    // signalk_http = host:port of Signal K (plain HTTP)
+  std::map<ix::WebSocket*, ClientAuth> m_client_auth;
+  std::deque<std::string> m_auth_events;  // filled by websocket threads, posted by Iterate
+  unsigned    m_cmds_rejected;
+  std::mutex  m_auth_mutex;      // guards the four above
+  static bool levelMayCommand(const std::string& level);
+  bool        setAuthParam(const std::string& param, const std::string& value);
+  bool        clientCountsForLink(ix::WebSocket* ws);
+  bool        hasLinkClients();
 
   // Heartbeat to keep connection alive
   double m_heartbeat_interval; // Interval in seconds to send heartbeat messages

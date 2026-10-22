@@ -71,8 +71,23 @@ int main(int argc, char *argv[])
           std::cout << "Headers:" << std::endl;
           for (auto it : msg->openInfo.headers)
           {
-              std::cout << "\t" << it.first << ": " << it.second << std::endl;
+              // Cookies and Authorization carry login tokens: never print them
+              std::string name = tolower(it.first);
+              bool secret = (name == "cookie" || name == "authorization");
+              std::cout << "\t" << it.first << ": " << (secret ? "<redacted>" : it.second) << std::endl;
           }
+
+          // command_auth = signalk: find out who this is before the client
+          // is counted for the link. The browser sends its Signal K login
+          // cookie with the upgrade request (same host, any port).
+          if (WebSocket.CommandAuthOn()) {
+              auto cookie = msg->openInfo.headers.find("Cookie");
+              std::string token = (cookie == msg->openInfo.headers.end()) ? "" :
+                                  WebSocket::TokenFromCookies(cookie->second);
+              WebSocket.AuthorizeClient(&webSocket, token);
+          }
+          else
+              webSocket.send("AUTH_STATUS=level=open#mode=off");
 
           // Add the new WebSocket connection to the list
           WebSocket.AddWebSocket(&webSocket);
@@ -87,10 +102,30 @@ int main(int argc, char *argv[])
           // All connected clients are available in an std::set. See the broadcast cpp example.
           // Second parameter tells whether we are sending the message in binary or text mode.
           // Here we send it in the same mode as it was received.
-          std::cout << "Received: " << msg->str << std::endl;
-          
+          bool is_auth = (msg->str.compare(0, 5, "AUTH=") == 0);
+          std::cout << "Received: " << (is_auth ? "AUTH=<redacted>" : msg->str) << std::endl;
+
+          // AUTH=<token>: the UI (re)sends its Signal K token after a login,
+          // logout or reconnect. Never queued or posted.
+          if (is_auth) {
+              if (WebSocket.CommandAuthOn())
+                  WebSocket.AuthorizeClient(&webSocket, msg->str.substr(5));
+              else
+                  webSocket.send("AUTH_STATUS=level=open#mode=off");
+              WebSocket.UpdateConnectionTime(&webSocket);
+              return;
+          }
+
           // Update connection timestamp on message receive
           WebSocket.UpdateConnectionTime(&webSocket);
+
+          // Read-only, anonymous or unverified users may watch, not command.
+          // The UI's keep-alive is dropped quietly, anything else is refused.
+          if (!WebSocket.ClientMayCommand(&webSocket)) {
+              if (msg->str.compare(0, 15, "HEARTBEAT_PING=") != 0)
+                  WebSocket.RejectCommand(&webSocket, msg->str);
+              return;
+          }
           
           //Adiciono o valor de msg a fila lida pelo Iterate()
           WebSocket.QueueMessage(msg -> str);
@@ -143,23 +178,6 @@ int main(int argc, char *argv[])
       }
   });
 
-  auto res = server.listen();
-  if (!res.first)
-  {
-      // Error handling
-      return 1;
-  }
-
-  // Per message deflate connection is enabled by default. It can be disabled
-  // which might be helpful when running on low power devices such as a Rasbery Pi
-  server.disablePerMessageDeflate();
-
-  // Run the server in the background. Server can be stoped by calling server.stop()
-  server.start();
-
-  // Block until server.stop() is called.
-  //server.wait();
-  // Or you can use server.stop() to stop the server in another thread.  
   string mission_file;
   string run_command = argv[0];
 
@@ -187,6 +205,25 @@ int main(int argc, char *argv[])
   cout << termColor("green");
   cout << "iWebSocket launching as " << run_command << endl;
   cout << termColor() << endl;
+
+  // The server accepts clients before the MOOS app has read its config
+  // (that happens in Run), so command_auth must be known before it starts:
+  // a client let in early would otherwise never be authorised.
+  WebSocket.ReadAuthConfig(mission_file, run_command);
+
+  auto res = server.listen();
+  if (!res.first)
+  {
+      // Error handling
+      return 1;
+  }
+
+  // Per message deflate connection is enabled by default. It can be disabled
+  // which might be helpful when running on low power devices such as a Rasbery Pi
+  server.disablePerMessageDeflate();
+
+  // Run the server in the background. Server can be stoped by calling server.stop()
+  server.start();
 
   WebSocket.Run(run_command.c_str(), mission_file.c_str());
   

@@ -22,6 +22,7 @@ using namespace std;
 #include <ixwebsocket/IXWebSocket.h>
 #include <ixwebsocket/IXUserAgent.h>
 #include <ixwebsocket/IXWebSocketServer.h>
+#include <ixwebsocket/IXHttpClient.h>
 #include <iostream>
 #include <iomanip>
 #include <stdexcept>
@@ -140,6 +141,9 @@ WebSocket::WebSocket()
   m_region_repost_at = 0;
   m_auto_link_timeout = -1;   // unset: same as link_timeout
   m_auto_link_ok_posted = false;
+  m_command_auth = false;
+  m_signalk_http = "127.0.0.1:3000";
+  m_cmds_rejected = 0;
 
   const char* can_vars[] = {"CAN_STATUS", "CAN_CONTROL_OWNER", "CAN_LOST_LINK",
                             "CAN_CONFLICT", "CAN_TX_RUDDER_PCT", "CAN_TX_THRUST_PCT",
@@ -158,7 +162,8 @@ void WebSocket::AddWebSocket(ix::WebSocket* ws)
   if (ws != nullptr) {
     m_webSockets.push_back(ws);
     m_lastMessageTime[ws] = MOOSTime(); // Initialize with current time
-    m_last_link_rx = MOOSTime();
+    if (clientCountsForLink(ws))
+      m_last_link_rx = MOOSTime();
     
     // Initialize heartbeat time when first client connects
     if (m_webSockets.size() == 1) {
@@ -176,6 +181,10 @@ void WebSocket::RemoveWebSocket(ix::WebSocket* ws)
   if (it != m_webSockets.end()) {
     m_webSockets.erase(it);
     m_lastMessageTime.erase(ws); // Remove timestamp tracking
+    {
+      std::lock_guard<std::mutex> lock(m_auth_mutex);
+      m_client_auth.erase(ws);
+    }
     reportEvent("WebSocket client disconnected. Total clients: " + std::to_string(m_webSockets.size()));
   }
 }
@@ -194,8 +203,163 @@ void WebSocket::UpdateConnectionTime(ix::WebSocket* ws)
 {
   if (ws != nullptr) {
     m_lastMessageTime[ws] = MOOSTime();
-    m_last_link_rx = MOOSTime();
+    if (clientCountsForLink(ws))
+      m_last_link_rx = MOOSTime();
   }
+}
+
+//---------------------------------------------------------
+// Command authorisation (command_auth = signalk)
+
+bool WebSocket::setAuthParam(const std::string& param, const std::string& value)
+{
+  if (param == "command_auth" &&
+      (tolower(value) == "off" || tolower(value) == "signalk")) {
+    m_command_auth = (tolower(value) == "signalk");
+    return true;
+  }
+  // host:port only, as grafana_bridge's signalk_http: a .moos file reads
+  // "//" as the start of a comment, so "http://..." cannot be written there
+  if (param == "signalk_http" && !value.empty() && value.find('/') == std::string::npos) {
+    m_signalk_http = value;
+    return true;
+  }
+  return false;
+}
+
+void WebSocket::ReadAuthConfig(const std::string& mission_file, const std::string& app_name)
+{
+  CProcessConfigReader reader;
+  reader.SetFile(mission_file);
+  std::string value;
+  if (reader.GetConfigurationParam(app_name, "command_auth", value))
+    setAuthParam("command_auth", stripBlankEnds(value));
+  if (reader.GetConfigurationParam(app_name, "signalk_http", value))
+    setAuthParam("signalk_http", stripBlankEnds(value));
+}
+
+bool WebSocket::levelMayCommand(const std::string& level)
+{
+  // open = Signal K runs without security, where everyone may write
+  return level == "readwrite" || level == "admin" || level == "open";
+}
+
+std::string WebSocket::TokenFromCookies(const std::string& cookie_header)
+{
+  // JAUTHENTICATION is Signal K's own login cookie, sktoken the UI's copy
+  std::string jauth, sktoken;
+  std::stringstream ss(cookie_header);
+  std::string item;
+  while (std::getline(ss, item, ';')) {
+    size_t eq = item.find('=');
+    if (eq == std::string::npos)
+      continue;
+    std::string name = stripBlankEnds(item.substr(0, eq));
+    std::string value = stripBlankEnds(item.substr(eq + 1));
+    if (name == "JAUTHENTICATION")
+      jauth = value;
+    else if (name == "sktoken")
+      sktoken = value;
+  }
+  return jauth.empty() ? sktoken : jauth;
+}
+
+// Asks the Signal K server who the token belongs to. Blocks the calling
+// websocket thread for up to a few seconds; each connection has its own.
+void WebSocket::AuthorizeClient(ix::WebSocket* ws, const std::string& token)
+{
+  if (ws == nullptr)
+    return;
+
+  std::string level = "unavailable";  // Signal K not reachable: no commands
+  std::string user;
+  ix::HttpClient http;
+  ix::HttpRequestArgsPtr args = http.createRequest();
+  args->connectTimeout = 2;
+  args->transferTimeout = 3;
+  if (!token.empty())
+    args->extraHeaders["Authorization"] = "Bearer " + token;
+  ix::HttpResponsePtr resp = http.get("http://" + m_signalk_http + "/skServer/loginStatus", args);
+
+  Json::Value status;
+  Json::CharReaderBuilder json_reader;
+  std::string json_errors;
+  std::istringstream body(resp ? resp->body : std::string());
+  if (resp && resp->statusCode == 200 &&
+      Json::parseFromStream(json_reader, body, &status, &json_errors) &&
+      status.isObject()) {
+    if (status.isMember("authenticationRequired") &&
+        status["authenticationRequired"].isBool() &&
+        !status["authenticationRequired"].asBool())
+      level = "open";
+    else if (status.get("status", "").asString() == "loggedIn") {
+      level = tolower(status.get("userLevel", "").asString());
+      user = status.get("username", "").asString();
+      if (level != "readonly" && level != "readwrite" && level != "admin")
+        level = "none";
+    }
+    else
+      level = "none";                 // anonymous or bad / expired token
+  }
+  std::string why;
+  if (level == "unavailable")
+    why = !resp ? ",error=no response" :
+          ",error=" + (resp->errorMsg.empty() ? "HTTP " + std::to_string(resp->statusCode)
+                                              : resp->errorMsg);
+
+  {
+    std::lock_guard<std::mutex> lock(m_auth_mutex);
+    m_client_auth[ws] = ClientAuth{level, user};
+    if (m_auth_events.size() < 100)
+      m_auth_events.push_back("auth user=" + (user.empty() ? "-" : user) + ",level=" + level + why);
+  }
+  ws->send("AUTH_STATUS=level=" + level + "#user=" + user + "#mode=signalk");
+}
+
+bool WebSocket::ClientMayCommand(ix::WebSocket* ws)
+{
+  if (!m_command_auth)
+    return true;
+  std::lock_guard<std::mutex> lock(m_auth_mutex);
+  auto it = m_client_auth.find(ws);
+  return it != m_client_auth.end() && levelMayCommand(it->second.level);
+}
+
+void WebSocket::RejectCommand(ix::WebSocket* ws, const std::string& message)
+{
+  if (ws == nullptr)
+    return;
+  std::string key = message.substr(0, message.find('='));
+  std::string level = "none", user;
+  {
+    std::lock_guard<std::mutex> lock(m_auth_mutex);
+    auto it = m_client_auth.find(ws);
+    if (it != m_client_auth.end()) {
+      level = it->second.level;
+      user = it->second.user;
+    }
+    m_cmds_rejected++;
+    if (m_auth_events.size() < 100)
+      m_auth_events.push_back("rejected key=" + key + ",user=" +
+                              (user.empty() ? "-" : user) + ",level=" + level);
+  }
+  ws->send("CMD_REJECTED=key=" + key + "#level=" + level);
+}
+
+bool WebSocket::clientCountsForLink(ix::WebSocket* ws)
+{
+  return ClientMayCommand(ws);
+}
+
+bool WebSocket::hasLinkClients()
+{
+  if (!m_command_auth)
+    return HasConnectedClients();
+  std::lock_guard<std::mutex> lock(m_auth_mutex);
+  for (const auto& entry : m_client_auth)
+    if (levelMayCommand(entry.second.level))
+      return true;
+  return false;
 }
 
 void WebSocket::CheckStaleConnections()
@@ -527,7 +691,8 @@ bool WebSocket::Iterate()
   // it within link_timeout. iCAN uses this for the lost-link failsafe in
   // manual control; it is posted on change and once a second so iCAN can
   // also tell when iWebSocket itself has stopped.
-  bool link_ok = HasConnectedClients() &&
+  // With command_auth on, only clients allowed to command count.
+  bool link_ok = hasLinkClients() &&
                  (current_time - m_last_link_rx <= m_link_timeout);
   // Autonomy's link, with its own timeout: iCAN (lost_link_autonomy = stop)
   // and the mission stop below act on this one. Time since the UI was last
@@ -546,6 +711,17 @@ bool WebSocket::Iterate()
     m_link_ok_posted = link_ok;
     m_auto_link_ok_posted = auto_ok;
     m_last_link_post = current_time;
+  }
+
+  // Authorisation results and refused commands, from the websocket threads
+  std::deque<std::string> auth_events;
+  {
+    std::lock_guard<std::mutex> lock(m_auth_mutex);
+    auth_events.swap(m_auth_events);
+  }
+  for (const std::string& event : auth_events) {
+    reportEvent("UI " + event);
+    Notify("UI_AUTH_EVENT", event);
   }
 
   // BHV_OpRegionV26 only reads REGION_POLY in an iteration where it runs
@@ -760,6 +936,9 @@ bool WebSocket::OnStartUp()
       m_lost_link_stop = (tolower(value) == "stop");
       handled = true;
     }
+    else if(param == "command_auth" || param == "signalk_http") {
+      handled = setAuthParam(param, value);
+    }
     else if(param == "foo") {
       handled = true;
     }
@@ -893,6 +1072,11 @@ bool WebSocket::buildReport()
   actab << "Connected Clients" << std::to_string(GetConnectedClientCount());
   actab << "Mensagem Recebida"  << msg_recebida;
   actab << "Connection Timeout" << std::to_string(m_connection_timeout) + "s";
+  actab << "Command auth" << (m_command_auth ? "signalk (" + m_signalk_http + ")" : "off");
+  {
+    std::lock_guard<std::mutex> lock(m_auth_mutex);
+    actab << "Commands rejected" << std::to_string(m_cmds_rejected);
+  }
   
   // Show connection health
   if (!m_webSockets.empty()) {
@@ -902,7 +1086,17 @@ bool WebSocket::buildReport()
       auto* ws = m_webSockets[i];
       double time_since_last_msg = current_time - m_lastMessageTime[ws];
       m_msgs << "  Client " << (i+1) << ": Last message " 
-             << std::fixed << std::setprecision(1) << time_since_last_msg << "s ago" << endl;
+             << std::fixed << std::setprecision(1) << time_since_last_msg << "s ago";
+      if (m_command_auth) {
+        std::lock_guard<std::mutex> lock(m_auth_mutex);
+        auto it = m_client_auth.find(ws);
+        if (it == m_client_auth.end())
+          m_msgs << " (not authorised)";
+        else
+          m_msgs << " (" << (it->second.user.empty() ? "-" : it->second.user)
+                 << ", " << it->second.level << ")";
+      }
+      m_msgs << endl;
     }
   }
 

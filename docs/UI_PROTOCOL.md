@@ -2,7 +2,17 @@
 
 Source: `src/iWebSocket/main.cpp`, `src/iWebSocket/WebSocket.cpp`.
 
-- Server: `ws://<boat>:8000` (`0.0.0.0`, hardcoded). No TLS, no auth, no origin check.
+- Server: `ws://<boat>:8000` (`0.0.0.0`, hardcoded). No TLS, no origin check.
+- Command authorisation (`command_auth`, default `off` = anyone may command). With
+  `command_auth = signalk` iWebSocket asks the Signal K server (`signalk_http = host:port`,
+  `GET /skServer/loginStatus`) who each connection is, using the `JAUTHENTICATION` / `sktoken`
+  cookie sent with the upgrade request or an `AUTH=<token>` message. `readwrite` and `admin`
+  users may command (and so does everyone when Signal K security is off); `readonly`, anonymous
+  and unverified (Signal K unreachable) users still get all telemetry, but their commands are
+  refused with `CMD_REJECTED` and posted as `UI_AUTH_EVENT`. Only users who may command count
+  for `UI_LINK_OK` / `UI_LINK_OK_AUTO`, so a read-only viewer left open does not hold off the
+  lost-link failsafe. Settings are read before the server starts. The level is checked when
+  the client connects or sends `AUTH=`, not again during the session.
 - Server ping every 1 s; connections idle > 60 s are dropped from the broadcast list
   (but not closed).
 - All lat/lon from the UI are converted to local x/y with `LatLong2LocalUTM`
@@ -45,6 +55,12 @@ Notes:
   is armed **and** a waypoint mission runs), `XTE_NOW` (metres from the centreline,
   absolute; only meaningful while the status is not `none`, reset to 0 when it goes `none`),
   `CORRIDOR_TURN` (bool, pCorridor: the boat is near a sharp corridor corner and slows for it).
+
+### Authorisation (sent to one connection only, plain text)
+
+- `AUTH_STATUS=level=<readwrite|admin|open|readonly|none|unavailable>#user=<name>#mode=<signalk|off>`:
+  on connect and after every `AUTH=`. `mode=off`: the boat does not check (level `open`).
+- `CMD_REJECTED=key=<KEY>#level=<level>`: a command from a user who may not command was dropped.
 
 ### Heartbeat
 Plain text (not JSON) `HEARTBEAT=<MOOSTime>` every 30 s — clients must tolerate it.
@@ -92,6 +108,7 @@ lists use `:`, coordinates are `lat,lon`. Unknown keys are ignored.
 | `LOOP_START` | integer >= 0 | `WPT_UPDATE=loop_start=<n>`: a repeated route restarts at point n after its last point. The UI sends it before `AUTONOMOUS_START`: points 0..n-1 are a planned approach from the boat's position (driven once), 0 = restart at the first point (stock). Non-integers are ignored with a run warning |
 | `CORRIDOR` | `width=<m>#pts=<lat>,<lon>:<lat>,<lon>:...` / `off` | `CORRIDOR_UPDATE=width=<w>,pts={x1,y1:x2,y2:...}` (local x,y) then `CORRIDOR=true` / off: `CORRIDOR=false`. `width` is the full width (both sides), > 0; at least 2 points. Any malformed field, a non-number or an out-of-range lat/lon rejects the whole command (run warning, nothing posted). Needs the mission origin. The corridor acts only while `WAYPOINT=true`; it is cleared by `AUTONOMOUS_STOP` and when the route completes |
 | `HEARTBEAT_PING` | any | keep-alive only |
+| `AUTH` | Signal K token, or empty after a logout | none: (re)checks the user with Signal K, answered with `AUTH_STATUS`; never logged with its value |
 
 ## Testing without the UI
 

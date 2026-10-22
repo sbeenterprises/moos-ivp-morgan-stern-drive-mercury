@@ -202,6 +202,15 @@ ProcessConfig = iWebSocket
    // reports a navigation fault; true = also while it is not reporting.
    nav_guard_required = true
 
+   // Who may command the boat. off = anyone who reaches port 8000 (as
+   // before). signalk = iWebSocket asks the Signal K server (signalk_http,
+   // host:port, plain HTTP) who each UI user is: read-only and anonymous
+   // users still see everything, but their commands are refused and they do
+   // not keep the link up. Check Signal K security on the boat before
+   // turning it on: if Signal K cannot be reached, nobody can command.
+   command_auth = off
+   signalk_http = 127.0.0.1:3000
+
    // Operating region: the polygon drawn in the UI is the HALT line; the
    // boat works inside it shrunk by this margin (BHV_OpRegionV26 breaches,
    // i.e. stops, on or just inside the drawn line).
