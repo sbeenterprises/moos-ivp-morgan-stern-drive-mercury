@@ -62,6 +62,14 @@ Notes:
   on connect and after every `AUTH=`. `mode=off`: the boat does not check (level `open`).
 - `CMD_REJECTED=key=<KEY>#level=<level>`: a command from a user who may not command was dropped.
 
+### Operator UI state (plain text, all clients)
+
+`UI_STATE=<json>`: what the commanding UI has selected or drawn that the boat does not hold
+itself (mission route and routes shown, speed, repeat, base, corridor, region, station-keep
+point and radii, follow settings, ENC safe-route preview). Relayed to every client as soon as
+it arrives and sent to each client on connect, so read-only viewers see the operator's view
+live. Only accepted from clients allowed to command (`command_auth`); max 256 kB.
+
 ### Heartbeat
 Plain text (not JSON) `HEARTBEAT=<MOOSTime>` every 30 s — clients must tolerate it.
 The server also sends a WebSocket ping every second; browsers answer it automatically, and each pong keeps `UI_LINK_OK` true even while the UI is idle or in the background.
@@ -108,6 +116,7 @@ lists use `:`, coordinates are `lat,lon`. Unknown keys are ignored.
 | `LOOP_START` | integer >= 0 | `WPT_UPDATE=loop_start=<n>`: a repeated route restarts at point n after its last point. The UI sends it before `AUTONOMOUS_START`: points 0..n-1 are a planned approach from the boat's position (driven once), 0 = restart at the first point (stock). Non-integers are ignored with a run warning |
 | `CORRIDOR` | `width=<m>#pts=<lat>,<lon>:<lat>,<lon>:...` / `off` | `CORRIDOR_UPDATE=width=<w>,pts={x1,y1:x2,y2:...}` (local x,y) then `CORRIDOR=true` / off: `CORRIDOR=false`. `width` is the full width (both sides), > 0; at least 2 points. Any malformed field, a non-number or an out-of-range lat/lon rejects the whole command (run warning, nothing posted). Needs the mission origin. The corridor acts only while `WAYPOINT=true`; it is cleared by `AUTONOMOUS_STOP` and when the route completes |
 | `HEARTBEAT_PING` | any | keep-alive only |
+| `UI_STATE` | JSON object | none: kept and relayed to all clients (see above) |
 | `AUTH` | Signal K token, or empty after a logout | none: (re)checks the user with Signal K, answered with `AUTH_STATUS`; never logged with its value |
 
 ## Testing without the UI

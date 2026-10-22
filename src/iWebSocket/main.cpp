@@ -91,6 +91,11 @@ int main(int argc, char *argv[])
 
           // Add the new WebSocket connection to the list
           WebSocket.AddWebSocket(&webSocket);
+
+          // Bring a new client up to date with the operator's UI
+          std::string ui_state = WebSocket.LatestUiStateMessage();
+          if (!ui_state.empty())
+              webSocket.send(ui_state);
           std::cout << "Total connected clients: " << WebSocket.GetConnectedClientCount() << std::endl;
           
           // Pings are set on the server (PING_INTERVAL_SECONDS above)
@@ -103,7 +108,9 @@ int main(int argc, char *argv[])
           // Second parameter tells whether we are sending the message in binary or text mode.
           // Here we send it in the same mode as it was received.
           bool is_auth = (msg->str.compare(0, 5, "AUTH=") == 0);
-          std::cout << "Received: " << (is_auth ? "AUTH=<redacted>" : msg->str) << std::endl;
+          // UI_STATE arrives every time the operator changes something: not echoed
+          if (msg->str.compare(0, 9, "UI_STATE=") != 0)
+              std::cout << "Received: " << (is_auth ? "AUTH=<redacted>" : msg->str) << std::endl;
 
           // AUTH=<token>: the UI (re)sends its Signal K token after a login,
           // logout or reconnect. Never queued or posted.

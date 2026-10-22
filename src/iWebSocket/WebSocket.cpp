@@ -760,7 +760,8 @@ bool WebSocket::Iterate()
     std::string value = message.substr(equalsPos + 1);
 
     std::cout << "Key: " << key << "\n";
-    std::cout << "Value: " << value << "\n";
+    if (key != "UI_STATE")
+      std::cout << "Value: " << value << "\n";
 
     // State machine approach: O(log n) lookup instead of O(n) linear search
     auto handler = m_messageHandlers.find(key);
@@ -1136,6 +1137,7 @@ void WebSocket::initializeMessageHandlers()
   m_messageHandlers["TRIM"] = &WebSocket::handleTrim;
   m_messageHandlers["STATION_KEEP_WAYPOINT"] = &WebSocket::handleStationKeepWaypoint;
   m_messageHandlers["HEARTBEAT_PING"] = &WebSocket::handleHeartbeatPing;
+  m_messageHandlers["UI_STATE"] = &WebSocket::handleUiState;
   m_messageHandlers["REPEAT"] = &WebSocket::handleRepeat;
   m_messageHandlers["BASE_COORDS"] = &WebSocket::handleBaseCoords;
   m_messageHandlers["CAN_SEND"] = &WebSocket::handleCanSend;
@@ -2048,6 +2050,29 @@ void WebSocket::handleStationKeepWaypoint(const std::string& value)
     Notify("STATION_UPDATES", "pwt=50");
     Notify("WPT_UPDATE", "pwt=250");
   }
+}
+
+// Only reaches here from a client allowed to command (command_auth), so a
+// viewer cannot overwrite what the operator's UI shows to others.
+void WebSocket::handleUiState(const std::string& value)
+{
+  if (value.empty() || value.size() > 256 * 1024 || value[0] != '{') {
+    reportRunWarning("UI_STATE ignored: not a JSON object or larger than 256 kB");
+    return;
+  }
+  {
+    std::lock_guard<std::mutex> lock(m_ui_state_mutex);
+    if (value == m_ui_state)
+      return;
+    m_ui_state = value;
+  }
+  SendMessage("UI_STATE=" + value);
+}
+
+std::string WebSocket::LatestUiStateMessage()
+{
+  std::lock_guard<std::mutex> lock(m_ui_state_mutex);
+  return m_ui_state.empty() ? "" : "UI_STATE=" + m_ui_state;
 }
 
 void WebSocket::handleHeartbeatPing(const std::string& value)

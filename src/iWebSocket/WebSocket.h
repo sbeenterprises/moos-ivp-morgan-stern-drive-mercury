@@ -71,6 +71,12 @@ class WebSocket : public AppCastingMOOSApp
    bool ClientMayCommand(ix::WebSocket* ws);
    void RejectCommand(ix::WebSocket* ws, const std::string& message);
 
+   // Operator UI state (UI_STATE=<json>): what the commanding UI has selected
+   // or drawn that the boat does not hold itself (mission route, speed, base,
+   // corridor, station-keep point...). Relayed to every client so read-only
+   // viewers see it as it happens; a client that connects gets the latest.
+   std::string LatestUiStateMessage();
+
 
  protected: // Standard MOOSApp functions to overload  
    bool OnNewMail(MOOSMSG_LIST &NewMail);
@@ -220,6 +226,9 @@ class WebSocket : public AppCastingMOOSApp
   bool handleRegionUpdatesOk(const std::string& value);
   void handleCorridor(const std::string& value);
   void handleLoopStart(const std::string& value);
+  void handleUiState(const std::string& value);
+  std::string m_ui_state;        // latest UI_STATE payload, guarded by m_ui_state_mutex
+  std::mutex  m_ui_state_mutex;
 
 };
 
