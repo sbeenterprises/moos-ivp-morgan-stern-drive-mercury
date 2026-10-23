@@ -7,6 +7,13 @@ what a session may not do.
 
 Related: [UI_PROTOCOL.md](UI_PROTOCOL.md) (messages), [KNOWN_ISSUES.md](KNOWN_ISSUES.md).
 
+## Where
+
+- C2 (the operator UI): `http://<boat>:3000/c2/` (USV-722 `192.168.22.11`, USV-725
+  `192.168.143.251`). With `"landingPage": "/c2/"` in Signal K's `~/.signalk/settings.json`
+  the bare `http://<boat>:3000/` opens it too.
+- Roles: Signal K admin, `http://<boat>:3000/admin/`.
+
 ## Switches (iWebSocket block of the mission file)
 
 | Parameter | Default | Meaning |
@@ -23,7 +30,7 @@ The real missions ship with `command_auth = off` and `exclusive_control = false`
 
 ## Roles
 
-Assigned in the Signal K admin page: Server → Plugin Config → SwiftShips UI →
+Assigned in the Signal K admin page: Server → Plugin Config → SwiftShips C2 →
 "Boat control roles". Signal K's own Admin / Read-Write rights do not give boat
 control by themselves; account management stays in Signal K.
 

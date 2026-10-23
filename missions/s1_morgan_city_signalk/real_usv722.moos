@@ -215,7 +215,7 @@ ProcessConfig = iWebSocket
    // at a time holds control; only it may command, and only its link keeps
    // UI_LINK_OK up. Operators take / release / request control from the UI,
    // a supervisor may force a takeover; any operator may press ALL STOP.
-   // Roles come from the Signal K admin page (SwiftShips UI plugin settings,
+   // Roles come from the Signal K admin page (SwiftShips C2 plugin settings,
    // "Boat control roles"), read from roles_file. See docs/CONTROL.md.
    exclusive_control = false
    roles_file = /home/douglas/.signalk/plugin-config-data/swiftships-ui.json
