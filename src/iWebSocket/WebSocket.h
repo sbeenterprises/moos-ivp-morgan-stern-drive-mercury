@@ -201,6 +201,10 @@ class WebSocket : public AppCastingMOOSApp
   std::map<ix::WebSocket*, ClientAuth> m_client_auth;
   std::map<ix::WebSocket*, std::string> m_cookie_token;   // login cookie at connect
   std::map<ix::WebSocket*, std::string> m_client_ip;
+  // A Signal K token stays valid after its user logs out; the token a
+  // session used when it logged out is refused from then on (until restart)
+  std::map<ix::WebSocket*, std::string> m_ws_token;
+  std::set<std::string> m_logged_out_tokens;
   // Audit trail: every login, logout, disconnect, control change, ALL STOP
   // and refused command, stamped when it happens ("kind|UTC time|text"),
   // posted to MOOS (UI_AUTH_EVENT / CONTROL_EVENT) and appended to

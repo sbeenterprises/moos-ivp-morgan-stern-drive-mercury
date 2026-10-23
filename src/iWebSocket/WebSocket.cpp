@@ -215,6 +215,7 @@ void WebSocket::RemoveWebSocket(ix::WebSocket* ws)
       }
       m_cookie_token.erase(ws);
       m_client_ip.erase(ws);
+      m_ws_token.erase(ws);
     }
     reportEvent("WebSocket client disconnected. Total clients: " + std::to_string(m_webSockets.size()));
   }
@@ -372,11 +373,28 @@ void WebSocket::AuthorizeClient(ix::WebSocket* ws, const std::string& value)
         logout = true;
     }
   }
-  if (token.empty() && !logout) {
+  bool stale = false;
+  {
     std::lock_guard<std::mutex> lock(m_auth_mutex);
-    auto c = m_cookie_token.find(ws);
-    if (c != m_cookie_token.end())
-      token = c->second;
+    if (logout) {
+      // whatever this connection was logged in with is finished
+      auto t = m_ws_token.find(ws);
+      if (t != m_ws_token.end() && !t->second.empty() && m_logged_out_tokens.size() < 10000)
+        m_logged_out_tokens.insert(t->second);
+      auto c = m_cookie_token.find(ws);
+      if (c != m_cookie_token.end() && !c->second.empty() && m_logged_out_tokens.size() < 10000)
+        m_logged_out_tokens.insert(c->second);
+    }
+    if (token.empty() && !logout) {
+      auto c = m_cookie_token.find(ws);
+      if (c != m_cookie_token.end())
+        token = c->second;
+    }
+    if (!token.empty() && m_logged_out_tokens.count(token)) {
+      token.clear();   // a copy of a login that was logged out: anonymous
+      stale = true;
+    }
+    m_ws_token[ws] = token;
   }
 
   std::string level = "unavailable";  // Signal K not reachable: no commands
@@ -440,6 +458,8 @@ void WebSocket::AuthorizeClient(ix::WebSocket* ws, const std::string& value)
       pushEvent("auth", "login user=" + user + " level=" + level + " role=" + role + where);
     else if (user.empty() && (!known || !prev_user.empty() || level == "unavailable"))
       pushEvent("auth", "anonymous level=" + level + " role=" + role + where + why);
+    if (stale)
+      pushEvent("auth", "rejected login=logged-out-token" + where);
     drainLease();
   }
   ws->send("AUTH_STATUS=level=" + level + "#user=" + user + "#role=" + role +
