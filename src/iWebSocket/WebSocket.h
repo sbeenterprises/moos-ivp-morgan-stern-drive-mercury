@@ -21,6 +21,7 @@
 #include <set>
 #include "MOOS/libMOOSGeodesy/MOOSGeodesy.h"
 #include "RegionGeom.h"
+#include "ControlLease.h"
 
 
 class WebSocket : public AppCastingMOOSApp
@@ -35,7 +36,9 @@ class WebSocket : public AppCastingMOOSApp
    // This must be a queue and not a single slot: the UI sends bursts (a mode
    // switch immediately followed by its gains) and everything but the last
    // message of a burst would otherwise be overwritten before it is read.
-   void QueueMessage(const std::string& message);
+   // ws: the sender (for the control generation and refusals); all_stop:
+   // an ALL_STOP from an operator who need not hold control
+   void QueueMessage(ix::WebSocket* ws, const std::string& message, bool all_stop = false);
 
    // Add a method to send messages
    void SendMessage(const std::string& message, bool binary = false);
@@ -48,6 +51,7 @@ class WebSocket : public AppCastingMOOSApp
    bool NotifyMOOS(const std::string& key, const std::string& value);
    bool NotifyMOOS(const std::string& key, double value);
    bool NotifyMOOS(const std::string& key, bool value);
+   bool OnDisconnectFromServer();
 
    // Method to check if any clients are connected
    bool HasConnectedClients() const;
@@ -67,9 +71,20 @@ class WebSocket : public AppCastingMOOSApp
    bool CommandAuthOn() const { return m_command_auth; }
    void ReadAuthConfig(const std::string& mission_file, const std::string& app_name);
    static std::string TokenFromCookies(const std::string& cookie_header);
-   void AuthorizeClient(ix::WebSocket* ws, const std::string& token);
+   // value: <token>[#session=<tab id>][#logout]; an empty token falls back
+   // on the login cookie the connection arrived with, unless #logout
+   void AuthorizeClient(ix::WebSocket* ws, const std::string& value);
+   void SetCookieToken(ix::WebSocket* ws, const std::string& token);
    bool ClientMayCommand(ix::WebSocket* ws);
    void RejectCommand(ix::WebSocket* ws, const std::string& message);
+
+   // Exclusive control (exclusive_control = true, needs command_auth). One
+   // session holds the control lease (ControlLease); only it may command,
+   // its traffic alone keeps UI_LINK_OK up. CTRL=take|release|request|
+   // accept|deny|cancel|force#reason=..; ALL_STOP from any operator.
+   bool ExclusiveOn() const { return m_exclusive; }
+   void HandleControl(ix::WebSocket* ws, const std::string& value);
+   bool ClientMayAllStop(ix::WebSocket* ws);
 
    // Operator UI state (UI_STATE=<json>): what the commanding UI has selected
    // or drawn that the boat does not hold itself (mission route, speed, base,
@@ -95,7 +110,14 @@ class WebSocket : public AppCastingMOOSApp
  private: // State variables
   // Messages received from the UI, waiting to be dispatched by Iterate().
   // Written from the websocket thread, drained from the MOOS thread.
-  std::deque<std::string> m_inbox;
+  struct Inbound {
+    std::string message;
+    ix::WebSocket* ws;   // sender; may have closed by the time it is handled
+    unsigned gen;        // control generation when it arrived
+    std::string user;
+    bool all_stop;
+  };
+  std::deque<Inbound> m_inbox;
   std::mutex m_inbox_mutex;
 
   std::vector<ix::WebSocket*> m_webSockets; // Store multiple web socket connections
@@ -165,15 +187,38 @@ class WebSocket : public AppCastingMOOSApp
   // Command authorisation (see CommandAuthOn). With it on, only clients
   // allowed to command keep the link up (UI_LINK_OK*): a read-only viewer
   // left open must not hold off the lost-link failsafe.
-  struct ClientAuth { std::string level; std::string user; };
+  struct ClientAuth {
+    std::string level;    // Signal K: readonly | readwrite | admin | open | none | unavailable
+    std::string user;
+    std::string role;     // viewer | planner | operator | supervisor
+    std::string session;  // the browser tab's id (AUTH=<token>#session=<id>)
+    ControlLease::Session sess() const { return ControlLease::Session{session, user, role}; }
+  };
   bool        m_command_auth;    // command_auth = signalk
   std::string m_signalk_http;    // signalk_http = host:port of Signal K (plain HTTP)
   std::map<ix::WebSocket*, ClientAuth> m_client_auth;
+  std::map<ix::WebSocket*, std::string> m_cookie_token;   // login cookie at connect
   std::deque<std::string> m_auth_events;  // filled by websocket threads, posted by Iterate
   unsigned    m_cmds_rejected;
   std::mutex  m_auth_mutex;      // guards the four above
   static bool levelMayCommand(const std::string& level);
   bool        setAuthParam(const std::string& param, const std::string& value);
+  std::string roleFor(const std::string& user, const std::string& level);
+  void        sendControlStatus();     // per client; needs m_auth_mutex free
+
+  bool         m_exclusive;            // exclusive_control
+  std::string  m_roles_file;           // roles_file: Signal K plugin config JSON
+  ControlLease m_lease;                // guarded by m_auth_mutex
+  bool         m_ctrl_dirty;           // send CONTROL_STATUS soon
+  double       m_ctrl_sent_at;
+  std::atomic<bool> m_boat_idle;       // no mission / station keep / follow / manual
+  std::atomic<bool> m_moos_up;
+  bool         m_moos_connected_once;
+  bool         m_manual_on;            // MOOS_MANUAL_OVERRIDE
+  bool         m_all_stop;             // ALL STOP latched until the holder resets it
+  std::string  m_all_stop_by;
+  void handleAllStop(const std::string& user);
+  bool allStopBlocks(const std::string& key, const std::string& value) const;
   bool        clientCountsForLink(ix::WebSocket* ws);
   bool        hasLinkClients();
 
@@ -227,6 +272,7 @@ class WebSocket : public AppCastingMOOSApp
   void handleCorridor(const std::string& value);
   void handleLoopStart(const std::string& value);
   void handleUiState(const std::string& value);
+  void handleAllStopReset(const std::string& value);
   std::string m_ui_state;        // latest UI_STATE payload, guarded by m_ui_state_mutex
   std::mutex  m_ui_state_mutex;
 

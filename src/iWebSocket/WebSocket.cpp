@@ -6,6 +6,7 @@
 /************************************************************/
 
 #include <iterator>
+#include <fstream>
 #include <jsoncpp/json/json.h>     // Biblioteca jsoncpp
 #include <sstream>
 #include <iostream>
@@ -142,6 +143,14 @@ WebSocket::WebSocket()
   m_auto_link_timeout = -1;   // unset: same as link_timeout
   m_auto_link_ok_posted = false;
   m_command_auth = false;
+  m_exclusive = false;
+  m_ctrl_dirty = true;
+  m_ctrl_sent_at = 0;
+  m_boat_idle = true;
+  m_moos_up = false;
+  m_moos_connected_once = false;
+  m_manual_on = false;
+  m_all_stop = false;
   m_signalk_http = "127.0.0.1:3000";
   m_cmds_rejected = 0;
 
@@ -183,7 +192,21 @@ void WebSocket::RemoveWebSocket(ix::WebSocket* ws)
     m_lastMessageTime.erase(ws); // Remove timestamp tracking
     {
       std::lock_guard<std::mutex> lock(m_auth_mutex);
-      m_client_auth.erase(ws);
+      auto a = m_client_auth.find(ws);
+      if (a != m_client_auth.end()) {
+        // The lease itself runs on until hold_timeout (a reload of the same
+        // tab picks it up again); a pending request is dropped now.
+        bool other = false;
+        for (const auto& e : m_client_auth)
+          if (e.first != ws && e.second.session == a->second.session &&
+              !a->second.session.empty())
+            other = true;
+        if (!other)
+          m_lease.gone(a->second.sess());
+        m_client_auth.erase(a);
+        m_ctrl_dirty = true;
+      }
+      m_cookie_token.erase(ws);
     }
     reportEvent("WebSocket client disconnected. Total clients: " + std::to_string(m_webSockets.size()));
   }
@@ -209,7 +232,7 @@ void WebSocket::UpdateConnectionTime(ix::WebSocket* ws)
 }
 
 //---------------------------------------------------------
-// Command authorisation (command_auth = signalk)
+// Command authorisation (command_auth = signalk), roles and exclusive control
 
 bool WebSocket::setAuthParam(const std::string& param, const std::string& value)
 {
@@ -224,6 +247,19 @@ bool WebSocket::setAuthParam(const std::string& param, const std::string& value)
     m_signalk_http = value;
     return true;
   }
+  if (param == "exclusive_control" &&
+      (tolower(value) == "true" || tolower(value) == "false")) {
+    m_exclusive = (tolower(value) == "true");
+    return true;
+  }
+  if (param == "roles_file") {
+    m_roles_file = value;
+    return true;
+  }
+  if (param == "control_request_timeout" && isNumber(value) && atof(value.c_str()) > 0) {
+    m_lease.setRequestTimeout(atof(value.c_str()));
+    return true;
+  }
   return false;
 }
 
@@ -232,16 +268,52 @@ void WebSocket::ReadAuthConfig(const std::string& mission_file, const std::strin
   CProcessConfigReader reader;
   reader.SetFile(mission_file);
   std::string value;
-  if (reader.GetConfigurationParam(app_name, "command_auth", value))
-    setAuthParam("command_auth", stripBlankEnds(value));
-  if (reader.GetConfigurationParam(app_name, "signalk_http", value))
-    setAuthParam("signalk_http", stripBlankEnds(value));
+  const char* params[] = {"command_auth", "signalk_http", "exclusive_control",
+                          "roles_file", "control_request_timeout"};
+  for (const char* p : params)
+    if (reader.GetConfigurationParam(app_name, p, value))
+      setAuthParam(p, stripBlankEnds(value));
 }
 
 bool WebSocket::levelMayCommand(const std::string& level)
 {
   // open = Signal K runs without security, where everyone may write
   return level == "readwrite" || level == "admin" || level == "open";
+}
+
+// The user's role: from roles_file (the Signal K plugin config, edited in
+// the Signal K admin page: configuration.roles = [{user, role}]), else from
+// the Signal K level. A read-only Signal K account is never more than a
+// viewer, since it cannot save routes or settings.
+std::string WebSocket::roleFor(const std::string& user, const std::string& level)
+{
+  std::string role;
+  if (level == "readonly")       role = "viewer";
+  else if (level == "readwrite") role = "operator";
+  else if (level == "admin")     role = "supervisor";
+  else if (level == "open")      role = "operator";
+  else                           return "viewer";      // none / unavailable
+
+  if (!m_roles_file.empty() && !user.empty()) {
+    std::ifstream in(m_roles_file);
+    Json::Value root;
+    Json::CharReaderBuilder rb;
+    std::string errs;
+    if (in && Json::parseFromStream(rb, in, &root, &errs)) {
+      const Json::Value& roles = root["configuration"]["roles"];
+      if (roles.isArray())
+        for (const Json::Value& r : roles)
+          if (r.isObject() && r.get("user", "").asString() == user) {
+            std::string mapped = tolower(r.get("role", "").asString());
+            if (mapped == "viewer" || mapped == "planner" ||
+                mapped == "operator" || mapped == "supervisor")
+              role = mapped;
+          }
+    }
+  }
+  if (level == "readonly")
+    role = "viewer";
+  return role;
 }
 
 std::string WebSocket::TokenFromCookies(const std::string& cookie_header)
@@ -266,10 +338,32 @@ std::string WebSocket::TokenFromCookies(const std::string& cookie_header)
 
 // Asks the Signal K server who the token belongs to. Blocks the calling
 // websocket thread for up to a few seconds; each connection has its own.
-void WebSocket::AuthorizeClient(ix::WebSocket* ws, const std::string& token)
+// value: <token>[#session=<tab id>]
+void WebSocket::AuthorizeClient(ix::WebSocket* ws, const std::string& value)
 {
   if (ws == nullptr)
     return;
+
+  std::string token = value, session;
+  bool logout = false;
+  size_t hash = value.find('#');
+  if (hash != std::string::npos) {
+    token = value.substr(0, hash);
+    std::stringstream rest(value.substr(hash + 1));
+    std::string part;
+    while (std::getline(rest, part, '#')) {
+      if (strBegins(part, "session="))
+        session = part.substr(8, 64);
+      else if (part == "logout")
+        logout = true;
+    }
+  }
+  if (token.empty() && !logout) {
+    std::lock_guard<std::mutex> lock(m_auth_mutex);
+    auto c = m_cookie_token.find(ws);
+    if (c != m_cookie_token.end())
+      token = c->second;
+  }
 
   std::string level = "unavailable";  // Signal K not reachable: no commands
   std::string user;
@@ -306,14 +400,32 @@ void WebSocket::AuthorizeClient(ix::WebSocket* ws, const std::string& token)
     why = !resp ? ",error=no response" :
           ",error=" + (resp->errorMsg.empty() ? "HTTP " + std::to_string(resp->statusCode)
                                               : resp->errorMsg);
+  std::string role = roleFor(user, level);
 
   {
     std::lock_guard<std::mutex> lock(m_auth_mutex);
-    m_client_auth[ws] = ClientAuth{level, user};
+    auto prev = m_client_auth.find(ws);
+    if (prev != m_client_auth.end()) {
+      // logged out, or now someone else in this tab: drop what the old
+      // identity held (unless nothing changed)
+      ClientAuth& p = prev->second;
+      if (p.user != user || p.session != session || p.role != role)
+        m_lease.logout(p.sess());
+    }
+    m_client_auth[ws] = ClientAuth{level, user, role, session};
+    m_ctrl_dirty = true;
     if (m_auth_events.size() < 100)
-      m_auth_events.push_back("auth user=" + (user.empty() ? "-" : user) + ",level=" + level + why);
+      m_auth_events.push_back("auth user=" + (user.empty() ? "-" : user) + ",level=" + level +
+                              ",role=" + role + why);
   }
-  ws->send("AUTH_STATUS=level=" + level + "#user=" + user + "#mode=signalk");
+  ws->send("AUTH_STATUS=level=" + level + "#user=" + user + "#role=" + role +
+           "#mode=signalk#control=" + (m_exclusive ? "exclusive" : "shared"));
+}
+
+void WebSocket::SetCookieToken(ix::WebSocket* ws, const std::string& token)
+{
+  std::lock_guard<std::mutex> lock(m_auth_mutex);
+  m_cookie_token[ws] = token;
 }
 
 bool WebSocket::ClientMayCommand(ix::WebSocket* ws)
@@ -322,7 +434,65 @@ bool WebSocket::ClientMayCommand(ix::WebSocket* ws)
     return true;
   std::lock_guard<std::mutex> lock(m_auth_mutex);
   auto it = m_client_auth.find(ws);
-  return it != m_client_auth.end() && levelMayCommand(it->second.level);
+  if (it == m_client_auth.end() || !levelMayCommand(it->second.level) ||
+      !ControlLease::mayOperate(it->second.role))
+    return false;
+  // exclusive: only the session holding control, and only while MOOS is up
+  return !m_exclusive || (m_lease.isHolder(it->second.sess()) && m_moos_up);
+}
+
+bool WebSocket::ClientMayAllStop(ix::WebSocket* ws)
+{
+  if (!m_command_auth)
+    return true;
+  std::lock_guard<std::mutex> lock(m_auth_mutex);
+  auto it = m_client_auth.find(ws);
+  return it != m_client_auth.end() && levelMayCommand(it->second.level) &&
+         ControlLease::mayOperate(it->second.role);
+}
+
+void WebSocket::HandleControl(ix::WebSocket* ws, const std::string& value)
+{
+  if (ws == nullptr)
+    return;
+  std::string action = value, reason;
+  size_t hash = value.find('#');
+  if (hash != std::string::npos) {
+    action = value.substr(0, hash);
+    std::string rest = value.substr(hash + 1);
+    if (strBegins(rest, "reason="))
+      reason = rest.substr(7, 200);
+  }
+  action = tolower(stripBlankEnds(action));
+
+  ControlLease::Result r{false, "exclusive control is off on this boat"};
+  {
+    std::lock_guard<std::mutex> lock(m_auth_mutex);
+    auto it = m_client_auth.find(ws);
+    if (!m_exclusive)
+      ;
+    else if (it == m_client_auth.end() || !levelMayCommand(it->second.level))
+      r = ControlLease::Result{false, "not logged in with a read/write account"};
+    else if (!m_moos_up && (action == "take" || action == "force" || action == "accept"))
+      r = ControlLease::Result{false, "MOOS is disconnected: boat control is unavailable"};
+    else {
+      ControlLease::Session s = it->second.sess();
+      double now = MOOSTime();
+      if (action == "take")         r = m_lease.take(s, now);
+      else if (action == "release") r = m_lease.release(s, m_boat_idle, now);
+      else if (action == "request") r = m_lease.request(s, now);
+      else if (action == "accept")  r = m_lease.answer(s, true, now);
+      else if (action == "deny")    r = m_lease.answer(s, false, now);
+      else if (action == "cancel")  r = m_lease.cancelRequest(s);
+      else if (action == "force")   r = m_lease.force(s, reason, now);
+      else r = ControlLease::Result{false, "unknown control action " + action};
+      if (r.ok && m_lease.held())
+        m_last_link_rx = m_lease.lastHeard();   // new holder starts fresh
+    }
+    m_ctrl_dirty = true;
+  }
+  ws->send("CTRL_RESULT=action=" + action + "#ok=" + (r.ok ? "true" : "false") +
+           "#reason=" + r.reason);
 }
 
 void WebSocket::RejectCommand(ix::WebSocket* ws, const std::string& message)
@@ -330,24 +500,36 @@ void WebSocket::RejectCommand(ix::WebSocket* ws, const std::string& message)
   if (ws == nullptr)
     return;
   std::string key = message.substr(0, message.find('='));
-  std::string level = "none", user;
+  std::string level = "none", user, why = "level";
   {
     std::lock_guard<std::mutex> lock(m_auth_mutex);
     auto it = m_client_auth.find(ws);
     if (it != m_client_auth.end()) {
       level = it->second.level;
       user = it->second.user;
+      if (levelMayCommand(level))
+        why = !ControlLease::mayOperate(it->second.role) ? "role" :
+              !m_moos_up ? "moos" : "control";
     }
     m_cmds_rejected++;
     if (m_auth_events.size() < 100)
       m_auth_events.push_back("rejected key=" + key + ",user=" +
-                              (user.empty() ? "-" : user) + ",level=" + level);
+                              (user.empty() ? "-" : user) + ",level=" + level + ",why=" + why);
   }
-  ws->send("CMD_REJECTED=key=" + key + "#level=" + level);
+  ws->send("CMD_REJECTED=key=" + key + "#level=" + level + "#why=" + why);
 }
 
 bool WebSocket::clientCountsForLink(ix::WebSocket* ws)
 {
+  if (m_command_auth && m_exclusive) {
+    // only the holder's traffic keeps the link (and the lease) alive
+    std::lock_guard<std::mutex> lock(m_auth_mutex);
+    auto it = m_client_auth.find(ws);
+    if (it == m_client_auth.end() || !m_lease.isHolder(it->second.sess()))
+      return false;
+    m_lease.heard(it->second.sess(), MOOSTime());
+    return true;
+  }
   return ClientMayCommand(ws);
 }
 
@@ -356,9 +538,86 @@ bool WebSocket::hasLinkClients()
   if (!m_command_auth)
     return HasConnectedClients();
   std::lock_guard<std::mutex> lock(m_auth_mutex);
+  if (m_exclusive)
+    return m_lease.held();
   for (const auto& entry : m_client_auth)
-    if (levelMayCommand(entry.second.level))
+    if (levelMayCommand(entry.second.level) && ControlLease::mayOperate(entry.second.role))
       return true;
+  return false;
+}
+
+// CONTROL_STATUS=<json>, to each client with its own "you" part
+void WebSocket::sendControlStatus()
+{
+  double now = MOOSTime();
+  std::vector<std::pair<ix::WebSocket*, std::string>> out;
+  {
+    std::lock_guard<std::mutex> lock(m_auth_mutex);
+    Json::Value base;
+    base["mode"] = m_exclusive ? "exclusive" : "shared";
+    base["state"] = m_exclusive ? m_lease.state() : std::string("shared");
+    base["holder"] = m_lease.held() ? m_lease.holder().user : "";
+    base["holder_role"] = m_lease.held() ? m_lease.holder().role : "";
+    base["gen"] = m_lease.gen();
+    base["reason"] = m_lease.lastReason();
+    base["last_user"] = m_lease.lastUser();
+    base["hold_timeout"] = m_lease.holdTimeout();
+    if (m_lease.requestPending()) {
+      base["request"]["user"] = m_lease.requester().user;
+      base["request"]["secs_left"] = std::max(0.0, m_lease.requestDeadline() - now);
+    }
+    base["all_stop"] = m_all_stop;
+    base["all_stop_by"] = m_all_stop_by;
+    base["moos"] = m_moos_up.load();
+    base["idle"] = m_boat_idle.load();
+    Json::StreamWriterBuilder w;
+    w["indentation"] = "";
+    for (auto* ws : m_webSockets) {
+      Json::Value msg = base;
+      auto it = m_client_auth.find(ws);
+      if (it != m_client_auth.end()) {
+        msg["you"]["user"] = it->second.user;
+        msg["you"]["role"] = it->second.role;
+        msg["you"]["holder"] = m_lease.isHolder(it->second.sess());
+        msg["you"]["requesting"] = m_lease.requestPending() &&
+          m_lease.requester().id == it->second.session &&
+          m_lease.requester().user == it->second.user;
+      }
+      out.push_back(std::make_pair(ws, "CONTROL_STATUS=" + Json::writeString(w, msg)));
+    }
+  }
+  for (auto& o : out)
+    o.first->send(o.second);
+}
+
+// ALL STOP: ends any autonomy, zero rudder and thrust, latched until the
+// holder resets it. Any operator may press it, holding control or not.
+void WebSocket::handleAllStop(const std::string& user)
+{
+  m_all_stop = true;
+  m_all_stop_by = user.empty() ? "-" : user;
+  stopAutonomy("ALL STOP by " + m_all_stop_by, "ALL_STOP_EVENT");
+  Notify("DESIRED_RUDDER", 0.0);
+  Notify("DESIRED_THRUST", 0.0);
+  Notify("ALL_STOP", "true");
+  Notify("CONTROL_EVENT", "all_stop user=" + m_all_stop_by);
+  reportRunWarning("ALL STOP by " + m_all_stop_by + ": starts and thrust refused until reset");
+  m_ctrl_dirty = true;
+}
+
+// While ALL STOP is latched nothing that makes the boat move is accepted
+bool WebSocket::allStopBlocks(const std::string& key, const std::string& value) const
+{
+  if (!m_all_stop)
+    return false;
+  if (key == "AUTONOMOUS_START" || key == "AUTONOMOUS_RETURN_TO_BASE")
+    return tolower(value) != "false";
+  if (key == "STATION_KEEP_WAYPOINT")
+    return strBegins(tolower(value), "true");
+  if (key == "TRAIL_FOLLOW")
+    return tolower(value) != "off";
+  if (key == "DESIRED_THRUST")
+    return atof(value.c_str()) != 0;
   return false;
 }
 
@@ -551,6 +810,8 @@ bool WebSocket::OnNewMail(MOOSMSG_LIST &NewMail)
       service_mode = (msg.GetString() == "true");
     else if(key == "PID_GAINS")
       pid_gains = msg.GetString();
+    else if(key == "MOOS_MANUAL_OVERRIDE")
+      m_manual_on = (tolower(msg.GetString()) == "true");
     else if(key == "TRAILING")
       trailing = (msg.GetString() == "true");
     else if(key == "STATIONING")
@@ -645,6 +906,23 @@ bool WebSocket::OnNewMail(MOOSMSG_LIST &NewMail)
 bool WebSocket::OnConnectToServer()
 {
    registerVariables();
+   // The MOOS link came back: nobody keeps control across it, an operator
+   // has to take it again before commands are accepted
+   if (m_moos_connected_once) {
+     std::lock_guard<std::mutex> lock(m_auth_mutex);
+     m_lease.revokeAll("moos-reconnect");
+     m_ctrl_dirty = true;
+   }
+   m_moos_connected_once = true;
+   m_moos_up = true;
+   return(true);
+}
+
+bool WebSocket::OnDisconnectFromServer()
+{
+   m_moos_up = false;
+   std::lock_guard<std::mutex> lock(m_auth_mutex);
+   m_ctrl_dirty = true;
    return(true);
 }
 
@@ -652,8 +930,16 @@ bool WebSocket::OnConnectToServer()
 // Procedure: QueueMessage()
 //            called from the websocket thread for every message the UI sends
 
-void WebSocket::QueueMessage(const std::string& message)
+void WebSocket::QueueMessage(ix::WebSocket* ws, const std::string& message, bool all_stop)
 {
+  Inbound in{message, ws, 0, "", all_stop};
+  {
+    std::lock_guard<std::mutex> lock(m_auth_mutex);
+    in.gen = m_lease.gen();
+    auto it = m_client_auth.find(ws);
+    if (it != m_client_auth.end())
+      in.user = it->second.user;
+  }
   std::lock_guard<std::mutex> lock(m_inbox_mutex);
 
   // Bound the queue so a stalled MOOS thread cannot grow it without limit.
@@ -662,7 +948,7 @@ void WebSocket::QueueMessage(const std::string& message)
   while (m_inbox.size() >= 512)
     m_inbox.pop_front();
 
-  m_inbox.push_back(message);
+  m_inbox.push_back(in);
 }
 
 //---------------------------------------------------------
@@ -687,6 +973,37 @@ bool WebSocket::Iterate()
     m_last_heartbeat_time = current_time;
   }
   
+  // Control lease: expire a silent holder / an unanswered request, log the
+  // changes, and keep every client's CONTROL_STATUS up to date
+  m_moos_up = m_Comms.IsConnected();
+  m_boat_idle = (waypoint != "true" && !stationing && !trailing && !m_manual_on);
+  {
+    std::vector<std::string> events;
+    bool send_status = false;
+    {
+      std::lock_guard<std::mutex> lock(m_auth_mutex);
+      unsigned gen_before = m_lease.gen();
+      m_lease.tick(current_time);
+      if (m_lease.gen() != gen_before) {
+        m_ctrl_dirty = true;
+        if (m_lease.held())
+          m_last_link_rx = m_lease.lastHeard();   // handed over: the new holder starts fresh
+      }
+      events = m_lease.takeEvents();
+      double every = m_lease.requestPending() ? 1.0 : 2.0;
+      send_status = m_ctrl_dirty || current_time - m_ctrl_sent_at >= every;
+      m_ctrl_dirty = false;
+    }
+    for (const std::string& e : events) {
+      reportEvent("Control: " + e);
+      Notify("CONTROL_EVENT", e);
+    }
+    if (send_status && HasConnectedClients()) {
+      sendControlStatus();
+      m_ctrl_sent_at = current_time;
+    }
+  }
+
   // Link to SS UI: at least one client connected and something heard from
   // it within link_timeout. iCAN uses this for the lost-link failsafe in
   // manual control; it is posted on change and once a second so iCAN can
@@ -741,14 +1058,38 @@ bool WebSocket::Iterate()
   // sends messages in bursts - enabling service mode pushes SERVICE_MODE
   // followed immediately by the six PID gains - and every one of them has to be
   // dispatched, not just whichever arrived last.
-  std::deque<std::string> inbox;
+  std::deque<Inbound> inbox;
   {
     std::lock_guard<std::mutex> lock(m_inbox_mutex);
     inbox.swap(m_inbox);
   }
 
-  for (const std::string& message : inbox) {
-    msg_recebida = message; // keep the appcast report showing the last message
+  for (const Inbound& in : inbox) {
+    const std::string& message = in.message;
+    if (message.compare(0, 9, "UI_STATE=") != 0)
+      msg_recebida = message; // keep the appcast report showing the last message
+
+    // ALL STOP from any operator, holding control or not
+    if (in.all_stop) {
+      handleAllStop(in.user);
+      continue;
+    }
+    // Exclusive control: a command sent under an older control generation
+    // (queued or delayed while control changed hands) is not carried out
+    if (m_command_auth && m_exclusive) {
+      unsigned gen;
+      {
+        std::lock_guard<std::mutex> lock(m_auth_mutex);
+        gen = m_lease.gen();
+      }
+      if (in.gen != gen) {
+        std::string key = message.substr(0, message.find('='));
+        reportEvent("Stale command dropped: " + key + " (control changed hands)");
+        Notify("UI_AUTH_EVENT", "rejected key=" + key + ",user=" +
+               (in.user.empty() ? "-" : in.user) + ",why=stale");
+        continue;
+      }
+    }
 
     //Split in the equal sign
     size_t equalsPos = message.find('=');
@@ -762,6 +1103,13 @@ bool WebSocket::Iterate()
     std::cout << "Key: " << key << "\n";
     if (key != "UI_STATE")
       std::cout << "Value: " << value << "\n";
+
+    if (allStopBlocks(key, value)) {
+      reportRunWarning(key + " refused: ALL STOP by " + m_all_stop_by + " is latched");
+      Notify("UI_AUTH_EVENT", "rejected key=" + key + ",user=" +
+             (in.user.empty() ? "-" : in.user) + ",why=all_stop");
+      continue;
+    }
 
     // State machine approach: O(log n) lookup instead of O(n) linear search
     auto handler = m_messageHandlers.find(key);
@@ -937,7 +1285,9 @@ bool WebSocket::OnStartUp()
       m_lost_link_stop = (tolower(value) == "stop");
       handled = true;
     }
-    else if(param == "command_auth" || param == "signalk_http") {
+    else if(param == "command_auth" || param == "signalk_http" ||
+            param == "exclusive_control" || param == "roles_file" ||
+            param == "control_request_timeout") {
       handled = setAuthParam(param, value);
     }
     else if(param == "foo") {
@@ -977,6 +1327,17 @@ bool WebSocket::OnStartUp()
     reportConfigWarning("Geodesy initialisation failed for LatOrigin/LongOrigin");
   else
     m_origin_ok = true;
+
+  // The control lease expires with the autonomy link: a holder not heard
+  // for autonomy_link_timeout has lost control (the failsafe acts then too)
+  {
+    std::lock_guard<std::mutex> lock(m_auth_mutex);
+    m_lease.setHoldTimeout(m_auto_link_timeout > 0 ? m_auto_link_timeout : m_link_timeout);
+  }
+  if (m_exclusive && !m_command_auth)
+    reportConfigWarning("exclusive_control needs command_auth = signalk (user identity): ignored");
+  if (!m_command_auth)
+    m_exclusive = false;
 
   // Registra variáveis no MOOS, se necessário
   registerVariables();	
@@ -1032,6 +1393,7 @@ void WebSocket::registerVariables()
   Register("SERVICE_MODE", 0); //PID calibration mode (manual gains)
   Register("PID_GAINS", 0); //Gains planchaPID is currently applying
   Register("TRAILING", 0); //Follow-a-contact behaviour active
+  Register("MOOS_MANUAL_OVERRIDE", 0); //manual control on (boat not idle)
   Register("STATIONING", 0); //Station-keep active (lost-link stop)
   Register("TRAIL_UPDATES", 0); //Contact/range/angle the trail behaviour is using
   Register("COLAV_TEST", 0);      //Collision avoidance test mode, request echo
@@ -1074,6 +1436,13 @@ bool WebSocket::buildReport()
   actab << "Mensagem Recebida"  << msg_recebida;
   actab << "Connection Timeout" << std::to_string(m_connection_timeout) + "s";
   actab << "Command auth" << (m_command_auth ? "signalk (" + m_signalk_http + ")" : "off");
+  {
+    std::lock_guard<std::mutex> lock(m_auth_mutex);
+    actab << "Control" << (!m_exclusive ? std::string("shared") :
+      m_lease.state() + (m_lease.held() ? " by " + m_lease.holder().user : std::string()) +
+      " (gen " + std::to_string(m_lease.gen()) + ")");
+  }
+  actab << "ALL STOP" << (m_all_stop ? "latched by " + m_all_stop_by : std::string("-"));
   {
     std::lock_guard<std::mutex> lock(m_auth_mutex);
     actab << "Commands rejected" << std::to_string(m_cmds_rejected);
@@ -1138,6 +1507,7 @@ void WebSocket::initializeMessageHandlers()
   m_messageHandlers["STATION_KEEP_WAYPOINT"] = &WebSocket::handleStationKeepWaypoint;
   m_messageHandlers["HEARTBEAT_PING"] = &WebSocket::handleHeartbeatPing;
   m_messageHandlers["UI_STATE"] = &WebSocket::handleUiState;
+  m_messageHandlers["ALL_STOP_RESET"] = &WebSocket::handleAllStopReset;
   m_messageHandlers["REPEAT"] = &WebSocket::handleRepeat;
   m_messageHandlers["BASE_COORDS"] = &WebSocket::handleBaseCoords;
   m_messageHandlers["CAN_SEND"] = &WebSocket::handleCanSend;
@@ -2050,6 +2420,20 @@ void WebSocket::handleStationKeepWaypoint(const std::string& value)
     Notify("STATION_UPDATES", "pwt=50");
     Notify("WPT_UPDATE", "pwt=250");
   }
+}
+
+// Clearing the ALL STOP latch: a normal command, so only the holder
+// (exclusive control) or someone allowed to command
+void WebSocket::handleAllStopReset(const std::string& value)
+{
+  if (tolower(value) != "true" || !m_all_stop)
+    return;
+  m_all_stop = false;
+  Notify("ALL_STOP", "false");
+  Notify("CONTROL_EVENT", "all_stop_reset");
+  reportEvent("ALL STOP reset");
+  std::lock_guard<std::mutex> lock(m_auth_mutex);
+  m_ctrl_dirty = true;
 }
 
 // Only reaches here from a client allowed to command (command_auth), so a

@@ -9,7 +9,7 @@ driven over **J1939 CAN** (`slcan0`).
 
 Related docs:
 [CODE_FLOW.md](CODE_FLOW.md) · [APPS.md](APPS.md) · [MISSIONS.md](MISSIONS.md) ·
-[UI_PROTOCOL.md](UI_PROTOCOL.md) · [CAN_INTERFACE.md](CAN_INTERFACE.md) ·
+[UI_PROTOCOL.md](UI_PROTOCOL.md) · [CONTROL.md](CONTROL.md) · [CAN_INTERFACE.md](CAN_INTERFACE.md) ·
 [KNOWN_ISSUES.md](KNOWN_ISSUES.md) · [DEVELOPMENT.md](DEVELOPMENT.md)
 
 ## System diagram (real boat, `missions/s1_morgan_city_signalk/real.moos`)

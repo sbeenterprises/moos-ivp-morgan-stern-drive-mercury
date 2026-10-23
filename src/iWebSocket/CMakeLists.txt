@@ -6,6 +6,7 @@
 SET(SRC
   WebSocket.cpp
   WebSocket_Info.cpp
+  ControlLease.cpp
   main.cpp
 )
 

@@ -62,6 +62,15 @@ Notes:
   on connect and after every `AUTH=`. `mode=off`: the boat does not check (level `open`).
 - `CMD_REJECTED=key=<KEY>#level=<level>`: a command from a user who may not command was dropped.
 
+### Control (plain text, per connection) — see [CONTROL.md](CONTROL.md)
+
+- `CONTROL_STATUS=<json>`: on every change and every 2 s (1 s while a request is pending):
+  `mode` (exclusive | shared), `state` (held | free | lost), `holder`, `holder_role`, `gen`,
+  `reason` / `last_user` (last change), `request` {user, secs_left}, `all_stop`, `all_stop_by`,
+  `moos` (iWebSocket's MOOS link), `idle` (no mission / manual / station keep / follow), and
+  `you` {user, role, holder, requesting} for the receiving connection.
+- `CTRL_RESULT=action=<a>#ok=true|false#reason=<text>`: answer to a `CTRL=` message.
+
 ### Operator UI state (plain text, all clients)
 
 `UI_STATE=<json>`: what the commanding UI has selected or drawn that the boat does not hold
@@ -116,8 +125,11 @@ lists use `:`, coordinates are `lat,lon`. Unknown keys are ignored.
 | `LOOP_START` | integer >= 0 | `WPT_UPDATE=loop_start=<n>`: a repeated route restarts at point n after its last point. The UI sends it before `AUTONOMOUS_START`: points 0..n-1 are a planned approach from the boat's position (driven once), 0 = restart at the first point (stock). Non-integers are ignored with a run warning |
 | `CORRIDOR` | `width=<m>#pts=<lat>,<lon>:<lat>,<lon>:...` / `off` | `CORRIDOR_UPDATE=width=<w>,pts={x1,y1:x2,y2:...}` (local x,y) then `CORRIDOR=true` / off: `CORRIDOR=false`. `width` is the full width (both sides), > 0; at least 2 points. Any malformed field, a non-number or an out-of-range lat/lon rejects the whole command (run warning, nothing posted). Needs the mission origin. The corridor acts only while `WAYPOINT=true`; it is cleared by `AUTONOMOUS_STOP` and when the route completes |
 | `HEARTBEAT_PING` | any | keep-alive only |
+| `CTRL` | `take`, `release`, `request`, `accept`, `deny`, `cancel`, `force#reason=<text>` | none: exclusive control (see CONTROL.md), answered with `CTRL_RESULT`; logged as `CONTROL_EVENT` |
+| `ALL_STOP` | `true` | from any operator or supervisor, holding control or not: ends autonomy, `DESIRED_RUDDER/THRUST=0`, `ALL_STOP=true`; starts and non-zero thrust are refused until `ALL_STOP_RESET` |
+| `ALL_STOP_RESET` | `true` | `ALL_STOP=false` (a normal command: the holder) |
 | `UI_STATE` | JSON object | none: kept and relayed to all clients (see above) |
-| `AUTH` | Signal K token, or empty after a logout | none: (re)checks the user with Signal K, answered with `AUTH_STATUS`; never logged with its value |
+| `AUTH` | `<token>[#session=<tab id>][#logout]`; empty token = the login cookie of the connection | none: (re)checks the user with Signal K, answered with `AUTH_STATUS`; never logged with its value |
 
 ## Testing without the UI
 

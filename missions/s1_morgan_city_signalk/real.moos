@@ -202,6 +202,17 @@ ProcessConfig = iWebSocket
    command_auth = off
    signalk_http = 127.0.0.1:3000
 
+   // Exclusive control (needs command_auth = signalk): one operator session
+   // at a time holds control; only it may command, and only its link keeps
+   // UI_LINK_OK up. Operators take / release / request control from the UI,
+   // a supervisor may force a takeover; any operator may press ALL STOP.
+   // Roles come from the Signal K admin page (SwiftShips UI plugin settings,
+   // "Boat control roles"), read from roles_file. See docs/CONTROL.md.
+   exclusive_control = false
+   roles_file = /home/douglas/.signalk/plugin-config-data/swiftships-ui.json
+   // An unanswered request for control hands it over after this many seconds
+   control_request_timeout = 15
+
    // Operating region: the polygon drawn in the UI is the HALT line; the
    // boat works inside it shrunk by this margin (BHV_OpRegionV26 breaches,
    // i.e. stops, on or just inside the drawn line).

@@ -2,7 +2,8 @@
 #------------------------------------------------------------------
 # Builds and runs the lib_canprofile, pCorridor (CorridorModel),
 # lib_regiongeom, pTurnLimit (TurnLimitModel), pColavScale
-# (ColavScaleModel) and pNavGuard (NavGuardModel) tests with plain g++. No MOOS or CAN hardware needed. Run from anywhere:
+# (ColavScaleModel), pNavGuard (NavGuardModel) and iWebSocket
+# (ControlLease) tests with plain g++. No MOOS or CAN hardware needed. Run from anywhere:
 #   tests/run_tests.sh
 #------------------------------------------------------------------
 
@@ -14,6 +15,7 @@ OUT_REGION="${TMPDIR:-/tmp}/region_test.$$"
 OUT_TURN="${TMPDIR:-/tmp}/turnlimit_test.$$"
 OUT_COLAV="${TMPDIR:-/tmp}/colavscale_test.$$"
 OUT_NAV="${TMPDIR:-/tmp}/navguard_test.$$"
+OUT_LEASE="${TMPDIR:-/tmp}/controllease_test.$$"
 
 g++ -std=c++11 -Wall -Wextra -O1 \
     -I"$ROOT/src/lib_canprofile" \
@@ -53,7 +55,13 @@ g++ -std=c++11 -Wall -Wextra -O1 \
     "$ROOT/tests/navguard_test.cpp" \
     -o "$OUT_NAV"
 
-trap 'rm -f "$OUT" "$OUT_CORRIDOR" "$OUT_REGION" "$OUT_TURN" "$OUT_COLAV" "$OUT_NAV"' EXIT
+g++ -std=c++11 -Wall -Wextra -O1 \
+    -I"$ROOT/src/iWebSocket" \
+    "$ROOT/src/iWebSocket/ControlLease.cpp" \
+    "$ROOT/tests/controllease_test.cpp" \
+    -o "$OUT_LEASE"
+
+trap 'rm -f "$OUT" "$OUT_CORRIDOR" "$OUT_REGION" "$OUT_TURN" "$OUT_COLAV" "$OUT_NAV" "$OUT_LEASE"' EXIT
 echo "== lib_canprofile =="
 "$OUT" "$ROOT/profiles"
 echo "== pCorridor CorridorModel =="
@@ -66,3 +74,5 @@ echo "== pColavScale ColavScaleModel =="
 "$OUT_COLAV"
 echo "== pNavGuard NavGuardModel =="
 "$OUT_NAV"
+echo "== iWebSocket ControlLease =="
+"$OUT_LEASE"

@@ -84,6 +84,7 @@ int main(int argc, char *argv[])
               auto cookie = msg->openInfo.headers.find("Cookie");
               std::string token = (cookie == msg->openInfo.headers.end()) ? "" :
                                   WebSocket::TokenFromCookies(cookie->second);
+              WebSocket.SetCookieToken(&webSocket, token);
               WebSocket.AuthorizeClient(&webSocket, token);
           }
           else
@@ -123,8 +124,27 @@ int main(int argc, char *argv[])
               return;
           }
 
+          std::string msg_key = msg->str.substr(0, msg->str.find('='));
+
+          // CTRL=take|release|request|accept|deny|cancel|force#reason=..
+          // (exclusive control); answered with CTRL_RESULT, never queued
+          if (msg_key == "CTRL") {
+              WebSocket.UpdateConnectionTime(&webSocket);
+              WebSocket.HandleControl(&webSocket, msg->str.substr(5));
+              return;
+          }
+
           // Update connection timestamp on message receive
           WebSocket.UpdateConnectionTime(&webSocket);
+
+          // ALL STOP: any operator, whether holding control or not
+          if (msg_key == "ALL_STOP") {
+              if (WebSocket.ClientMayAllStop(&webSocket))
+                  WebSocket.QueueMessage(&webSocket, msg->str, true);
+              else
+                  WebSocket.RejectCommand(&webSocket, msg->str);
+              return;
+          }
 
           // Read-only, anonymous or unverified users may watch, not command.
           // The UI's keep-alive is dropped quietly, anything else is refused.
@@ -135,7 +155,7 @@ int main(int argc, char *argv[])
           }
           
           //Adiciono o valor de msg a fila lida pelo Iterate()
-          WebSocket.QueueMessage(msg -> str);
+          WebSocket.QueueMessage(&webSocket, msg->str);
 
           // Parse the incoming message to publish to MOOS
           std::string message = msg->str;
