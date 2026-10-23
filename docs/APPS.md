@@ -17,6 +17,7 @@ the current `main`.
 | [pTrafficSim](#ptrafficsim) | ✔ | simulated | simulated AIS traffic |
 | [pColavEval](#pcolaveval) | ✔ | simulated | COLAV metrics |
 | [pCorridor](#pcorridor) | ✔ | real, real_usv722/725, simulated, external | route corridor (XTE + zone) |
+| [pEngineWatch](#penginewatch) | ✔ | real, real_usv722/725 | engine run state + engine alerts |
 | [pSensorFusionTracker_ref](#psensorfusiontracker_ref) | ✔ | realvision | radar+vision fusion |
 | [iNMEA](#inmea) | ✔ | simulated | NAV → NMEA to Signal K |
 | [iSignalK](#isignalk) | ✔ | legacy only | Signal K course → WPT |
@@ -268,6 +269,26 @@ independent data with each other (speeds in m/s inside, config in `nav_speed_uni
 - **Offline**: `navguard_replay [--param=value ...] <file>.alog` runs the same model over a log
   (raw NMEA in `MSG_UDP` when present, else the `NAV_*` variables; autonomy = helm `clear`) and
   prints each warn/fault and where autonomy would have been stopped.
+
+## pEngineWatch
+`src/pEngineWatch/` — engine run state and engine alerts on the boat, raised and logged with or
+without a UI open (same rules as the SS UI's engine monitor). Logic in
+`EngineWatchModel.{h,cpp}` (plain C++; tests in `tests/enginewatch_test.cpp`). Alert only: never
+commands the boat.
+- **Source**: `engine_source = moos` (default): `ENGINE_SPEED`, `ENGINE_COOLANT_TEMP`,
+  `ENGINE_BATTERY_VOLTAGE`, `ENGINE_FUEL_LEVEL` (iCANRec). `signalk`: a worker thread GETs
+  `signalk_http` (`127.0.0.1:3000`) `/signalk/v1/api/vessels/self` at 1 Hz (0.9 s timeout):
+  `propulsion.<engine_id>` (default the first) revolutions ×60, temperature / coolantTemperature
+  K→°C, alternatorVoltage; `electrical.batteries.House.voltage`; `tanks.fuel.0.currentLevel` ×100.
+  A reading is new only when the revolutions timestamp moves. `signalk_token` if reads need a login.
+- **Run state**: running (≥ 300 rpm), stopped, unknown (no rpm reading for 10 s).
+- **Alerts** (mission = `IVPHELM_STATE = DRIVE`): `shutOffInMission` emergency (stopped 3 s in a
+  mission), `noDataInMission` warn (data lost in a mission, after having had data), `overheat`
+  warn ≥ 95 °C / alarm ≥ 100 °C (clears < 93), `lowVoltage` warn < 12.0 V / alarm < 11.5 V
+  (clears ≥ 12.2), `notCharging` warn (running, alternator < 12.8 V for 30 s), `lowFuel` warn
+  < 20 % / alarm < 10 % (clears ≥ 22). Threshold alerts hold while the data is missing.
+- **Pubs**: `ENGINE_RUN_STATE` (on change and every 5 s), `ENGINE_ALERT` on each level change:
+  `key=<key>,level=<warn|alarm|emergency|clear>,msg=<text>`. A run warning while each is active.
 
 ## lib_regiongeom
 `src/lib_regiongeom/` — operating-region geometry for iWebSocket (plain C++, tests in

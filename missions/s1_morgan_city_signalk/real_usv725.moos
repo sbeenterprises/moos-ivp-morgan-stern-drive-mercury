@@ -45,6 +45,7 @@ ProcessConfig = ANTLER
   Run = pTurnLimit    @ NewConsole = false
   Run = pColavScale   @ NewConsole = false
   Run = pNavGuard     @ NewConsole = false
+  Run = pEngineWatch  @ NewConsole = false
   Run = pXYpublisher      @ NewConsole = false
   Run = pContactSpawn	      @ NewConsole = false
   Run = pContactMgrV20 @ NewConsole = false
@@ -598,5 +599,20 @@ ProcessConfig = pNavGuard
   follow_tol      = 60     // deg, autonomy: track off the commanded course ...
   follow_secs     = 20     // ... for this long (not while turning toward it)
   clear_secs      = 10     // a fault clears after this long with all checks clean
+}
+
+//------------------------------------------
+// pEngineWatch config block
+// Engine run state (ENGINE_RUN_STATE) and engine alerts (ENGINE_ALERT):
+// engine shut off / no data during a mission, overheat, low battery.
+// Alert only, never commands the boat.
+// USV-725: the Mercury's J1939 data comes from iCANRec (ENGINE_*).
+
+ProcessConfig = pEngineWatch
+{
+  AppTick   = 2
+  CommsTick = 2
+
+  engine_source = moos             // ENGINE_SPEED / _COOLANT_TEMP / _BATTERY_VOLTAGE
 }
 
