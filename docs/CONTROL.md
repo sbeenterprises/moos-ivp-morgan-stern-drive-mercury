@@ -13,6 +13,9 @@ Related: [UI_PROTOCOL.md](UI_PROTOCOL.md) (messages), [KNOWN_ISSUES.md](KNOWN_IS
   `192.168.143.251`). With `"landingPage": "/c2/"` in Signal K's `~/.signalk/settings.json`
   the bare `http://<boat>:3000/` opens it too.
 - Roles: Signal K admin, `http://<boat>:3000/admin/`.
+- Signal K on the boats runs as root (`signalk.service`, `User=root`): its config folder
+  is `/root/.signalk` — that is where C2 is registered and where `landingPage` goes,
+  not `/home/douglas/.signalk`.
 
 ## Switches (iWebSocket block of the mission file)
 
@@ -21,7 +24,7 @@ Related: [UI_PROTOCOL.md](UI_PROTOCOL.md) (messages), [KNOWN_ISSUES.md](KNOWN_IS
 | `command_auth` | `off` | `signalk`: each UI connection's user is checked with the Signal K server (`signalk_http`, host:port). Read-only and anonymous users get telemetry only. |
 | `signalk_http` | `127.0.0.1:3000` | Signal K, plain HTTP, `host:port` (a `.moos` file reads `//` as a comment). |
 | `exclusive_control` | `false` | `true` (needs `command_auth = signalk`): one session at a time holds control. |
-| `roles_file` | none | Signal K plugin config of the SS UI plugin, `configuration.roles = [{user, role}]`. |
+| `roles_file` | none | `/var/lib/swiftships-c2/roles.json` in the real missions: written by the SwiftShips C2 plugin whenever Signal K starts it or its settings are saved (`{"configuration": {"roles": [{user, role}]}}`, readable by all). Signal K runs as root on the boats, and its own config folder (`/root/.signalk`) is not readable by the MOOS user. |
 | `control_request_timeout` | 15 s | An unanswered request for control hands it over. |
 | `link_timeout` / `autonomy_link_timeout` | 3 s / 5 s | Unchanged; with exclusive control they apply to the holder only, and the control lease expires with `autonomy_link_timeout`. |
 
