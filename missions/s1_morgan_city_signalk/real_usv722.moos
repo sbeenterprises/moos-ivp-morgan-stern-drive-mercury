@@ -208,7 +208,7 @@ ProcessConfig = iWebSocket
    // users still see everything, but their commands are refused and they do
    // not keep the link up. Check Signal K security on the boat before
    // turning it on: if Signal K cannot be reached, nobody can command.
-   command_auth = off
+   command_auth = signalk
    signalk_http = 127.0.0.1:3000
 
    // Exclusive control (needs command_auth = signalk): one operator session
@@ -217,7 +217,7 @@ ProcessConfig = iWebSocket
    // a supervisor may force a takeover; any operator may press ALL STOP.
    // Roles come from the Signal K admin page (SwiftShips C2 plugin settings,
    // "Boat control roles"); the plugin writes them to roles_file. See docs/CONTROL.md.
-   exclusive_control = false
+   exclusive_control = true
    roles_file = /var/lib/swiftships-c2/roles.json
    // An unanswered request for control hands it over after this many seconds
    control_request_timeout = 15
