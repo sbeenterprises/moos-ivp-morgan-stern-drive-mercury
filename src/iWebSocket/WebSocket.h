@@ -75,6 +75,7 @@ class WebSocket : public AppCastingMOOSApp
    // on the login cookie the connection arrived with, unless #logout
    void AuthorizeClient(ix::WebSocket* ws, const std::string& value);
    void SetCookieToken(ix::WebSocket* ws, const std::string& token);
+   void SetClientIp(ix::WebSocket* ws, const std::string& ip);
    bool ClientMayCommand(ix::WebSocket* ws);
    void RejectCommand(ix::WebSocket* ws, const std::string& message);
 
@@ -192,12 +193,26 @@ class WebSocket : public AppCastingMOOSApp
     std::string user;
     std::string role;     // viewer | planner | operator | supervisor
     std::string session;  // the browser tab's id (AUTH=<token>#session=<id>)
+    std::string ip;
     ControlLease::Session sess() const { return ControlLease::Session{session, user, role}; }
   };
   bool        m_command_auth;    // command_auth = signalk
   std::string m_signalk_http;    // signalk_http = host:port of Signal K (plain HTTP)
   std::map<ix::WebSocket*, ClientAuth> m_client_auth;
   std::map<ix::WebSocket*, std::string> m_cookie_token;   // login cookie at connect
+  std::map<ix::WebSocket*, std::string> m_client_ip;
+  // Audit trail: every login, logout, disconnect, control change, ALL STOP
+  // and refused command, stamped when it happens ("kind|UTC time|text"),
+  // posted to MOOS (UI_AUTH_EVENT / CONTROL_EVENT) and appended to
+  // <audit_dir>/c2_audit_<UTC date>.log. Callers hold m_auth_mutex.
+  std::string m_audit_dir;
+  bool        m_audit_warned;
+  std::string m_dispatch_user;   // sender of the command being handled (MOOS thread)
+  void pushEvent(const std::string& kind, const std::string& text);
+  void drainLease();
+  void writeAudit(const std::string& stamp, const std::string& kind, const std::string& text);
+  static std::string utcStamp();
+  static std::string shortId(const std::string& session);
   std::deque<std::string> m_auth_events;  // filled by websocket threads, posted by Iterate
   unsigned    m_cmds_rejected;
   std::mutex  m_auth_mutex;      // guards the four above

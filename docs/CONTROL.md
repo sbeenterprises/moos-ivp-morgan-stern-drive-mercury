@@ -26,6 +26,7 @@ Related: [UI_PROTOCOL.md](UI_PROTOCOL.md) (messages), [KNOWN_ISSUES.md](KNOWN_IS
 | `exclusive_control` | `false` | `true` (needs `command_auth = signalk`): one session at a time holds control. |
 | `roles_file` | none | `/var/lib/swiftships-c2/roles.json` in the real missions: written by the SwiftShips C2 plugin whenever Signal K starts it or its settings are saved (`{"configuration": {"roles": [{user, role}]}}`, readable by all). Signal K runs as root on the boats, and its own config folder (`/root/.signalk`) is not readable by the MOOS user. |
 | `control_request_timeout` | 15 s | An unanswered request for control hands it over. |
+| `audit_dir` | none | Folder for the daily audit file (see Audit); `/home/douglas/c2_audit` in the real missions. |
 | `link_timeout` / `autonomy_link_timeout` | 3 s / 5 s | Unchanged; with exclusive control they apply to the holder only, and the control lease expires with `autonomy_link_timeout`. |
 
 The real missions ship with `command_auth = off` and `exclusive_control = false`
@@ -108,11 +109,33 @@ continues. A viewer or planner left connected does not keep the link up.
 
 ## Audit
 
-MOOS variables (in the pLogger log): `CONTROL_EVENT` (take, release, request,
-deny, cancel, handover, handover-timeout, force + reason, lost, logout, revoke,
-all_stop, all_stop_reset), `UI_AUTH_EVENT` (logins with level and role,
-refused commands with the reason: level, role, control, moos, stale, all_stop),
-`ALL_STOP`.
+**Audit file** (`audit_dir`, `/home/douglas/c2_audit` on the boats): one line
+per event, UTC time, a file per UTC day (`c2_audit_YYYY-MM-DD.log`), appended
+as it happens and kept across mission restarts. Example:
+
+```
+2026-10-23T03:50:00Z auth login user=alice level=readwrite role=operator ip=192.168.22.5 session=k3f9a1x0
+2026-10-23T03:50:01Z control take user=alice role=operator gen=1
+2026-10-23T03:50:02Z control request user=frank holder=alice
+2026-10-23T03:50:03Z control handover user=frank role=operator gen=2 from=alice
+2026-10-23T03:50:05Z control release user=frank
+2026-10-23T03:50:09Z control force user=carol role=supervisor gen=5 from=alice
+2026-10-23T03:50:09Z control force reason=operator not answering
+2026-10-23T03:50:11Z control all_stop user=carol
+2026-10-23T03:50:12Z auth logout user=carol ip=192.168.22.5 session=q81mz2c4
+2026-10-23T03:50:13Z auth rejected key=DESIRED_THRUST user=bob level=readonly why=level
+2026-10-23T03:50:14Z auth disconnect user=bob role=viewer ip=192.168.22.7 session=t0b6e9d2
+```
+
+`auth`: login, logout, anonymous (connected without a login), disconnect,
+rejected (with why: level, role, control, moos, stale, all_stop).
+`control`: start (iWebSocket started, nobody in control), take, release,
+request, deny, cancel, handover, handover-timeout, force + reason, lost (holder
+not heard), logout, revoke (MOOS link restarted), refused (a control action
+that was not allowed), all_stop, all_stop_reset.
+
+The same lines are posted to MOOS as `CONTROL_EVENT` / `UI_AUTH_EVENT`, so they
+are also in each mission's pLogger log next to what the boat did.
 
 ## Not covered (yet)
 

@@ -7,6 +7,8 @@
 
 #include <iterator>
 #include <fstream>
+#include <ctime>
+#include <sys/stat.h>
 #include <jsoncpp/json/json.h>     // Biblioteca jsoncpp
 #include <sstream>
 #include <iostream>
@@ -151,6 +153,7 @@ WebSocket::WebSocket()
   m_moos_connected_once = false;
   m_manual_on = false;
   m_all_stop = false;
+  m_audit_warned = false;
   m_signalk_http = "127.0.0.1:3000";
   m_cmds_rejected = 0;
 
@@ -203,10 +206,15 @@ void WebSocket::RemoveWebSocket(ix::WebSocket* ws)
             other = true;
         if (!other)
           m_lease.gone(a->second.sess());
+        pushEvent("auth", "disconnect user=" + (a->second.user.empty() ? "-" : a->second.user) +
+                  " role=" + a->second.role + " ip=" + a->second.ip +
+                  " session=" + shortId(a->second.session));
+        drainLease();
         m_client_auth.erase(a);
         m_ctrl_dirty = true;
       }
       m_cookie_token.erase(ws);
+      m_client_ip.erase(ws);
     }
     reportEvent("WebSocket client disconnected. Total clients: " + std::to_string(m_webSockets.size()));
   }
@@ -256,6 +264,12 @@ bool WebSocket::setAuthParam(const std::string& param, const std::string& value)
     m_roles_file = value;
     return true;
   }
+  if (param == "audit_dir") {
+    m_audit_dir = value;
+    while (m_audit_dir.size() > 1 && strEnds(m_audit_dir, "/"))
+      m_audit_dir.pop_back();
+    return true;
+  }
   if (param == "control_request_timeout" && isNumber(value) && atof(value.c_str()) > 0) {
     m_lease.setRequestTimeout(atof(value.c_str()));
     return true;
@@ -269,7 +283,7 @@ void WebSocket::ReadAuthConfig(const std::string& mission_file, const std::strin
   reader.SetFile(mission_file);
   std::string value;
   const char* params[] = {"command_auth", "signalk_http", "exclusive_control",
-                          "roles_file", "control_request_timeout"};
+                          "roles_file", "control_request_timeout", "audit_dir"};
   for (const char* p : params)
     if (reader.GetConfigurationParam(app_name, p, value))
       setAuthParam(p, stripBlankEnds(value));
@@ -404,22 +418,83 @@ void WebSocket::AuthorizeClient(ix::WebSocket* ws, const std::string& value)
 
   {
     std::lock_guard<std::mutex> lock(m_auth_mutex);
+    std::string ip = m_client_ip.count(ws) ? m_client_ip[ws] : "-";
+    std::string where = " ip=" + ip + " session=" + shortId(session);
+    std::string prev_user;
+    bool known = false;
     auto prev = m_client_auth.find(ws);
     if (prev != m_client_auth.end()) {
       // logged out, or now someone else in this tab: drop what the old
       // identity held (unless nothing changed)
       ClientAuth& p = prev->second;
+      known = true;
+      prev_user = p.user;
       if (p.user != user || p.session != session || p.role != role)
         m_lease.logout(p.sess());
     }
-    m_client_auth[ws] = ClientAuth{level, user, role, session};
+    m_client_auth[ws] = ClientAuth{level, user, role, session, ip};
     m_ctrl_dirty = true;
-    if (m_auth_events.size() < 100)
-      m_auth_events.push_back("auth user=" + (user.empty() ? "-" : user) + ",level=" + level +
-                              ",role=" + role + why);
+    if (!prev_user.empty() && prev_user != user)
+      pushEvent("auth", "logout user=" + prev_user + where);
+    if (!user.empty() && user != prev_user)
+      pushEvent("auth", "login user=" + user + " level=" + level + " role=" + role + where);
+    else if (user.empty() && (!known || !prev_user.empty() || level == "unavailable"))
+      pushEvent("auth", "anonymous level=" + level + " role=" + role + where + why);
+    drainLease();
   }
   ws->send("AUTH_STATUS=level=" + level + "#user=" + user + "#role=" + role +
            "#mode=signalk#control=" + (m_exclusive ? "exclusive" : "shared"));
+}
+
+void WebSocket::SetClientIp(ix::WebSocket* ws, const std::string& ip)
+{
+  std::lock_guard<std::mutex> lock(m_auth_mutex);
+  m_client_ip[ws] = ip;
+}
+
+std::string WebSocket::utcStamp()
+{
+  char buf[32];
+  time_t now = time(nullptr);
+  struct tm t;
+  gmtime_r(&now, &t);
+  strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%SZ", &t);
+  return buf;
+}
+
+std::string WebSocket::shortId(const std::string& session)
+{
+  return session.empty() ? "-" : session.substr(0, 8);
+}
+
+void WebSocket::pushEvent(const std::string& kind, const std::string& text)
+{
+  if (m_auth_events.size() < 1000)
+    m_auth_events.push_back(kind + "|" + utcStamp() + "|" + text);
+}
+
+void WebSocket::drainLease()
+{
+  for (const std::string& e : m_lease.takeEvents())
+    pushEvent("control", e);
+}
+
+// One line per event, a file per UTC day; opened and closed each time so a
+// crash loses nothing and the file can be rotated or copied at any moment
+void WebSocket::writeAudit(const std::string& stamp, const std::string& kind, const std::string& text)
+{
+  if (m_audit_dir.empty())
+    return;
+  std::string file = m_audit_dir + "/c2_audit_" + stamp.substr(0, 10) + ".log";
+  std::ofstream out(file, std::ios::app);
+  if (!out) {
+    if (!m_audit_warned)
+      reportRunWarning("Cannot write the audit log " + file);
+    m_audit_warned = true;
+    return;
+  }
+  m_audit_warned = false;
+  out << stamp << " " << kind << " " << text << "\n";
 }
 
 void WebSocket::SetCookieToken(ix::WebSocket* ws, const std::string& token)
@@ -488,6 +563,9 @@ void WebSocket::HandleControl(ix::WebSocket* ws, const std::string& value)
       else r = ControlLease::Result{false, "unknown control action " + action};
       if (r.ok && m_lease.held())
         m_last_link_rx = m_lease.lastHeard();   // new holder starts fresh
+      if (!r.ok)
+        pushEvent("control", "refused action=" + action + " user=" + s.user + " reason=" + r.reason);
+      drainLease();
     }
     m_ctrl_dirty = true;
   }
@@ -512,9 +590,8 @@ void WebSocket::RejectCommand(ix::WebSocket* ws, const std::string& message)
               !m_moos_up ? "moos" : "control";
     }
     m_cmds_rejected++;
-    if (m_auth_events.size() < 100)
-      m_auth_events.push_back("rejected key=" + key + ",user=" +
-                              (user.empty() ? "-" : user) + ",level=" + level + ",why=" + why);
+    pushEvent("auth", "rejected key=" + key + " user=" + (user.empty() ? "-" : user) +
+              " level=" + level + " why=" + why);
   }
   ws->send("CMD_REJECTED=key=" + key + "#level=" + level + "#why=" + why);
 }
@@ -600,7 +677,10 @@ void WebSocket::handleAllStop(const std::string& user)
   Notify("DESIRED_RUDDER", 0.0);
   Notify("DESIRED_THRUST", 0.0);
   Notify("ALL_STOP", "true");
-  Notify("CONTROL_EVENT", "all_stop user=" + m_all_stop_by);
+  {
+    std::lock_guard<std::mutex> lock(m_auth_mutex);
+    pushEvent("control", "all_stop user=" + m_all_stop_by);
+  }
   reportRunWarning("ALL STOP by " + m_all_stop_by + ": starts and thrust refused until reset");
   m_ctrl_dirty = true;
 }
@@ -911,6 +991,7 @@ bool WebSocket::OnConnectToServer()
    if (m_moos_connected_once) {
      std::lock_guard<std::mutex> lock(m_auth_mutex);
      m_lease.revokeAll("moos-reconnect");
+     drainLease();
      m_ctrl_dirty = true;
    }
    m_moos_connected_once = true;
@@ -978,7 +1059,6 @@ bool WebSocket::Iterate()
   m_moos_up = m_Comms.IsConnected();
   m_boat_idle = (waypoint != "true" && !stationing && !trailing && !m_manual_on);
   {
-    std::vector<std::string> events;
     bool send_status = false;
     {
       std::lock_guard<std::mutex> lock(m_auth_mutex);
@@ -989,14 +1069,10 @@ bool WebSocket::Iterate()
         if (m_lease.held())
           m_last_link_rx = m_lease.lastHeard();   // handed over: the new holder starts fresh
       }
-      events = m_lease.takeEvents();
+      drainLease();
       double every = m_lease.requestPending() ? 1.0 : 2.0;
       send_status = m_ctrl_dirty || current_time - m_ctrl_sent_at >= every;
       m_ctrl_dirty = false;
-    }
-    for (const std::string& e : events) {
-      reportEvent("Control: " + e);
-      Notify("CONTROL_EVENT", e);
     }
     if (send_status && HasConnectedClients()) {
       sendControlStatus();
@@ -1037,8 +1113,13 @@ bool WebSocket::Iterate()
     auth_events.swap(m_auth_events);
   }
   for (const std::string& event : auth_events) {
-    reportEvent("UI " + event);
-    Notify("UI_AUTH_EVENT", event);
+    size_t a = event.find('|'), b = event.find('|', a + 1);
+    std::string kind = event.substr(0, a);
+    std::string stamp = event.substr(a + 1, b - a - 1);
+    std::string text = event.substr(b + 1);
+    reportEvent((kind == "control" ? "Control: " : "UI ") + text);
+    Notify(kind == "control" ? "CONTROL_EVENT" : "UI_AUTH_EVENT", text);
+    writeAudit(stamp, kind, text);
   }
 
   // BHV_OpRegionV26 only reads REGION_POLY in an iteration where it runs
@@ -1085,8 +1166,9 @@ bool WebSocket::Iterate()
       if (in.gen != gen) {
         std::string key = message.substr(0, message.find('='));
         reportEvent("Stale command dropped: " + key + " (control changed hands)");
-        Notify("UI_AUTH_EVENT", "rejected key=" + key + ",user=" +
-               (in.user.empty() ? "-" : in.user) + ",why=stale");
+        std::lock_guard<std::mutex> lock(m_auth_mutex);
+        pushEvent("auth", "rejected key=" + key + " user=" + (in.user.empty() ? "-" : in.user) +
+                  " why=stale");
         continue;
       }
     }
@@ -1106,10 +1188,13 @@ bool WebSocket::Iterate()
 
     if (allStopBlocks(key, value)) {
       reportRunWarning(key + " refused: ALL STOP by " + m_all_stop_by + " is latched");
-      Notify("UI_AUTH_EVENT", "rejected key=" + key + ",user=" +
-             (in.user.empty() ? "-" : in.user) + ",why=all_stop");
+      std::lock_guard<std::mutex> lock(m_auth_mutex);
+      pushEvent("auth", "rejected key=" + key + " user=" + (in.user.empty() ? "-" : in.user) +
+                " why=all_stop");
       continue;
     }
+
+    m_dispatch_user = in.user;
 
     // State machine approach: O(log n) lookup instead of O(n) linear search
     auto handler = m_messageHandlers.find(key);
@@ -1287,7 +1372,7 @@ bool WebSocket::OnStartUp()
     }
     else if(param == "command_auth" || param == "signalk_http" ||
             param == "exclusive_control" || param == "roles_file" ||
-            param == "control_request_timeout") {
+            param == "control_request_timeout" || param == "audit_dir") {
       handled = setAuthParam(param, value);
     }
     else if(param == "foo") {
@@ -1338,6 +1423,15 @@ bool WebSocket::OnStartUp()
     reportConfigWarning("exclusive_control needs command_auth = signalk (user identity): ignored");
   if (!m_command_auth)
     m_exclusive = false;
+
+  // Audit log folder (one level is created if missing); a start line marks
+  // every restart, which also leaves nobody in control
+  if (!m_audit_dir.empty()) {
+    mkdir(m_audit_dir.c_str(), 0755);
+    std::lock_guard<std::mutex> lock(m_auth_mutex);
+    pushEvent("control", std::string("start command_auth=") + (m_command_auth ? "signalk" : "off") +
+              " exclusive_control=" + (m_exclusive ? "true" : "false") + " (nobody in control)");
+  }
 
   // Registra variáveis no MOOS, se necessário
   registerVariables();	
@@ -2430,9 +2524,9 @@ void WebSocket::handleAllStopReset(const std::string& value)
     return;
   m_all_stop = false;
   Notify("ALL_STOP", "false");
-  Notify("CONTROL_EVENT", "all_stop_reset");
   reportEvent("ALL STOP reset");
   std::lock_guard<std::mutex> lock(m_auth_mutex);
+  pushEvent("control", "all_stop_reset user=" + (m_dispatch_user.empty() ? "-" : m_dispatch_user));
   m_ctrl_dirty = true;
 }
 

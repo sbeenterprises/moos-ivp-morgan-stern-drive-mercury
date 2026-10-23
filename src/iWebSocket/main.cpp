@@ -80,6 +80,7 @@ int main(int argc, char *argv[])
           // command_auth = signalk: find out who this is before the client
           // is counted for the link. The browser sends its Signal K login
           // cookie with the upgrade request (same host, any port).
+          WebSocket.SetClientIp(&webSocket, connectionState->getRemoteIp());
           if (WebSocket.CommandAuthOn()) {
               auto cookie = msg->openInfo.headers.find("Cookie");
               std::string token = (cookie == msg->openInfo.headers.end()) ? "" :

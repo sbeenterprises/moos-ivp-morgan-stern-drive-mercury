@@ -221,6 +221,11 @@ ProcessConfig = iWebSocket
    roles_file = /var/lib/swiftships-c2/roles.json
    // An unanswered request for control hands it over after this many seconds
    control_request_timeout = 15
+   // Audit log: one line per login, logout, disconnect, control change
+   // (take, release, request, handover, force + reason, lost, revoke),
+   // ALL STOP and refused command, UTC time, user, role, IP; one file per
+   // UTC day: <audit_dir>/c2_audit_YYYY-MM-DD.log. Empty = off.
+   audit_dir = /home/douglas/c2_audit
 
    // Operating region: the polygon drawn in the UI is the HALT line; the
    // boat works inside it shrunk by this margin (BHV_OpRegionV26 breaches,
